@@ -2711,7 +2711,7 @@ class PeakPickingWidget(QWidget):
 
         self.sliderThresh.blockSignals(False)
 
-PhasingForm, PhasingFormBC = uic.loadUiType("qtFormPhasingWidget.ui")    # Load the predesigned PhasingWidget Form
+#PhasingForm, PhasingFormBC = uic.loadUiType("qtFormPhasingWidget.ui")    # Load the predesigned PhasingWidget Form
 
 class PhasingWidget(QWidget):
     """A widget that contains scrollers/buttons for phasing and that interacts with a matplotlib canvas to plot the results."""
