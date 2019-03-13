@@ -1587,7 +1587,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
         if role == QtCore.Qt.CheckStateRole and clmn >= self.skipColumns:
             # Set the tick boxes
-            modifiers = QtGui.QApplication.keyboardModifiers()
+            shiftPressed = (QtGui.QApplication.keyboardModifiers() == QtCore.Qt.ShiftModifier)
             """if modifiers == QtCore.Qt.ShiftModifier:
                 print('Shift+Click')
             elif modifiers == QtCore.Qt.ControlModifier:
