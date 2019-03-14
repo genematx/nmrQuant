@@ -1223,7 +1223,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
     def __init__(self, datum, parent = None):
         super().__init__()     # QtCore.QAbstractItemModel.__init__(self)
         self.datum = datum             # A pointer to the workspace
-        self.actvStepIndx = -1        # Currently selected active step id
+        self.actvStepIndx = -1         # Currently selected active step id
         self._indxRoot = QtCore.QModelIndex()    # "Invalid" index to point to the root of the display
         self._buttons = viewNode("_buttons", alias=None)
         self._ranges = viewNode("_ranges", alias="")
@@ -3405,9 +3405,9 @@ class MainView(QMainWindow):
             self.treeModel.notifyDataChanged()     # Update the TLS line in the chemTree view
         self.actnToggleTLS.triggered.connect(onToggleTLS)
         # Fit the last step action
-        self.actnFitLastStep = QAction(self._icon('icon_fitOneStep.png'), 'Fit last step', self)
+        self.actnFitLastStep = QAction(self._icon('icon_fitOneStep.png'), 'Fit active step', self)
         self.actnFitLastStep.setStatusTip('Fit the last step')
-        self.actnFitLastStep.triggered.connect(lambda:self.fitStep(indx = -1))
+        self.actnFitLastStep.triggered.connect(lambda:self.fitStep(indx = self.treeModel.actvStepIndx))
         # Sample action
         self.actnSample = QAction(self._icon('icon_sample.png'), 'Sample last step with MCMC', self)
         self.actnSample.setStatusTip('Sample parameters checked on the last step with the MCMC algorithm')
