@@ -34,8 +34,8 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '0.16.0'
-compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
+version = '0.18.0'
+compile_standalone = True   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
     cursors.MOVE: Qt.SizeAllCursor,
