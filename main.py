@@ -1643,8 +1643,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                             step.fitCustomLshape = not self.datum.steps[step_indx].fitCustomLshape
 
             if shiftPressed:
-                #self.dataChanged.emit(self.index(0,0), self.index(self.rowCount(), 0))
-                self.dataChanged.emit(self._indxRoot, self._indxRoot)                # Update the entire table (only the current row would be sufficient...)
+                self.dataChanged.emit(self.index(row,0), self.index(row, self.columnCount()))                # Update the entire current row
             else: self.dataChanged.emit(index, index)              # Update only the current index
             return True
 
