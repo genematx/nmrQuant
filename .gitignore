@@ -105,3 +105,8 @@ venv.bak/
 
 # Other private files
 _results.txt
+_development
+build/
+dist/
+icons/_dev/
+workspaces/
