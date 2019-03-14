@@ -1,0 +1,5 @@
+Series         Filename                        Signal norm    alpha-D-Glucopyranose  var      beta-D-Glucopyranose  var      Water  var      x_alpha-D-Glucopyranose    95% cred.i.    x_beta-D-Glucopyranose    95% cred.i.
+-------------  --------------------------  ---------------  -----------------------  -----  ----------------------  -----  -------  -----  -------------------------  -------------  ------------------------  -------------
+Series 1       S5.102_Spinsolve                1.42882e+06                        1  ---                         1  ---          1  ---                          0.5              0                       0.5              0
+S5.102_Varian  PRESAT_d2o_20170602_400_02  32681.6                                1  ---                         1  ---          1  ---                          0.5              0                       0.5              0
+S5.102_Varian  PROTON_d2o_20170602_400_02      1.11815e+06                        1  ---                         1  ---          1  ---                          0.5              0                       0.5              0
