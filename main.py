@@ -35,7 +35,7 @@ except ImportError:
     figureoptions = None
 
 version = '0.16.0'
-compile_standalone = True   # Change to False for debugging/development to output the results into the usual console
+compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
     cursors.MOVE: Qt.SizeAllCursor,
@@ -1588,36 +1588,64 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if role == QtCore.Qt.CheckStateRole and clmn >= self.skipColumns:
             # Set the tick boxes
             shiftPressed = (QtGui.QApplication.keyboardModifiers() == QtCore.Qt.ShiftModifier)
-            """if modifiers == QtCore.Qt.ShiftModifier:
-                print('Shift+Click')
-            elif modifiers == QtCore.Qt.ControlModifier:
-                print('Control+Click')
-            elif modifiers == (QtCore.Qt.ControlModifier |
-                               QtCore.Qt.ShiftModifier):
-                print('Control+Shift+Click')
-            else:
-                print('Click')"""
             # step_indx = clmn-self.skipColumns    # Normal order
             step_indx = self.columnCount() - clmn - 1    # Reversed order
 
             if node.nodeType == 'param':
                 try:
                     self.datum.steps[step_indx].autoKeys.remove(node.name)
+
+                    # Repeat for the rest of the steps
+                    if shiftPressed:
+                        for step in self.datum.steps:
+                            try:
+                                step.autoKeys.remove(node.name)
+                            except KeyError: pass
+
                     if not self.datum.isAutofittable(key=node.name):
                         self.datum.steps[step_indx].parsKeys.add(node.name)
+
+                        # Repeat for the rest of the steps
+                        if shiftPressed:
+                            for step in self.datum.steps:
+                                step.parsKeys.add(node.name)
                 except KeyError:
                     try:
                         self.datum.steps[step_indx].parsKeys.remove(node.name)
+
+                        # Repeat for the rest of the steps
+                        if shiftPressed:
+                            for step in self.datum.steps:
+                                try:
+                                    step.parsKeys.remove(node.name)
+                                except KeyError: pass
+
                         if self.datum.isAutofittable(key=node.name):
                             self.datum.steps[step_indx].autoKeys.add(node.name)
+                            # Repeat for the rest of the steps
+                            if shiftPressed:
+                                for step in self.datum.steps:
+                                    step.autoKeys.add(node.name)
                     except KeyError:
                         self.datum.steps[step_indx].parsKeys.add(node.name)
+                        # Repeat for the rest of the steps
+                        if shiftPressed:
+                            for step in self.datum.steps:
+                                step.parsKeys.add(node.name)
 
             elif node.nodeType == 'bool':
                 if node.name == 'lshapeX':
                     self.datum.steps[step_indx].fitCustomLshape = not self.datum.steps[step_indx].fitCustomLshape
 
-            self.dataChanged.emit(index, index)
+                    # Repeat for the rest of the steps
+                    if shiftPressed:
+                        for step in self.datum.steps:
+                            step.fitCustomLshape = not self.datum.steps[step_indx].fitCustomLshape
+
+            if shiftPressed:
+                #self.dataChanged.emit(self.index(0,0), self.index(self.rowCount(), 0))
+                self.dataChanged.emit(self._indxRoot, self._indxRoot)                # Update the entire table (only the current row would be sufficient...)
+            else: self.dataChanged.emit(index, index)              # Update only the current index
             return True
 
         return False
