@@ -1222,7 +1222,8 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
     def __init__(self, datum, parent = None):
         super().__init__()     # QtCore.QAbstractItemModel.__init__(self)
-        self.datum = datum       # A pointer to the workspace
+        self.datum = datum             # A pointer to the workspace
+        self.actvStepIndx = -1         # Currently selected active step id
         self._indxRoot = QtCore.QModelIndex()    # "Invalid" index to point to the root of the display
         self._buttons = viewNode("_buttons", alias=None)
         self._ranges = viewNode("_ranges", alias="")
@@ -1289,6 +1290,16 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
     def notifyDataChanged(self):
         self.dataChanged.emit(self._indxRoot, self._indxRoot)     # Update the entire tree
+
+    def onHeaderSectionPressed(self, clmn):
+        """Is called when a user selects a new column. Connected to the slot"""
+        if clmn >= self.skipColumns:
+            self.actvStepIndx = self.clmn2step(clmn)
+            self.dataChanged.emit(self.index(0,clmn), self.index(self.rowCount(self._indxRoot)-1, clmn))                # Update the entire column
+
+    def onHeaderSectionMoved(self, logicalIndex, oldVisualIndex, newVisualIndex):
+        """Is called when columns in the tree view are moved."""
+        print('Column {} is moved from {} to {}.'.format(logicalIndex, oldVisualIndex, newVisualIndex))
 
     def headerData(self, section, orientation, role):
 
@@ -1358,10 +1369,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 return self.createIndex(row, column, child)
             else:
                 return QtCore.QModelIndex()
-
-        #if not self.hasIndex(row, column, prnt):
-        #    print("doesn't have this index")
-        #    return self._rootIndex
 
     def indexByKey(self, key):
         """Searches for the element specified by its key in the TP tree and returns its index."""
@@ -1482,6 +1489,10 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     displayIcon = QIcon("icons\icon_chemMixture.png")
             return displayIcon
 
+        # Display the active step in a different color
+        if role == QtCore.Qt.BackgroundRole and clmn >= self.skipColumns and self.clmn2step(clmn) == self.actvStepIndx:
+            return QtGui.QBrush(QtCore.Qt.darkBlue)
+
         return None
 
     def flags(self, index):
@@ -1588,8 +1599,8 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if role == QtCore.Qt.CheckStateRole and clmn >= self.skipColumns:
             # Set the tick boxes
             shiftPressed = (QtGui.QApplication.keyboardModifiers() == QtCore.Qt.ShiftModifier)
-            # step_indx = clmn-self.skipColumns    # Normal order
-            step_indx = self.columnCount() - clmn - 1    # Reversed order
+            # Find at which step we are now
+            step_indx = self.clmn2step(clmn)
 
             if node.nodeType == 'param':
                 try:
@@ -1762,6 +1773,11 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.datum.reset_shape()
         self.crntChanged.emit()
 
+    def clmn2step(self, clmn):
+        """A utility function to convert a column index to the corresponding step index."""
+        # return clmn-self.skipColumns    # Normal order
+        return self.columnCount() - clmn - 1    # Reversed order
+
 class ChemTreeView(QTreeView):
     """Model/View based class to display chemical trees."""
 
@@ -1916,6 +1932,9 @@ class ChemTreeView(QTreeView):
         self.setSelectionMode(QTreeView.ExtendedSelection)
 
         self.header().sectionCountChanged.connect(self.onSectionCountChanged)
+        self.header().setClickable(True)
+        self.header().sectionPressed.connect(self.model().onHeaderSectionPressed)
+        self.header().sectionMoved.connect(self.model().onHeaderSectionMoved)
 
         #self.header().setDefaultSectionSize(20)
         self.setColumnWidth(0, 150)
@@ -2240,7 +2259,7 @@ class ChemTreeView(QTreeView):
                 self.model().TP[key].hidden = True
         self.hideExcessiveRows()
 
-    def selectActive(self, stemKey):
+    def selectPickedParameter(self, stemKey):
         """Selects an active paramter for a picked peak."""
         key = (stemKey[:stemKey.rfind('-')]+'-SPSY'+stemKey[stemKey.rfind('-')+1:stemKey.rfind('.')], 'chshQD', int(stemKey[stemKey.rfind('.')+1:])-1)
         index = self.model().indexByKey(key)
@@ -3386,9 +3405,9 @@ class MainView(QMainWindow):
             self.treeModel.notifyDataChanged()     # Update the TLS line in the chemTree view
         self.actnToggleTLS.triggered.connect(onToggleTLS)
         # Fit the last step action
-        self.actnFitLastStep = QAction(self._icon('icon_fitOneStep.png'), 'Fit last step', self)
+        self.actnFitLastStep = QAction(self._icon('icon_fitOneStep.png'), 'Fit active step', self)
         self.actnFitLastStep.setStatusTip('Fit the last step')
-        self.actnFitLastStep.triggered.connect(lambda:self.fitStep(indx = -1))
+        self.actnFitLastStep.triggered.connect(lambda:self.fitStep(indx = self.treeModel.actvStepIndx))
         # Sample action
         self.actnSample = QAction(self._icon('icon_sample.png'), 'Sample last step with MCMC', self)
         self.actnSample.setStatusTip('Sample parameters checked on the last step with the MCMC algorithm')
@@ -3501,7 +3520,7 @@ class MainView(QMainWindow):
         self.phasingTool.setNewDatum(self._crnt)
 
         # TODO!
-        # Highlight the current Datum in the Navigation widget if it was seletec programmatically
+        # Highlight the current Datum in the Navigation widget if it was seletected programmatically
         #ids = self._crnt.selfID()
         #print(ids)
         #ser_index = self.naviTreeModel.index(ids[0], 0, None)    # Index corresponding to the Series
@@ -4147,7 +4166,7 @@ class MainView(QMainWindow):
         """Called on picking event; selects the corresponding row in chem tree."""
         for k, v in self.allStems.items():
             if event.artist in v[1]:
-                self.treeView.selectActive(k)
+                self.treeView.selectPickedParameter(k)
                 self.selectStems(k)
 
     def selectStems(self, key):
