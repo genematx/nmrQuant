@@ -34,7 +34,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '0.18.1'
+version = '0.18.2'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
