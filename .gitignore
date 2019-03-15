@@ -110,5 +110,6 @@ build/
 dist/
 icons/_dev/
 workspaces/
+notebooks/
 main.spec       # File created by pyinstaller
 main.exe
