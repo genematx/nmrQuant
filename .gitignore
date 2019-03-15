@@ -111,3 +111,4 @@ dist/
 icons/_dev/
 workspaces/
 main.spec       # File created by pyinstaller
+main.exe
