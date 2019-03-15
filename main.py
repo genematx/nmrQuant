@@ -1299,6 +1299,16 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
     def notifyDataChanged(self):
         self.dataChanged.emit(self._indxRoot, self._indxRoot)     # Update the entire tree
 
+    def onHeaderSectionPressed(self, clmn):
+        """Is called when a user selects a new column. Connected to the slot"""
+        if clmn >= self.skipColumns:
+            self.actvStepIndx = self.clmn2step(clmn)
+            self.dataChanged.emit(self.index(0,clmn), self.index(self.rowCount(self._indxRoot)-1, clmn))                # Update the entire column
+
+    def onHeaderSectionMoved(self, logicalIndex, oldVisualIndex, newVisualIndex):
+        """Is called when columns in the tree view are moved."""
+        print('Column {} is moved from {} to {}.'.format(logicalIndex, oldVisualIndex, newVisualIndex))
+
     def headerData(self, section, orientation, role):
 
         #if role == QtCore.Qt.SizeHintRole:
