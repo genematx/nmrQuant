@@ -1260,26 +1260,34 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if flag: self.endResetModel()
 
     def setNewDatum(self, datum):
-        oldColumnCount = self.columnCount()
-        newColumnCount = self.skipColumns
-        try:
-            newColumnCount += len(datum.steps)
-        except AttributeError: pass
+        if isinstance(self.datum, Workspace) or self.datum.steps != datum.steps:
+            # If the list of steps has changed
+            oldColumnCount = self.columnCount()
+            newColumnCount = self.skipColumns
+            try:
+                newColumnCount += len(datum.steps)
+            except AttributeError: pass
 
-        parent = QtCore.QModelIndex()
+            parent = QtCore.QModelIndex()
 
-        if oldColumnCount < newColumnCount:
-            self.beginInsertColumns(parent, oldColumnCount, newColumnCount-1)
-        elif oldColumnCount > newColumnCount:
-            self.beginRemoveColumns(parent, newColumnCount, oldColumnCount-1)
+            if oldColumnCount < newColumnCount:
+                self.beginInsertColumns(parent, oldColumnCount, newColumnCount-1)
+            elif oldColumnCount > newColumnCount:
+                self.beginRemoveColumns(parent, newColumnCount, oldColumnCount-1)
 
-        self.datum = datum
+            self.datum = datum
+            self.actvStepIndx = len(self.datum.steps)-1
 
-        if oldColumnCount < newColumnCount:
-            self.endInsertColumns()
-        elif oldColumnCount > newColumnCount:
-            self.endRemoveColumns()
-        else: self.notifyDataChanged()
+            if oldColumnCount < newColumnCount:
+                self.endInsertColumns()
+            elif oldColumnCount > newColumnCount:
+                self.endRemoveColumns()
+            else: self.notifyDataChanged()
+
+        else:
+            # The list of steps is the same (teh new Datum is in the same Series)
+            self.datum = datum
+            self.notifyDataChanged()
 
     def fullReset(self, datum):
         self.beginResetModel()
@@ -1315,7 +1323,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     return head[section]
                 else:
                     # return section - (self.skipColumns-1)  # In normal order
-                    return self.columnCount() - section    # In reversed order
+                    return self.columnCount() - section      # In reversed order
             else:
                 return None
 
@@ -1491,7 +1499,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
         # Display the active step in a different color
         if role == QtCore.Qt.BackgroundRole and clmn >= self.skipColumns and self.clmn2step(clmn) == self.actvStepIndx:
-            return QtGui.QBrush(QtCore.Qt.darkBlue)
+            return QtGui.QBrush(QtGui.QColor(255, 204, 41, 64))
 
         return None
 
@@ -1669,17 +1677,40 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         parent = QtCore.QModelIndex()
         self.beginInsertColumns(parent, self.columnCount(), self.columnCount())
         self.datum.steps.append(newStep)
+        self.actvStepIndx = len(self.datum.steps) - 1            # Set the last step as active
         self.endInsertColumns()
 
     def delStep(self):
+        # Removes the active step and sets the previous one as active
         try:
             if len(self.datum.steps) > 1:
                 parent = QtCore.QModelIndex()
                 self.beginRemoveColumns(parent, self.columnCount()-1, self.columnCount()-1)
-                self.datum.steps.pop(-1)
+                self.datum.steps.pop(self.actvStepIndx)              # Remove the step
+                self.actvStepIndx = max(0, self.actvStepIndx - 1)    # Set the active step to previous
                 self.endRemoveColumns()
-        except AttributeError:
+        except AttributeError:      # If the datum is the entire Workspace
             return False
+
+    def moveStep(self, oldVisualIndex, newVisualIndex):
+        """Moves a step according to indices of columns in the associated View."""
+        if oldVisualIndex >= self.skipColumns and newVisualIndex >= self.skipColumns:
+            oldStepID = self.clmn2step(oldVisualIndex)
+            newStepID = self.clmn2step(newVisualIndex)
+
+            # Move the Step in the datastructure
+            print('Step {} is moving to {}.'.format(oldStepID+1, newStepID+1))
+            movingStep = self.datum.steps.pop(oldStepID)
+            self.datum.steps.insert(newStepID, movingStep)
+
+            # Set it active and update the View
+            self.actvStepIndx = newStepID
+
+    def setActiveStep(self, clmn):
+        """Is called when a user selects a new column corresponding to a step. Connected to the slot in the View."""
+        if clmn >= self.skipColumns:
+            self.actvStepIndx = self.clmn2step(clmn)
+            self.dataChanged.emit(self.index(0,clmn), self.index(self.rowCount(self._indxRoot)-1, clmn))                # Update the entire column
 
     def addChemical(self, index, source = 'new'):
         """Adds a new chemical to the tree as a child to node index."""
@@ -1933,8 +1964,8 @@ class ChemTreeView(QTreeView):
 
         self.header().sectionCountChanged.connect(self.onSectionCountChanged)
         self.header().setClickable(True)
-        self.header().sectionPressed.connect(self.model().onHeaderSectionPressed)
-        self.header().sectionMoved.connect(self.model().onHeaderSectionMoved)
+        self.header().sectionPressed.connect(self.model().setActiveStep)
+        self.header().sectionMoved.connect(self.onHeaderSectionMoved)
 
         #self.header().setDefaultSectionSize(20)
         self.setColumnWidth(0, 150)
@@ -1972,6 +2003,14 @@ class ChemTreeView(QTreeView):
         self.setColumnWidth(4, 50)
         for i in range(5, newCount):
             self.setColumnWidth(i, 18)
+
+    def onHeaderSectionMoved(self, logicalIndex, oldVisualIndex, newVisualIndex):
+        """Is called when columns in the tree view are moved. Moves them back, but also calls a function in the model to update the list of Steps."""
+        self.header().blockSignals(True)
+        self.header().moveSection(newVisualIndex, oldVisualIndex)    # Move back
+        self.header().blockSignals(False)
+
+        self.model().moveStep(oldVisualIndex, newVisualIndex)
 
     def onCustomContextMenuRequested(self, pos):
         """Handler of the custom context menu requested signal."""
