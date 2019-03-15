@@ -4,7 +4,7 @@ block_cipher = None
 
 
 a = Analysis(['main.py'],
-             pathex=['C:\\Users\\yma80\\AnacondaProjects\\chemTree'],
+             pathex=['C:\\Users\\yma80\\AnacondaProjects\\nmrQuant'],
              binaries=[],
              datas=[],
              hiddenimports=[],
