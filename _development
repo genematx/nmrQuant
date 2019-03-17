@@ -7,3 +7,6 @@ Copy chemDB.json and the icons folder to the same folder as the executable file
 
 3. Installing a package in the editable mode. Copy the package to a local directory C:\path\package.
 pip install -e C:\Path\package
+
+4. Uninstall a package:
+pip uninstall packagename
