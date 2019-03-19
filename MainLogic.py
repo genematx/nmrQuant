@@ -2107,7 +2107,7 @@ class Datum():
 
         return x_arr, llkl_arr, lpri_arr, lpst_arr, crntVal
 
-    def _prepareKeys(self, parsKeys, autoKeys=None, verbose=True):
+    def _prepareKeys(self, parsKeys, autoKeys=None, verbose=True, print_parameters=False):
         """Make sure that all parameter keys are relevant for the current Datum (e.g. no 4-tuple keys)."""
         parsKeys = set([]) if parsKeys is None else set(parsKeys)
         #autoKeys = set([]) if autoKeys is None else set(autoKeys)
@@ -2126,14 +2126,18 @@ class Datum():
         #parsKeys = [key for key in parsKeys if not self.isAutofittable(key)]
 
         if verbose:
-            print("Optimizing over {} parameters:".format(len(parsKeys)))
-            for key in parsKeys:
-                print("     {}".format(str(key)))
-            print("Parameters inferred automatically:")
-            if autoKeys is not None:
-                for key in autoKeys:
-                    if self.isAutofittable(key):
-                        print("     {}".format(str(key)))
+            npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
+            npar_fit = len(parsKeys)
+            print("Marginalized {} and fitting {} parameters...".format(npar_auto, npar_fit))
+            if print_parameters:
+                print("Optimized parameters:")
+                for key in parsKeys:
+                    print("     {}".format(str(key)))
+                print("Parameters inferred automatically:")
+                if autoKeys is not None:
+                    for key in autoKeys:
+                        if self.isAutofittable(key):
+                            print("     {}".format(str(key)))
 
         return parsKeys, autoKeys
 
