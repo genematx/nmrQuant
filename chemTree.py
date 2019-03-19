@@ -264,7 +264,7 @@ parsSpec.abs = lambda self, arg : rel2abs(self, arg)
 parsSpec.evalPrior = lambda self, arg : priorProb(self, arg)
 parsSpec.dflt = lambda self : (self.min + self.max) / 2 if self.dval is None else self.dval
 
-smplSpec = namedtuple('smplSpec', 'min, max, mean, median, var, q1, q3, p5, p95, hpd5')     # Specifciation of MCMC samples
+smplSpec = namedtuple('smplSpec', 'min, max, mean, median, var, q1, q3, p5, p95, hpd5')     # Specification of MCMC samples
 smplSpec.__new__.__defaults__ = (-np.inf, np.inf, None, None, None, None, None, None, None, None)
 
 peakSpec = namedtuple('peakSpec', 'chsh, fwhm, intn')
@@ -577,84 +577,6 @@ def spinop(n_spin):
                 Lz[i] = sps.kron(Lz[i], unit, format='csr')
 
     return Lx, Ly, Lz, T
-
-#@profile
-def QDsimsGrpd2_BACKUP(freqArr, jcplMtx):
-    """Simulates a QD system based on the spin frequencies and j couplings in Hz. See, e.g., http://www.users.csbsju.edu/~frioux/nmr/Speclab4.htm"""
-    n_spin = len(freqArr)
-    if jcplMtx is not None:
-        # 1. Define the Pauli matrices (for proton, a spin-1/2 particle)
-        sig_x = np.array([[0, 1/2], [1/2, 0]])
-        sig_y = np.array([[0, -1j/2], [1j/2, 0]])
-        sig_z = np.array([[1/2, 0], [0, -1/2]])
-        unit = np.identity(2)
-        # 2. Build Cartesian spin operators for each spin in the system and the transition probability matrix
-        T = 0
-        Lx = [None]*n_spin
-        Ly = [None]*n_spin
-        Lz = [None]*n_spin
-        for i in range(n_spin):
-            Lx[i] = 1
-            Ly[i] = 1
-            Lz[i] = 1
-            T = np.kron(np.identity(2), T) + np.kron([[0, 1], [1, 0]], np.identity(pow(2,i)))
-            for j in range(n_spin):
-                if i == j:
-                    Lx[i] = np.kron(Lx[i], sig_x)
-                    Ly[i] = np.kron(Ly[i], sig_y)
-                    Lz[i] = np.kron(Lz[i], sig_z)
-                else:
-                    Lx[i] = np.kron(Lx[i], unit)
-                    Ly[i] = np.kron(Ly[i], unit)
-                    Lz[i] = np.kron(Lz[i], unit)
-
-        # 4. Build the Hamiltonian
-        H = sps.lil_matrix((2**n_spin, 2**n_spin))
-        for i in range(n_spin):
-            H = H - freqArr[i] * Lz[i];
-            for j in range(n_spin):
-                if jcplMtx[i][j] != 0:
-                    H = H + jcplMtx[i][j] * (np.dot(Lx[i],Lx[j]) + np.dot(Ly[i],Ly[j]) + np.dot(Lz[i],Lz[j]))
-
-        # 5. Compute the eigenvalues/eigenvectors of the Hamiltonian
-        vH, uH = np.linalg.eigh(H)     # vH, uH = np.linalg.eig(H)
-
-        # 6. Find which quantum states each eigenvector corresponds to and rearrange the columns of uH / values of vH. Use the largest entry in the eigenvectors to indicate this
-        # TODO! NEEDS REVISION!!!
-        #_, lbls = linear_sum_assignment(10000000 - abs(uH))
-        #uH = uH[:, lbls]     # rearrange the columns of uH
-        #vH = vH[lbls]
-
-        # 7. Find the intensities and transition frequencies
-        intn = abs(np.power(np.dot(uH.T, np.dot(T,uH)), 2))
-        omega = abs(vH.reshape(-1,1) - vH)
-        intn = np.triu(intn).flatten('F')
-        omega = np.triu(omega).flatten('F')
-
-        p = np.flipud(intn.argsort())        # Sort the peaks from highest to lowest intensity
-        intn2 = np.cumsum(intn[p]**2)        # Cumulative sum of sorted squared intensities
-        p = p[0:max( n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) )]      # argmax will return the index of first occurence of element that evaluates to True
-
-        #p = p[0:n_spin*(2**(n_spin-1))]    # Keep only peaks corresponding to single transitions (assuming they are the largest)
-        #### p = p[(intn[p] > 0.00000001)]                # Keep only the largest peaks
-        #print(n_spin, len(p))
-
-        omega = omega[p]
-        intn = intn[p]
-        intn = n_spin * intn / sum(intn)
-
-        # 9. Add the transitions to the arrays of their closest resonances
-        omega_Q1, intn_Q1 = [None]*n_spin, [None]*n_spin     # Lists to hold arrays of frequencies and intensities for each spin separately
-        indMin = np.argmin(abs(omega.reshape(-1,1) - np.array(freqArr).reshape(1,-1)), axis = 1)    # Indices of the closest chem shift in freqArr for each transition
-        for i in range(len(freqArr)):
-            indx = np.where(indMin == i)
-            intn_Q1[i] = intn[indx]
-            omega_Q1[i] = omega[indx]
-    else:
-        omega_Q1 = [[freqArr[0]]]
-        intn_Q1 = [np.array([n_spin])]
-
-    return omega_Q1, intn_Q1
 
 #@profile
 def QDsimsGrpd2(H, T):
@@ -1231,56 +1153,6 @@ class chemNodeQD(chemNode):
         result["alphQD"] = [par for par in self.alphQD]
         if len(self.jcplQD) > 0: result["jcplQD"] = [par for par in self.jcplQD]
         return result
-
-    def getPoles_BACKUP(self, c0, chsh=[], alph=[], chshQD=[], alphQD=[], jcplQD=[]):
-        """Computes the poles for all peaks including QD simulations if needed."""
-        chemNode.getPoles(self, c0, chsh, alph)     # Compute sPole
-
-        ## Find absolute values of the QD parameters
-        chshQD = c0*np.array(chshQD)          # List of absolute values of chemical shifts (in Hz)
-        alphQD = np.array(alphQD)
-        jcplQD = np.array(jcplQD)
-
-        # Run the QD simulations only if the parameters have changed (assume that chsh, alph, and t have also changed)
-        if self.oldParsQD["chsh"] is None or self.oldParsQD["jcpl"] is None or any(self.oldParsQD["jcpl"] != jcplQD) or (any(abs(self.oldParsQD["chsh"] - chshQD) > config.QD_RerunQDchshThreshold*c0) and self.jcplQD != []):
-            # Assign chemical shifts and j coupling values to spins in the system
-            freqSpin = [chshQD[i-1] for i in self.chshAsgn]       # Frequencies of each spin after assignment
-            jcplSpin = [[jcplQD[i-1] if i>0 else 0 for i in self.jcplAsgn[j]] for j in range(len(self.jcplAsgn))] if len(jcplQD)>0 else None
-
-            # QD simulations
-            print("Running QD simulations.")
-            freqQPeaks, intnQPeaks = QDsimsGrpd2_BACKUP(freqSpin, jcplSpin)
-            #freqQPeaks = [(1-i/c0)*1e+06 for i in freqQPeaks]
-            #freqQPeaks, intnQPeaks = QDsims([val for val in chshSpin], jcplSpin)
-
-            # Aggregate poles and assign them to different chemical shifts and update the corresponding child node
-            for i, chld in enumerate(self.children()):
-                if i+1 in self.chshAsgn:       # Must be there, but worths checking...
-                    # Put poles for the same chemical shift together
-                    qPoles = np.concatenate([x for (x, j) in zip(freqQPeaks, self.chshAsgn) if j == i+1])
-                    qPolesIntn = np.concatenate([x for (x, j) in zip(intnQPeaks, self.chshAsgn) if j == i+1])
-                    qPoles, qPolesIntn = group_peaks(qPoles, qPolesIntn, maxWidth = config.QD_AggregatePeaksThreshold)                    # relative values of peak positions in ppm
-
-                    chld.qPoles = 1j*2*np.pi*np.array(qPoles)
-                    chld.qPolesIntn = np.array(qPolesIntn) / chld.intn    # Scale all qPoles for a given T node by the number of nuclei with the same chemical shift (i.e. the intensity of the node)
-
-                    # TODO: Simplify peaks / aggregate several peaks
-
-                    # Include the effect of line broadening
-                    chld.sT, chld.qT, chld.uT, chld.uF = [], [], [], []        # Remove previous sT
-                    chld.sPole = 1j*0 - alphQD[i]
-                    chld.propPoles(self.uPoles)      # Propagate the poles
-
-            # store the parameters
-            self.oldParsQD.update({"chsh":chshQD, "jcpl":jcplQD})
-        else:
-            # Check maybe only some alphas and/or chem shifts have changed
-            diffPoles = 1j*2*np.pi*(chshQD - self.oldParsQD["chsh"]) - alphQD
-            for i, chld in enumerate(self.children()):
-                if chld.sPole != diffPoles[i]:
-                    chld.sT, chld.uT, chld.uF = [], [], []
-                    chld.sPole = diffPoles[i]
-                    chld.uPoles = chld.qPoles + chld.sPole
 
     #@profile
     def getPoles(self, c0, chsh=[], alph=[], chshQD=[], alphQD=[], jcplQD=[], **kwargs):
