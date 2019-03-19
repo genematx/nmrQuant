@@ -2135,7 +2135,12 @@ class Datum():
         if verbose:
             npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
             npar_fit = len(parsKeys)
-            print("Marginalized {} and fitting {} parameters...".format(npar_auto, npar_fit))
+            if npar_fit == 0:
+                print("Nothing to fit; {} parameters inferred in closed form...".format(npar_auto))
+            elif npar_fit == 1:
+                print("Fitting one parameter; {} parameters inferred in closed form...".format(npar_auto))
+            else:
+                print("Fitting {} parameters; {} parameters inferred in closed form...".format(npar_fit, npar_auto))
             if print_parameters:
                 print("Optimized parameters:")
                 for key in parsKeys:
