@@ -3130,7 +3130,7 @@ class FittingThread(QThread):
         # Optimize
         if not self._exiting:
             for i, indx in enumerate(self.stepIdsToFit):
-                print("Optimizing step No. {:d} ({:d}/{:d})".format(indx+1, i+1, len(self.stepIdsToFit)))
+                print("\nOptimizing step No. {:d} ({:d}/{:d})".format(indx+1, i+1, len(self.stepIdsToFit)))
                 step = self.fileToFit.steps[indx]
                 # Update the custom lineshape if requested
                 if step.fitCustomLshape:
