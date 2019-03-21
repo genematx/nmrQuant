@@ -1424,6 +1424,12 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
             return font
 
+        # Setup font for the reference parameter
+        if clmn == 4 and role == QtCore.Qt.FontRole and isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
+            font = QtGui.QFont()    # Default font
+            font.setBold(True)
+            return font
+
         if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole, QtCore.Qt.ForegroundRole]:
             if node.nodeType == 'param':
                 key = node.name
@@ -1471,7 +1477,10 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             if clmn == 0:
                 if node.nodeType == 'param':
                     if "chshQD" in node.name[1]:
-                        displayIcon = QIcon("icons\icon_deltaQD.png")
+                        if isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
+                            displayIcon = QIcon("icons\icon_deltaQD_lock.png")
+                        else:
+                            displayIcon = QIcon("icons\icon_deltaQD.png")
                     elif node.name[1] == 'ampl':
                         displayIcon = QIcon("icons\icon_ampl.png")
                     elif node.name[1][:6] == "alphQD":
@@ -1481,14 +1490,10 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     elif node.name[1][:4] == "alph":
                         displayIcon = QIcon("icons\icon_alpha.png")
                     elif node.name[1][:4] == "chsh":
-                        displayIcon = QIcon("icons\icon_delta.png")
-                    """elif node.nodeType == 'intn':
-                    key = node.name[0]
-                    if self.datum.T[key].isReported():
-                        if key in self.datum.repRootNames:
-                            displayIcon = QIcon("icons\icon_ampl.png")
-                        else: displayIcon = QIcon("icons\icon_intn.png")
-                    else: displayIcon = QIcon("icons\icon_blank.png")"""
+                        if isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
+                            displayIcon = QIcon("icons\icon_delta_lock.png")
+                        else:
+                            displayIcon = QIcon("icons\icon_delta.png")
                 elif node.nodeType == 'lshape':
                     displayIcon = QIcon('icons\icon_lshape.png')
                 elif node.name == 'lshapeX':
@@ -1818,7 +1823,7 @@ class ChemTreeView(QTreeView):
     class ParsSpecDialog(QDialog):
         """A dialog to set specification for a parameter."""
 
-        def __init__(self, name, param, crntVal=None,  parent = None):
+        def __init__(self, name, param, crntVal=None, isReference=None, parent = None):
             super().__init__(parent)
             layoutMain = QVBoxLayout(self)
             layoutForm = QFormLayout()
@@ -1863,11 +1868,18 @@ class ChemTreeView(QTreeView):
             else:
                 actnDfltFromCrnt.triggered.connect(lambda : self.editDfltVal.setValue(crntVal))
 
+            # Checkbox to set the current parameter as a reference
+            self.chckReference = QCheckBox("Use as reference")
+
+
             # OK and Cancel buttons
             self.buttons = QDialogButtonBox(
                 QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
                 Qt.Horizontal, self)
             layoutMain.addLayout(layoutForm)
+            if isReference is not None:          # If the parameter can be set as a reference (e.g. if it is a chemical shift or an intensity)
+                self.chckReference.setChecked(isReference)
+                layoutMain.addWidget(self.chckReference)
             layoutMain.addWidget(self.chckSeries)
             layoutMain.addWidget(self.buttons)
 
@@ -1922,7 +1934,8 @@ class ChemTreeView(QTreeView):
                     'p1':self.editPriorP1.value(),\
                     'p2':self.editPriorP2.value(),\
                     'dval':self.editDfltVal.value()},\
-                    self.chckSeries.isChecked()
+                    self.chckSeries.isChecked(),\
+                    self.chckReference.isChecked()
 
     def __init__(self, parent=None):
         super().__init__(parent)    # Initialize a QTreeWidget
@@ -2164,18 +2177,22 @@ class ChemTreeView(QTreeView):
             param = self.model().datum.getPrior(key)
             try:
                 crntVal = self.model().datum.getCrntVal(key)
+                isReference = (self.model().datum.refChshKey == key) if key[1][:4] == 'chsh' else None
             except AttributeError:
-                crntVal = None
+                crntVal, isReference = None, None
 
-            dialog = self.ParsSpecDialog(key, param, crntVal, parent=self)
+            dialog = self.ParsSpecDialog(key, param, crntVal, isReference, parent=self)
             result = dialog.exec_()
             if result == QDialog.Accepted:    # If OK was clicked
-                newParSpec, resetSeries = dialog.getSelection()
+                newParSpec, resetSeries, setReference = dialog.getSelection()
                 crnt = self.model().datum
                 if isinstance(crnt, Datum) and resetSeries:
                     crnt = crnt.parent
                 else: pass # It is either a Datum and no series flag was set or it is a Series
                 crnt.setPrior(key, **newParSpec, reset=True)
+                if isReference is not None:
+                    crnt.setReferenceChshKey(key = key if setReference else None)
+                    if setReference: self.model().crntChanged.emit()            # Update the computed signals
 
     def saveSubtree(self, index):
         """Saves the subtree starting with the node index."""
@@ -3264,7 +3281,7 @@ class MainView(QMainWindow):
         self.treeView = ChemTreeView()
         self.treeModel = ChemTreeModel(self.wsp)
         self.treeView.setModel(self.treeModel)
-        self.treeModel.crntChanged.connect(lambda:self.tryStep(None))       # If current values are changed by the user
+        self.treeModel.crntChanged.connect(lambda:self.tryStep(indx = self.treeModel.actvStepIndx))       # If current values are changed by the user
         self.treeView.changedSelected.connect(self.selectStems)             # If new parameter is selected by the user
 
         # create a text edit widget to choose the optimization sequence
@@ -4041,10 +4058,10 @@ class MainView(QMainWindow):
                 if DDD.bF is not None:
                     bF = DDD.bF
                     xF += bF
-
             else: zF, xF, bF = None, None, None
 
             inRange, outRange = splitFreq([DDD.freqBlocks[blk] for blk in DDD.steps[0].frqBlkIds], f=DDD.f)
+            dref_chsh = DDD.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
             rmsResidual = 0.0
             if outRange:
                 supsRatio = math.ceil(yFph.size / (2**13))   # Subsampling ratio; take no more than 2^13 points
@@ -4055,16 +4072,16 @@ class MainView(QMainWindow):
 
                 # Plot measured data
                 yF_outR = np.insert(yFph[allIndx], gapsPos, None)
-                self.ax[0].plot(f_outR, yF_outR.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
+                self.ax[0].plot(f_outR - dref_chsh, yF_outR.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
 
                 # Plot the fitted model
                 if xF is not None:
                     xF_outR = np.insert(xF[allIndx], gapsPos, None)
-                    self.ax[0].plot(f_outR, xF_outR.real, '-', color='r', label='Fitted model')
+                    self.ax[0].plot(f_outR - dref_chsh, xF_outR.real, '-', color='r', label='Fitted model')
 
                     # Plot the residuals
                     if self.actnPlotResidual.isChecked():
-                        self.ax[2].plot(f_outR, yF_outR.real - xF_outR.real, '-', color='darkkhaki')
+                        self.ax[2].plot(f_outR - dref_chsh, yF_outR.real - xF_outR.real, '-', color='darkkhaki')
 
             if inRange:
                 allIndx = np.concatenate([r.indxFreq for r in inRange])
@@ -4073,7 +4090,7 @@ class MainView(QMainWindow):
 
                 # Plot measured data
                 yF_inR = np.insert(yFph[allIndx], gapsPos, np.nan)     #  - 1*step.bFph[allIndx]
-                self.ax[0].plot(f_inR, yF_inR.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='')
+                self.ax[0].plot(f_inR - dref_chsh, yF_inR.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='')
 
                 # Plot the model components
                 if self.actnShowComponents.isChecked():
@@ -4081,16 +4098,16 @@ class MainView(QMainWindow):
                         zF = (zF + 1*bF)
                         zF_inR = np.insert(zF[allIndx, :], gapsPos, None, axis=0)
                         for i, node in enumerate(DDD.repRootNames):
-                            self.ax[0].plot(f_inR, zF_inR[:, i], '-', linewidth=0.5, color=config.colrseq[i], label=node)
+                            self.ax[0].plot(f_inR - dref_chsh, zF_inR[:, i], '-', linewidth=0.5, color=config.colrseq[i], label=node)
 
                 # Plot the fitted model
                 if xF is not None:
                     xF_inR = np.insert(xF[allIndx], gapsPos, None)       #  - 1*step.bFph[allIndx]
-                    self.ax[0].plot(f_inR, xF_inR.real, '-', color='r', label='')
+                    self.ax[0].plot(f_inR - dref_chsh, xF_inR.real, '-', color='r', label='')
 
                     # Plot the residuals
                     if self.actnPlotResidual.isChecked():
-                        self.ax[2].plot(f_inR, yF_inR.real - xF_inR.real, '-', color='darkkhaki')
+                        self.ax[2].plot(f_inR - dref_chsh, yF_inR.real - xF_inR.real, '-', color='darkkhaki')
                         rmsResidual += np.sqrt(np.nanmean(np.abs(yF_inR - xF_inR)**2))
 
             # Show or hide stems depending on the state of the checkable action self.actnShowStems
@@ -4121,7 +4138,7 @@ class MainView(QMainWindow):
 
             # Plot optimization limits
             for i, blk in enumerate(DDD.freqBlocks):
-                self.ax[0].axvspan(blk.min, blk.max, alpha=0.2 if i in DDD.steps[0].frqBlkIds else 0.05, facecolor='yellow')
+                self.ax[0].axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2 if i in DDD.steps[0].frqBlkIds else 0.05, facecolor='yellow')
 
             self.ax[0].legend(loc=0)
 
@@ -4159,6 +4176,7 @@ class MainView(QMainWindow):
         settings["ax1Limits"] = {"xlim":self.ax[1].get_xlim(), "ylim":(0, self.ax[1].get_ylim()[1])}
         self.ax[1].clear()
         self.allStems = {}     # Dictionary that stores references to all stem lines
+        dref_chsh = self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
 
         if checked:
             # Plot stem diagrams
@@ -4174,7 +4192,7 @@ class MainView(QMainWindow):
                         self.allStems[leaf.name] = (markerline, stemlines)"""
             for i, name in enumerate([name for name in self._crnt.repRootNames if name not in ['Water', 'Chloroform'] ]):
                 for key, val in mdldPeaks[name].items():   # Loop over the leaves
-                    markerline, stemlines, baseline = self.ax[1].stem([pk.chsh for pk in val], [np.abs(pk.intn) for pk in val], basefmt=" ")     # , label=node.name if j==0 else ''
+                    markerline, stemlines, baseline = self.ax[1].stem([pk.chsh - dref_chsh for pk in val], [np.abs(pk.intn) for pk in val], basefmt=" ")     # , label=node.name if j==0 else ''
                     plt.setp(stemlines, linewidth=1, color=config.colrseq[i], picker = 2)    # Picking tolerance in px
                     plt.setp(markerline, markerfacecolor = config.colrseq[i], linestyle='None', color=config.colrseq[i], markersize=2)      # , picker=self.onStemPick
                     self.allStems[key] = (markerline, stemlines)
@@ -4265,7 +4283,8 @@ class MainView(QMainWindow):
 
     def addFreqBlock(self, xmin, xmax):
         """Adds new optimization range to the current Series andf updates the plot."""
-        self.freqTableModel.addFreqBlock(xmin, xmax)
+        dref_chsh = self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
+        self.freqTableModel.addFreqBlock(xmin + dref_chsh, xmax + dref_chsh)
 
         self.ax[0].axvspan(xmin, xmax, alpha=0.1, facecolor='yellow')
         self.canvas.draw()
@@ -4273,8 +4292,9 @@ class MainView(QMainWindow):
     def remFreqBlock(self, event):
         """Removes a frequency block that covers a location xdata in ppm and updates the plot."""
         # Find which block (if any) covers the passed location and which one to remove if there are multiple blocks. Event is a button_press_event passed from the canvas/CustomToolbar
+        dref_chsh = self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
         if event.xdata:   # If the click was in axes
-            scores = [blk.max-blk.min if blk.min < event.xdata < blk.max else np.inf for blk in self._crnt.freqBlocks]    # Find the narrowest block that covers teh clicked position
+            scores = [blk.max-blk.min if blk.min < event.xdata - dref_chsh < blk.max else np.inf for blk in self._crnt.freqBlocks]    # Find the narrowest block that covers teh clicked position
             indx = min(enumerate(scores), key=itemgetter(1))[0]      # Find the index of the minimum
 
             if indx > 0:    # Don't remove the allFrequencies block

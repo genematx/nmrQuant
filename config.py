@@ -17,6 +17,8 @@ SAMPL_funcType = 'LS'                       # Defines the type of the cost funct
 
 MODEL_ShapeKernelSize = 13                  # Size of the custom lineshape correction kernel (must be odd)
 
+DISPL_ShiftToReference = True          # Display the chemical shift sca;e on the spectrum shifted accordingly to the global chsh parameter of the entire mixture
+
 colrseq = [(0.1216,    0.4706,    0.7059),\
     (0.8902,    0.1020,    0.1098),\
     (0.2000,    0.6275,    0.1725),\
