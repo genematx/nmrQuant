@@ -4662,5 +4662,54 @@
         null
       ]
     ]
+  },
+  "Propane (Gas Phase)": {
+    "chshH": [
+      [
+        3.81,
+        4.01,
+        "H1, H3",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        4.260000000000001,
+        4.46,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multH": [
+      1
+    ],
+    "chshC": [],
+    "jcplHH": [
+      [
+        6.62,
+        8.620000000000001,
+        "H1, H3-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "name": "Propane (Gas Phase)",
+    "pairHH": [
+      [
+        0,
+        1
+      ]
+    ],
+    "nSpinH": [
+      6,
+      2
+    ]
   }
 }
