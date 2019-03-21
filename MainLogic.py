@@ -1220,21 +1220,34 @@ class Series():
 
         # Prepare keys and starting parameters. Expand parameter keys (if 3-tuples were provided, they will be substituted with 4-tuples for all datasets) and make sure there are no repeats
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=verbose)
-        evaluateAll = any([key[-2]=='meta' for key in parsKeys])     # If optimizing over any meta parameters, will need to evaluate all Datums, else can skip some
 
-        # Define optimization ranges and initial values of parameters
-        evalParsH = [copy.deepcopy(DDD.crntParsH) for DDD in self.data]    # Make a copy of parameters which will be used to evaluate the function
-        evalMetaF = copy.deepcopy(self.crntMetaF)
-        bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
-        initVals = np.array([evalParsH[k[0]][k[1]][k[2]][k[3]] if len(k) == 4 else evalMetaF[k] for k in parsKeys])
-        customPriors = dict()
-        # Define the objective function
-        def costFuncOpti(x):
-            if np.isnan(x).any():
-                return -np.inf
-            for k, v in zip(parsKeys, x):
+        if len(parsKeys) > 0:
+            evaluateAll = any([key[-2]=='meta' for key in parsKeys])     # If optimizing over any meta parameters, will need to evaluate all Datums, else can skip some
+
+            # Define optimization ranges and initial values of parameters
+            evalParsH = [copy.deepcopy(DDD.crntParsH) for DDD in self.data]    # Make a copy of parameters which will be used to evaluate the function
+            evalMetaF = copy.deepcopy(self.crntMetaF)
+            bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
+            initVals = np.array([evalParsH[k[0]][k[1]][k[2]][k[3]] if len(k) == 4 else evalMetaF[k] for k in parsKeys])
+            customPriors = dict()
+            # Define the objective function
+            def costFuncOpti(x):
+                if np.isnan(x).any():
+                    return -np.inf
+                for k, v in zip(parsKeys, x):
+                    if len(k) == 4:
+                        evalParsH[k[0]][k[1]][k[2]][k[3]] = v
+                    elif len(k) == 2:
+                        evalMetaF[k] = v
+                # Evaluate the function skipping the datasets that are not present in parsKeys
+                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
+
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
+
+            # Update the structure of all parameters
+            for k, v in zip(parsKeys, res.x):
                 if len(k) == 4:
-                    evalParsH[k[0]][k[1]][k[2]][k[3]] = v
+                    self.data[k[0]].crntParsH[k[1]][k[2]][k[3]] = v
                 elif len(k) == 2:
                     evalMetaF[k] = v
             # Evaluate the function skipping the datasets that are not present in parsKeys
@@ -1249,6 +1262,7 @@ class Series():
             elif len(k) == 2:
                 self.crntMetaF[k] = v
 
+        # Re-evaluatethe posterior
         result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
 
         if verbose:
@@ -1951,26 +1965,31 @@ class Datum():
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=verbose)
 
-        # Define the objective function using a copy of the parameters dictionary
-        evalParsH = copy.deepcopy(self.crntParsH)
-        bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
-        initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-        costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, robust=False)[0]
+        if len(parsKeys) > 0:
+            # Define the objective function using a copy of the parameters dictionary
+            evalParsH = copy.deepcopy(self.crntParsH)
+            bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
+            initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
+            costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, robust=False)[0]
 
-        # Call the optimization routine
-        res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
+            # Call the optimization routine
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
+
 
         # Update the stored parameters
         updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
         if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
         self.smplDistF.clear()
+        
+        # Re-evaluate the posterior
         result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
 
         if verbose:
-            print("Optimization finished. Posterior={:.4g}".format(result))
-            print('Found values:')
-            for key in parsKeys:
-                print("     {} = {:.5g}".format(str(key), self.getCrntVal(key)))
+            if len(parsKeys) > 0:
+                print("Optimization finished. Posterior={:.4g}".format(result))
+                print('Found values:')
+                for key in parsKeys:
+                    print("     {} = {:.5g}".format(str(key), self.getCrntVal(key)))
 
         return result, meta
 
@@ -2152,7 +2171,12 @@ class Datum():
         if verbose:
             npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
             npar_fit = len(parsKeys)
-            print("Marginalized {} and fitting {} parameters...".format(npar_auto, npar_fit))
+            if npar_fit == 0:
+                print("Nothing to fit; {} parameters inferred in closed form...".format(npar_auto))
+            elif npar_fit == 1:
+                print("Fitting one parameter; {} parameters inferred in closed form...".format(npar_auto))
+            else:
+                print("Fitting {} parameters; {} parameters inferred in closed form...".format(npar_fit, npar_auto))
             if print_parameters:
                 print("Optimized parameters:")
                 for key in parsKeys:
