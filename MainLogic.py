@@ -992,6 +992,11 @@ class Series():
             except KeyError:
                 return getattr(self.T[key[0]], key[1])[key[2]]
 
+    def setReferenceChshKey(self, key=None):
+        """Sets the reference chemical shift and updates the global chemical shift accordingly."""
+        for DDD in self.data:
+            DDD.setReferenceChshKey(key)
+
     def addMetaParameter(self, **kwargs):
         """Adds a new meta parameter to the current Series. Additional key word argumrnts may include standard parsSpec arguments: label, min, max, distr, p1, p2, dval."""
         # Check maybe there is already a parameter with such label
@@ -1240,7 +1245,7 @@ class Series():
         # Update the structure of all parameters
         for k, v in zip(parsKeys, res.x):
             if len(k) == 4:
-                self.data[k[0]].crntParsH[k[1]][k[2]][k[3]] = v
+                self.data[k[0]].setCrntVal(k[1:3], v) #   crntParsH[k[1]][k[2]][k[3]] = v
             elif len(k) == 2:
                 self.crntMetaF[k] = v
 
@@ -1429,6 +1434,7 @@ class Datum():
         self.smplDistF = dict()          # A flat dictionary of sampled (or marginalized) parameters
         self.mdldPeaks = {}
         self.pckdPeaks = []
+        self.refChshKey = None           # A key of the chemical shift that will be used as a reference (will be set to its default value and the rest of the spectrum shifted accordingly)
         self.fullReset(crntParsH, priors)
 
     def __getattr__(self, attr):
@@ -1498,10 +1504,27 @@ class Datum():
         return self.crntParsH[key[0]][key[1]][key[2]]
 
     def setCrntVal(self, key, val):
-        """Updates the value of the parameter key."""
-        # TODO: Will be deprecated.
+        """Updates the current value of the parameter key."""
+        if key == self.refChshKey:
+            self.setGlobalChshVal(self.getGlobalChshVal() + (float(val) - self.getPrior(key).dflt()) )
+            val = self.getPrior(key).dflt()
         self.crntParsH[key[0]][key[1]][key[2]] = float(val)
         self.smplDistF.clear()
+
+    def getGlobalChshVal(self):
+        """Returns the value of the top-level chemical shift in the parameter tree."""
+        return self.getCrntVal(key = (self.T.findRoot().name, 'chsh', 0))
+
+    def setGlobalChshVal(self, val):
+        """Sets the value of the top-level chemical shift in the parameter tree."""
+        self.setCrntVal(key = (self.T.findRoot().name, 'chsh', 0), val=val)
+
+    def setReferenceChshKey(self, key=None):
+        """Sets the reference chemical shift and updates the global chemical shift accordingly."""
+        self.refChshKey = key
+        if key is not None:
+            self.setGlobalChshVal(self.getGlobalChshVal() + (self.getCrntVal(key) - self.getPrior(key).dflt()) )
+            self.setCrntVal(key, self.getPrior(key).dflt())
 
     def getDfltParsH(self):
         """Returns a complete hierarchical dictionary of default parameters."""
@@ -1939,6 +1962,7 @@ class Datum():
 
         # Update the stored parameters
         updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
+        if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
         self.smplDistF.clear()
         result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
 
@@ -2084,7 +2108,7 @@ class Datum():
         self.zF[indxInRange, :] = Zcorr + bslnConst
         self.bF[indxInRange] = bslnPoly.dot(mc[na:]) - bslnConst.dot(mc[:na])
         for lbl, val in zip(self.repRootNames, np.abs(mc[:na])):
-            self.crntParsH[lbl]['ampl'][0] = np.asscalar(val)
+            self.setCrntVal((lbl, 'ampl', 0), val)       # .crntParsH[lbl]['ampl'][0] = np.asscalar(val)
 
         return np.abs(mc[:na])
 
@@ -2515,7 +2539,7 @@ def save_workspace(filename, wsp, GUIsettings=None):
                                      'xlim': (10.0, 0.0)},
                        'autoPhase': False, 'startFromPars': 'current',
                        '_view': {'hiddenTreeViewNodes': [], 'stepsEditText': 'AAAAAA'},
-                       '_config': {'SAMPL_varEstimator': 'robust', 'OPTIM_method': 'L-BFGS-B', 'QD_RerunQDchshThreshold': 0.1, 'OPTIM_startFrom': 'current', 'SAMPL_funcType': 'LS', 'OPTIM_niterSuccess': 5, 'MODEL_ShapeKernelSize': 13, 'OPTIM_maxBasinhoppingSteps': 3, 'QD_AggregatePeaksThreshold': 0.5},
+                       '_config': {'SAMPL_varEstimator': 'robust', 'OPTIM_method': 'L-BFGS-B', 'QD_RerunQDchshThreshold': 0.1, 'OPTIM_startFrom': 'current', 'SAMPL_funcType': 'LS', 'OPTIM_niterSuccess': 5, 'MODEL_ShapeKernelSize': 13, 'OPTIM_maxBasinhoppingSteps': 3, 'QD_AggregatePeaksThreshold': 0.5, 'DISPL_ShiftToReference': True},
                        'autoPick': False, 'ax1Limits': None, 'ax2Limits': None}
     dataPack = wsp.pack()
     with open(filename, 'wb') as fp:
