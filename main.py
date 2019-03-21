@@ -4294,7 +4294,7 @@ class MainView(QMainWindow):
         # Find which block (if any) covers the passed location and which one to remove if there are multiple blocks. Event is a button_press_event passed from the canvas/CustomToolbar
         dref_chsh = self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
         if event.xdata:   # If the click was in axes
-            scores = [blk.max-blk.min if blk.min < event.xdata - dref_chsh < blk.max else np.inf for blk in self._crnt.freqBlocks]    # Find the narrowest block that covers teh clicked position
+            scores = [blk.max-blk.min if blk.min < event.xdata + dref_chsh < blk.max else np.inf for blk in self._crnt.freqBlocks]    # Find the narrowest block that covers teh clicked position
             indx = min(enumerate(scores), key=itemgetter(1))[0]      # Find the index of the minimum
 
             if indx > 0:    # Don't remove the allFrequencies block
