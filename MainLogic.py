@@ -819,7 +819,8 @@ class Workspace():
                                                     'mdldPeaks' : dat.mdldPeaks,
                                                     'pckdPeaks' : dat.pckdPeaks,
                                                     'sF' : dat.sF,
-                                                    'sT' : dat.sT
+                                                    'sT' : dat.sT,
+                                                    'refChshKey' : dat.refChshKey
                                                     })
 
         return result
@@ -874,6 +875,8 @@ class Workspace():
                 newDatum.sT = dat['sT'] if 'sT' in dat.keys() else None
                 if 'smplDistF' in dat.keys():
                     newDatum.smplDistF.update(dat['smplDistF'])
+                if 'refChshKey' in dat.keys():
+                    newDatum.setReferenceChshKey(dat['refChshKey'])
 
         if lshapeOrder is None: self.set_lshapeOrder(2)
 
@@ -1980,7 +1983,7 @@ class Datum():
         updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
         if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
         self.smplDistF.clear()
-        
+
         # Re-evaluate the posterior
         result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
 
