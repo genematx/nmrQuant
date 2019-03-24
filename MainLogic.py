@@ -1250,29 +1250,19 @@ class Series():
             # Update the structure of all parameters
             for k, v in zip(parsKeys, res.x):
                 if len(k) == 4:
-                    self.data[k[0]].crntParsH[k[1]][k[2]][k[3]] = v
+                    self.data[k[0]].setCrntVal(k[1:3], v) #   crntParsH[k[1]][k[2]][k[3]] = v
                 elif len(k) == 2:
-                    evalMetaF[k] = v
-            # Evaluate the function skipping the datasets that are not present in parsKeys
-            return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
-
-        res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
-
-        # Update the structure of all parameters
-        for k, v in zip(parsKeys, res.x):
-            if len(k) == 4:
-                self.data[k[0]].setCrntVal(k[1:3], v) #   crntParsH[k[1]][k[2]][k[3]] = v
-            elif len(k) == 2:
-                self.crntMetaF[k] = v
+                    self.crntMetaF[k] = v
 
         # Re-evaluatethe posterior
         result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
 
         if verbose:
-            print("Optimization finished. Posterior={:.4g}".format(result))
-            print('Found values:')
-            for key in parsKeys:
-                print("     {} = {:.5g}".format(str(key), self.getCrntVal(key)))
+            if len(parsKeys) > 0:
+                print("Optimization finished. Posterior={:.4g}".format(result))
+                print('Found values:')
+                for key in parsKeys:
+                    print("     {} = {:.5g}".format(str(key), self.getCrntVal(key)))
 
         return result, meta
 
@@ -1353,7 +1343,7 @@ class Series():
 
         return(result)
 
-    def _prepareKeys(self, parsKeys, autoKeys=None, verbose=True):
+    def _prepareKeys(self, parsKeys, autoKeys=None, verbose=True, print_parameters=False):
         """Convert parameter Keys from Datum to Series representations and make sure there are no repetitions."""
         parsKeys = set([]) if parsKeys is None else set(parsKeys)
         if autoKeys is not None: autoKeys = set(autoKeys)
@@ -1371,9 +1361,23 @@ class Series():
         #                                    and self.data[key[0]].getPrior(key[-3:]).max==np.pi)) )]
 
         if verbose:
-            print("Optimizing over {} parameters:".format(len(parsKeys)))
-            for key in parsKeys:
-                print("     {}".format(str(key)))
+            npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
+            npar_fit = len(parsKeys)
+            if npar_fit == 0:
+                print("Nothing to fit; {} parameters inferred in closed form...".format(npar_auto))
+            elif npar_fit == 1:
+                print("Fitting one parameter; {} parameters inferred in closed form...".format(npar_auto))
+            else:
+                print("Fitting {} parameters; {} parameters inferred in closed form...".format(npar_fit, npar_auto))
+            if print_parameters:
+                print("Optimized parameters:")
+                for key in parsKeys:
+                    print("     {}".format(str(key)))
+                print("Parameters inferred automatically:")
+                if autoKeys is not None:
+                    for key in autoKeys:
+                        if self.isAutofittable(key):
+                            print("     {}".format(str(key)))
 
         return parsKeys, autoKeys
 
@@ -1978,11 +1982,10 @@ class Datum():
             # Call the optimization routine
             res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
 
-
-        # Update the stored parameters
-        updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
-        if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
-        self.smplDistF.clear()
+            # Update the stored parameters
+            updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
+            if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
+            self.smplDistF.clear()
 
         # Re-evaluate the posterior
         result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
