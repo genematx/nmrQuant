@@ -113,3 +113,4 @@ workspaces/
 notebooks/
 main.spec       # File created by pyinstaller
 main.exe
+image.eps
