@@ -1372,7 +1372,7 @@ class chemNodeDB(chemNode):
             SPSY = chemNodeQD(self.name + '-SPSY' + str(i+1), spsy)  # New spin system node (QD)
             for j in range(len(spsy.chsh)):
                 SPSY.addChild(chemNodeT(self.name + '-' + str(i+1) + '.' + str(j+1), intn=spsy.chshAsgn.count(j+1),
-                                        alias=spsy.chsh[j].label if spsy.chsh[j].label!='' else ''))      # , intn=spsy.mult
+                                        alias=self.name + ' ' + spsy.chsh[j].label if spsy.chsh[j].label!='' else ''))      # , intn=spsy.mult
             self.addChild(SPSY)
 
 # ------------------------- Functions for working with trees -------------------------------

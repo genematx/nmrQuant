@@ -928,7 +928,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
         self.endInsertRows()
 
-    def addDatum(self, crnt_series, path):
+    def addDatumFromFile(self, crnt_series, path):
         """Adds new Datum entries specified by the path to the series object."""
 
         ser_id = self.wsp.series.index(crnt_series) # Position of the Series in the Workspace
@@ -971,8 +971,30 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
             name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
 
-        elif path[-3:] == '.1d':
+        elif path[-3:] == 'fid':
+            # Read a Bruker FID file
+            dic, data = ng.fileio.bruker.read(path[:-3])
 
+            acqus = dic['acqus']
+            ntgrp = acqus['GRPDLY']    # Number of time samples of the Bruker filter response;
+            swh = acqus['SW_h']     # Spectral width in Hz
+            f0 = acqus['O1']        # Offset in Hz
+            c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
+            dt = 1 / swh         # Sampling period (dwell time)
+            tau = acqus['DE'] * (1e-06)   # Ringdown time delay in sec
+
+            yT = data[ntgrp:].reshape(-1, 1)
+            nt = len(yT)
+            t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+
+            ## Subsample if the frequency range is too large
+            #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+            #t = t[::k]
+            #yT = yT[::k, :]
+
+            name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
+
+        elif path[-3:] == '.1d':
             # Read a Spinsolve data.1d file
             dic, data = ng.fileio.spinsolve.read(path)
             c0 = dic['b1Freq']
@@ -986,10 +1008,10 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
             yT = data.reshape(-1, 1)
 
-            # Subsample if the frequency range is too large
-            k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-            t = t[::k]
-            yT = yT[::k, :]
+            ## Subsample if the frequency range is too large
+            #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+            #t = t[::k]
+            #yT = yT[::k, :]
 
             name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
 
@@ -1029,9 +1051,9 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         elif isinstance(parent, Datum):
             parent = parent.parent    # Go one level up to the Series level
 
-        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.1d);;Converted FID (*.pyfid);;Spinsolve binary (*.1d);;JCAMP (*.dx)"):
+        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.1d; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d);;JCAMP (*.dx);;Bruker FID (fid)"):
             #try:
-            self.addDatum(parent, newFilePath)
+            self.addDatumFromFile(parent, newFilePath)
             #except:
             #    print("Could not add the file ", newFilePath)
 
