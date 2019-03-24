@@ -1353,13 +1353,6 @@ class Series():
                 parsKeys.update([(i, *key) for i in range(len(self.data))])        # Repeat the same key for all Datums
         parsKeys = sorted(list(parsKeys))
 
-        # Determine which parameters can be marginalized and remove them from the list of sampled values
-        #parsKeys = [key for key in parsKeys if not ( len(key)==4 and ((key[2]=='ampl' and self.data[key[0]].getPrior(key[-3:]).distr=='Gaussian') \
-        #            or (key[2]=='sigma2' and self.data[key[0]].getPrior(key[-3:]).distr=='Inverse-Gamma') \
-        #            or (key[2]=='theta' and self.data[key[0]].getPrior(key[-3:]).distr=='Uniform' \
-        #                                    and self.data[key[0]].getPrior(key[-3:]).min==-np.pi \
-        #                                    and self.data[key[0]].getPrior(key[-3:]).max==np.pi)) )]
-
         if verbose:
             npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
             npar_fit = len(parsKeys)
