@@ -1250,7 +1250,7 @@ class Series():
             # Update the structure of all parameters
             for k, v in zip(parsKeys, res.x):
                 if len(k) == 4:
-                    self.data[k[0]].setCrntVal(k[1:3], v) #   crntParsH[k[1]][k[2]][k[3]] = v
+                    self.data[k[0]].setCrntVal(k[1:], v) #   crntParsH[k[1]][k[2]][k[3]] = v
                 elif len(k) == 2:
                     self.crntMetaF[k] = v
 
