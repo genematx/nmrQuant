@@ -1108,8 +1108,8 @@ class chemNodeQD(chemNode):
         jcplSpin = [[jcplQD[i-1] if i>0 else 0 for i in self.jcplAsgn[j]] for j in range(len(self.jcplAsgn))] if len(jcplQD)>0 else None"""
 
         n_spin = len(self.chshAsgn)
-        self.spinopsL = [0]*len(self.chshQD)
-        self.spinopsJ = [0]*len(self.jcplQD)
+        self.spinopsL = [0.0]*len(self.chshQD)
+        self.spinopsJ = [0.0]*len(self.jcplQD)
         Lx, Ly, Lz, self.TM = spinop(n_spin)       # Cartesian spin operators used to construct the Hamiltonian and the Transition matrix
         for i in range(n_spin):
             self.spinopsL[self.chshAsgn[i]-1] += Lz[i]
@@ -1174,9 +1174,9 @@ class chemNodeQD(chemNode):
                 H = np.zeros((2**n_spin, 2**n_spin), dtype='float64')
                 try:
                     for chsh, spinop in zip(chshQD, self.spinopsL):
-                        H -= chsh * spinop
+                        H = H - chsh * spinop
                     for jcpl, spinop in zip(jcplQD, self.spinopsJ):
-                        H += jcpl * spinop
+                        H = H + jcpl * spinop
                 except AttributeError:
                     # TO BE REMOVED IN LATER VERSIONS. LEFT FOR COMPATIBILITY
                     pass
