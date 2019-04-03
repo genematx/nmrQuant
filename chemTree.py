@@ -598,14 +598,19 @@ def QDsimsGrpd2(H, T):
     omega = abs(vH.reshape(-1,1) - vH)
     intn = np.triu(intn).flatten('F')
     omega = np.triu(omega).flatten('F')
+    #return omega, intn
 
     p = np.flipud(intn.argsort())        # Sort the peaks from highest to lowest intensity
-    intn2 = np.cumsum(intn[p]**2)        # Cumulative sum of sorted squared intensities
-    p = p[0:max( n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) )]      # argmax will return the index of first occurence of element that evaluates to True
+    #intn2 = np.cumsum(intn[p]**2)        # Cumulative sum of sorted squared intensities
+    #p = p[0:max( n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) )]      # argmax will return the index of first occurence of element that evaluates to True
+    #p = range(max( n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) ))
+    #p = p[range(max( 0*n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) ))]
 
     #p = p[0:n_spin*(2**(n_spin-1))]    # Keep only peaks corresponding to single transitions (assuming they are the largest)
-    #### p = p[(intn[p] > 0.00000001)]                # Keep only the largest peaks
+    #p = p[(intn[p] > 0.00000001)]                # Keep only the largest peaks
     #print(n_spin, len(p))
+    p_max = np.argmin( np.diff(np.log(intn[p]))[:2*n_spin*(2**(n_spin-1))] ) + 1     # All coefficients before the sharpest drop in their intensity but at most 2*n_spin*(2**(n_spin-1))
+    p = p[:p_max]
 
     omega = omega[p]
     intn = intn[p]
@@ -1049,6 +1054,7 @@ class chemNode(treeNode):
         """Resets the oldPars, s(t), and u(t) to their default (empty) values. Everything will be recomputed at the next evaluation."""
         self.uT = []
         self.sT = []
+        self.oldTime = []
 
     def getPoles(self, c0, chsh=[], alph=[], **kwargs):
         """Computes the poles and returns 1 if they have changed, 0 otehrwise"""
@@ -1099,8 +1105,6 @@ class chemNodeQD(chemNode):
         self.oldParsQD = {"chsh":None, "jcpl":None}
         self.qPoles = [None]*len(self.chshQD)                # QD poles excluding the effects of line-broadedning although including any linebroadening due to peak aggregation
         self.qPolesIntn = [None]*len(self.chshQD)
-        self.oldFreq = []
-        self.oldTau = []
 
         # Create spin operators
         """# Assign chemical shifts and j coupling values to spins in the system
@@ -1154,6 +1158,12 @@ class chemNodeQD(chemNode):
         if len(self.jcplQD) > 0: result["jcplQD"] = [par for par in self.jcplQD]
         return result
 
+    def reset(self):
+        """Resets the saved old parameters in the node. Evrything will be recomputed on the next step."""
+        chemNode.reset(self)
+        self.oldParsQD["chsh"] = None
+        self.oldParsQD["jcpl"] = None
+
     #@profile
     def getPoles(self, c0, chsh=[], alph=[], chshQD=[], alphQD=[], jcplQD=[], **kwargs):
         """Computes the poles for all peaks including QD simulations if needed."""
@@ -1179,7 +1189,6 @@ class chemNodeQD(chemNode):
                         H = H + jcpl * spinop
                 except AttributeError:
                     # TO BE REMOVED IN LATER VERSIONS. LEFT FOR COMPATIBILITY
-                    pass
                     def spinop(n_spin):
                         # Construct Carrtesian spin operators; will be used to build the Hamiltonian
                         # 1. Define the Pauli matrices (for proton, a spin-1/2 particle)
@@ -1228,6 +1237,7 @@ class chemNodeQD(chemNode):
 
                 #print("H", np.linalg.matrix_rank(H))
                 omega, intn = QDsimsGrpd2(H, self.TM)
+                #return omega, intn
 
                 # 9. Add the transitions to the arrays of their closest resonances
                 freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
@@ -1288,7 +1298,6 @@ class chemNodeT(chemNode):
         self.qPolesIntn = 1.
         self.uPoles = 0.                # poles computed including the effects of all ancestors
         self.uF = []
-        self.oldTau = []
 
     def default_pars(self):
         """Returns a dictionary of default parameters for the node."""

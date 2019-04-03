@@ -1895,6 +1895,7 @@ class Datum():
 
             # Define modelled and measured signals
             Z, y = np.hstack((zFinRange, bslnPoly)), yFinRange
+
         ns, nz = Z.shape     # Number of samples and (model signals + baselines)
         na = len(repRootNames)    # Number of model signals, and hence the resulting amplitudes
         if np.isnan(Z).any() or np.isinf(Z).any():             # This can happen if some chemical shifts are set to None
@@ -1933,7 +1934,9 @@ class Datum():
         if not useComplex:
             Z, y = Z.real, (y*np.exp(-1j*theta)).real
         else:
-            Z, y = np.vstack([Z.real, Z.imag]), np.vstack([(y*np.exp(-1j*theta)).real, (y*np.exp(-1j*theta)).imag])
+            pass
+            y = y*np.exp(-1j*theta)
+            #Z, y = np.vstack([Z.real, Z.imag]), np.vstack([(y*np.exp(-1j*theta)).real, (y*np.exp(-1j*theta)).imag])
 
         # 3.3. Variance of noise
         key = ('.', 'sigma2', 0)
@@ -1960,25 +1963,27 @@ class Datum():
             Gz = 1.0*np.abs(Z)
 
         Gz[:, na:] = 0
-        #self.ZZZ, self.yyy = Z, y
         result, ampl, sigma2, meta = log_likelihood(Z, y, ampl=ampl, sigma2=sigma2, \
             Gz=Gz, Gy=None, gamma=gamma, m0=m0, iS0=iS0, a_sigma2=a_sigma2, b_sigma2=b_sigma2, \
             funcType=funcType, robust=robust)
-        diff_theta = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase
+        diff_theta = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase estimated from the complex valued amplitudes
         theta = (theta + diff_theta + np.pi) % (2 * np.pi) - np.pi
         m_ampl = ampl*np.exp(-1j*diff_theta)
-        m_ampl[:na] = m_ampl[:na].real
-        if m_ampl[:na].sum() < 0:      # Make sure that all amplitudes are positive
+        #m_ampl[:na] = m_ampl[:na].real
+        if m_ampl[:na].real.sum() < 0:      # Make sure that all amplitudes are positive
             m_ampl = - m_ampl
-            theta = (theta + +np.pi + np.pi) % (2 * np.pi) - np.pi
+            theta = (theta + np.pi + np.pi) % (2 * np.pi) - np.pi
             if not useComplex: evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
+        m_ampl[:na] = np.abs(m_ampl[:na])
         gamma = meta['gamma']
         S_ampl = meta['ampl'][1]
         a_sigma2, b_sigma2 = meta['sigma2']
+        #print(m_ampl)
 
         mult = 1   # sum(m_ampl)     # Multiplier (can be used to output normalized amplitudes)
-        for lbl, val in zip(self.repRootNames, np.abs(m_ampl[:na])):
-            evalParsH[lbl]['ampl'][0] = np.asscalar(val) / mult
+        for lbl, val in zip(self.repRootNames, m_ampl[:na]):
+            evalParsH[lbl]['ampl'][0] = np.asscalar(np.abs(val)) / mult
+            evalParsH[lbl]['phase'][0] = np.asscalar(np.angle(val))
         evalParsH['.']['mult'][0] = mult
         evalParsH['.']['theta'][0] = theta            # Update the phase
         evalParsH['.']['sigma2'][0] = sigma2

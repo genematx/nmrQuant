@@ -782,10 +782,11 @@ def log_likelihood(Z, y, ampl=None, sigma2=None, Gz=None, Gy=None, gamma=None, m
     n, k = Z.shape     # Number of samples and (model signals)
     isReal = np.isreal(Z).all() and np.isreal(y).all() and (ampl is None or np.isreal(ampl).all())    # Determine if the problem is real or complex-valued
     #gamma = max(min(gamma, 1-1e-12), 1e-12)    # Make sure gamma is within allowed bounds
-    #if theta is not None and not isReal:
-    #    y = y * np.exp(-1j*theta)
+
+    # Initialize the array of amplitudes
     if ampl is None:
         ampl = np.array([None]*k)
+    #print('Is real:', isReal)
 
     #print("ampl in = ", ampl.ravel())
     if funcType == 'LS':
