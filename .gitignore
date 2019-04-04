@@ -115,3 +115,4 @@ main.spec       # File created by pyinstaller
 main.exe
 image.eps
 fid/
+release.zip

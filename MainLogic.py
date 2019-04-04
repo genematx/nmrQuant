@@ -1809,7 +1809,7 @@ class Datum():
     def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, useComplex=True):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
         #funcType = 'TLS'
-        useComplex = False
+        useComplex = True
 
         # 1. Update the settings
         if frqBlkIds is None:
