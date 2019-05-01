@@ -10,3 +10,6 @@ pip install -e C:\Path\package
 
 4. Uninstall a package:
 pip uninstall packagename
+
+5. Installing geopandas:
+https://geoffboeing.com/2014/09/using-geopandas-windows/

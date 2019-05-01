@@ -75,7 +75,7 @@ class OrderedSet(collections.MutableSet):
         return set(self) == set(other)
 
 # --- Loading the database in JSON format ---
-class chemSpec():
+class chemSpec:
     """Class for database entires."""
 
     def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None):

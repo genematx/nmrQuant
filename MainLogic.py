@@ -1806,10 +1806,9 @@ class Datum():
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
     #@profile
-    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, useComplex=True):
+    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField='Re'):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
         #funcType = 'TLS'
-        useComplex = True
 
         # 1. Update the settings
         if frqBlkIds is None:
@@ -1819,7 +1818,7 @@ class Datum():
         if funcType is None:
             funcType=config.SAMPL_funcType
         if funcType is 'TLS':
-            useComplex = False
+            numberField = 'Re'
 
         # 2. Compute a matrix of model signals Z, either in time or frequency domain
         inTimeDomain = (len(frqBlkIds) == 0)
@@ -1888,7 +1887,7 @@ class Datum():
 
             # Include the baseline
             bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
-            if not useComplex:
+            if numberField == 'Re':
                 bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
             #else: bslnPoly *= phFinRange
             nb = bslnPoly.shape[1]     # Total number of baseline terms
@@ -1917,7 +1916,7 @@ class Datum():
                 m0[i], S0[i,i] = spec.p1, spec.p2
             else:
                 ampl[i] = evalParsH[self.repRootNames[i]]['ampl'][0]
-                if useComplex: ampl[i] *= np.exp(1j*evalParsH[self.repRootNames[i]]['phase'][0])    # Set possibly different phases for each amplitude
+                if numberField == 'Cx': ampl[i] *= np.exp(1j*evalParsH[self.repRootNames[i]]['phase'][0])    # Set possibly different phases for each amplitude
         iS0 = np.linalg.inv(S0)
 
         # 3.2. Global phase shift
@@ -1931,12 +1930,12 @@ class Datum():
             Sc = np.linalg.inv(ZZ.real)
             theta = np.asscalar( 0.5*np.angle(Zy.T.dot(np.dot(Sc, Zy))) )
         else: theta = evalParsH['.']['theta'][0]
-        if not useComplex:
+        if numberField == 'Re':
             Z, y = Z.real, (y*np.exp(-1j*theta)).real
-        else:
-            pass
+        elif numberField == 'ReIm':
+            Z, y = np.vstack([Z.real, Z.imag]), np.vstack([(y*np.exp(-1j*theta)).real, (y*np.exp(-1j*theta)).imag])
+        elif numberField == 'Cx':
             y = y*np.exp(-1j*theta)
-            #Z, y = np.vstack([Z.real, Z.imag]), np.vstack([(y*np.exp(-1j*theta)).real, (y*np.exp(-1j*theta)).imag])
 
         # 3.3. Variance of noise
         key = ('.', 'sigma2', 0)
@@ -1966,6 +1965,7 @@ class Datum():
         result, ampl, sigma2, meta = log_likelihood(Z, y, ampl=ampl, sigma2=sigma2, \
             Gz=Gz, Gy=None, gamma=gamma, m0=m0, iS0=iS0, a_sigma2=a_sigma2, b_sigma2=b_sigma2, \
             funcType=funcType, robust=robust)
+        print(ampl)
         diff_theta = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase estimated from the complex valued amplitudes
         theta = (theta + diff_theta + np.pi) % (2 * np.pi) - np.pi
         m_ampl = ampl*np.exp(-1j*diff_theta)
@@ -1973,7 +1973,7 @@ class Datum():
         if m_ampl[:na].real.sum() < 0:      # Make sure that all amplitudes are positive
             m_ampl = - m_ampl
             theta = (theta + np.pi + np.pi) % (2 * np.pi) - np.pi
-            if not useComplex: evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
+            if numberField == 'Re': evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
         m_ampl[:na] = np.abs(m_ampl[:na])
         gamma = meta['gamma']
         S_ampl = meta['ampl'][1]
