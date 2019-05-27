@@ -723,7 +723,7 @@ class Workspace():
             res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
                   options={'eps':1e-05})       # Step-size for computing the Jacobian
             #print(res['message'])
-
+        print(res)
         return res
 
     def _sample(self, costFuncSmpl, bounds, initVals, nwalkers=None, nsteps=None, verbose=True):

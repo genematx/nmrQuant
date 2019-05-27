@@ -969,7 +969,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             t = t[::k]
             yT = yT[::k, :]
 
-            name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
+            name = os.path.split(os.path.dirname(path))[1]
 
         elif path[-3:] == 'fid':
             # Read a Bruker FID file
@@ -992,13 +992,19 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             #t = t[::k]
             #yT = yT[::k, :]
 
-            name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
+            name = os.path.split(os.path.dirname(path))[1]
 
         elif path[-3:] == '.1d':
             # Read a Spinsolve data.1d file
             dic, data = ng.fileio.spinsolve.read(path)
-            c0 = dic['b1Freq']
-            fcar = -dic['lowestFrequency']
+            try:
+                c0 = dic['b1Freq']
+            except KeyError:
+                c0 = dic['b1Freq'+dic['nucleus']]     # e.g. b1Freq1H
+            try:
+                fcar = -dic['lowestFrequency']
+            except KeyError:
+                fcar = -dic['offFreq']
             dt = dic['dwellTime'] * 1e-6
             nt = dic['nrPnts']
 
