@@ -994,9 +994,9 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
             name = os.path.split(os.path.dirname(path))[1]
 
-        elif path[-3:] == '.1d':
+        elif path[-3:] in ['.1d', '.2d']:
             # Read a Spinsolve data.1d file
-            dic, data = ng.fileio.spinsolve.read(path)
+            dic, yT = ng.fileio.spinsolve.read(path, bin_file='data'+path[-3:])
             try:
                 c0 = dic['b1Freq']
             except KeyError:
@@ -1004,7 +1004,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             try:
                 fcar = -dic['lowestFrequency']
             except KeyError:
-                fcar = -dic['offFreq']
+                fcar = 0.0
             dt = dic['dwellTime'] * 1e-6
             nt = dic['nrPnts']
 
@@ -1012,7 +1012,6 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             f0 = swh/2-fcar      # Frequency shift in Hz
 
             t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-            yT = data.reshape(-1, 1)
 
             ## Subsample if the frequency range is too large
             #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
@@ -1032,7 +1031,6 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         self.layoutAboutToBeChanged.emit()
 
         if len(crnt_series.data) == 0 and yT.shape[1] == 1:   # Adding only a single first Datum; no rows will be added, but need to replace the existing Series row with this new Datum
-
             crnt_series.addDatum(yT, name = name)
         else:
             # Start adding rows
@@ -1042,7 +1040,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
                 self.beginInsertRows(index, len(crnt_series.data), len(crnt_series.data)+yT.shape[1]-1)        # Parent node, first and last position
             # Add the rows
             for i in range(yT.shape[1]):
-                crnt_series.addDatum(yT[:,i], name = name+str(i+1) if yT.shape[1]>1 else name)
+                crnt_series.addDatum(yT[:,i].reshape(-1,1), name = name+str(i+1) if yT.shape[1]>1 else name)
             # Finish adding rows
             self.endInsertRows()
 
@@ -1057,7 +1055,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         elif isinstance(parent, Datum):
             parent = parent.parent    # Go one level up to the Series level
 
-        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.1d; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d);;JCAMP (*.dx);;Bruker FID (fid)"):
+        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.1d; *.2d; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx);;Bruker FID (fid)"):
             #try:
             self.addDatumFromFile(parent, newFilePath)
             #except:
