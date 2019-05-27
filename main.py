@@ -34,7 +34,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '0.18.5'
+version = '0.18.6'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -969,7 +969,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             t = t[::k]
             yT = yT[::k, :]
 
-            name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
+            name = os.path.split(os.path.dirname(path))[1]
 
         elif path[-3:] == 'fid':
             # Read a Bruker FID file
@@ -992,13 +992,19 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             #t = t[::k]
             #yT = yT[::k, :]
 
-            name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
+            name = os.path.split(os.path.dirname(path))[1]
 
         elif path[-3:] == '.1d':
             # Read a Spinsolve data.1d file
             dic, data = ng.fileio.spinsolve.read(path)
-            c0 = dic['b1Freq']
-            fcar = -dic['lowestFrequency']
+            try:
+                c0 = dic['b1Freq']
+            except KeyError:
+                c0 = dic['b1Freq'+dic['nucleus']]     # e.g. b1Freq1H
+            try:
+                fcar = -dic['lowestFrequency']
+            except KeyError:
+                fcar = -dic['offFreq']
             dt = dic['dwellTime'] * 1e-6
             nt = dic['nrPnts']
 
@@ -3499,13 +3505,17 @@ class MainView(QMainWindow):
         self.actnFitAllSteps.setStatusTip('Fit all steps for this file')
         self.actnFitAllSteps.triggered.connect(lambda _ : self.fitAllSteps(selectedFiles = None))
         # Fit all files action
-        actnStopFitting = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
-        actnStopFitting.setStatusTip('Stop fitting')
-        actnStopFitting.triggered.connect(self.stopFitting)
-        # Stop fitting action
         self.actnFitAllFiles = QAction(self._icon('icon_fitAllFiles.png'), 'Fit all files', self)
         self.actnFitAllFiles.setStatusTip('Fit all steps for this file')
         self.actnFitAllFiles.triggered.connect(self.fitAllFiles)
+        # Stop fitting action
+        actnStopFitting = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
+        actnStopFitting.setStatusTip('Stop fitting')
+        actnStopFitting.triggered.connect(self.stopFitting)
+        # Phase correction actions
+        """self.actnCorrectPh0 = QAction(self._icon('icon_correctPh0.png'), 'Correct ph0', self)
+        self.actnCorrectPh0.setStatusTip('Correct zero-order phasing.')
+        self.actnCorrectPh0.triggered.connect(self.correct_phase)"""
         # Save current results
         actnSaveResults = QAction(self._icon('icon_saveResults.png'), 'Save results to file', self)
         actnSaveResults.setStatusTip('Save all current results to file')

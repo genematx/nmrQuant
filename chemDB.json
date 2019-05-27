@@ -4711,5 +4711,798 @@
       6,
       2
     ]
+  },
+  "Ethyl": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        4.4,
+        4.6,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.18,
+        1.3800000000000001,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      2,
+      3
+    ],
+    "pairHH": [
+      [
+        0,
+        1
+      ]
+    ],
+    "jcplHH": [
+      [
+        3.2699999999999996,
+        5.27,
+        "H1-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Ethyl"
+  },
+  "Isobutyl": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        2,
+        2.2,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        4.2,
+        4.3999999999999995,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1,
+        1.2000000000000002,
+        "H3,4",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      2,
+      1,
+      6
+    ],
+    "pairHH": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ]
+    ],
+    "jcplHH": [
+      [
+        5.5,
+        7.5,
+        "H1-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        3.5,
+        5.5,
+        "H2-H3,4",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Isobutyl"
+  },
+  "Isopropyl PIPX": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        2.9,
+        3.1,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        0.9,
+        1.1,
+        "H2,3",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      1,
+      6
+    ],
+    "pairHH": [
+      [
+        0,
+        1
+      ]
+    ],
+    "jcplHH": [
+      [
+        0,
+        2,
+        "H1-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Isopropyl PIPX"
+  },
+  "DMSO": {
+    "chshC": [],
+    "multH": [
+      2
+    ],
+    "chshH": [
+      [
+        2.52,
+        2.72,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      3
+    ],
+    "pairHH": [],
+    "jcplHH": [],
+    "name": "DMSO"
+  },
+  "Isoamyl": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        4.340000000000001,
+        4.54,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.52,
+        1.7200000000000002,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.5999999999999999,
+        1.8,
+        "H3",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        0.81,
+        1.01,
+        "H4,5",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      2,
+      2,
+      1,
+      6
+    ],
+    "pairHH": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ]
+    ],
+    "jcplHH": [
+      [
+        5.81,
+        7.81,
+        "H1-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        6,
+        8,
+        "H2-H3",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        5.7,
+        7.7,
+        "H3-H4",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Isoamyl"
+  },
+  "Amyl": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        3.4099999999999997,
+        3.61,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.42,
+        1.62,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.27,
+        1.4700000000000002,
+        "H3",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.27,
+        1.4700000000000002,
+        "H4",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        0.85,
+        1.05,
+        "H5",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      2,
+      2,
+      2,
+      2,
+      3
+    ],
+    "pairHH": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ]
+    ],
+    "jcplHH": [
+      [
+        5.92,
+        7.92,
+        "H1-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        8.17,
+        10.17,
+        "H2-H3",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        7.59,
+        9.59,
+        "H3-H4",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        4.56,
+        6.56,
+        "H4-H5",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Amyl"
+  },
+  "Propanol": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        0.62,
+        0.82,
+        "H3",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.27,
+        1.4700000000000002,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        3.3,
+        3.5,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      3,
+      2,
+      2
+    ],
+    "pairHH": [
+      [
+        2,
+        1
+      ],
+      [
+        1,
+        0
+      ]
+    ],
+    "jcplHH": [
+      [
+        6.5,
+        8.5,
+        "H1-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        5.75,
+        7.75,
+        "H2-H3",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Propanol"
+  },
+  "2-metyl butyl": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        4.2700000000000005,
+        4.47,
+        "H1a",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        4.19,
+        4.39,
+        "H1b",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.3499999999999999,
+        1.55,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.7999999999999998,
+        2,
+        "H3a",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.1199999999999999,
+        1.32,
+        "H3b",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        0.8,
+        1,
+        "H4",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        0.75,
+        0.95,
+        "H5",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      3,
+      3
+    ],
+    "pairHH": [
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        4
+      ],
+      [
+        2,
+        5
+      ],
+      [
+        2,
+        6
+      ],
+      [
+        3,
+        4
+      ],
+      [
+        3,
+        5
+      ],
+      [
+        4,
+        5
+      ]
+    ],
+    "jcplHH": [
+      [
+        -11.53,
+        -9.53,
+        "H1a-H1b",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        4.92,
+        6.92,
+        "H1a-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        5.8,
+        7.8,
+        "H1b-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        7.5,
+        9.5,
+        "H2-H3a",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        7.5,
+        9.5,
+        "H2-H3b",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        -1,
+        1,
+        "H2-H4",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        5.6,
+        7.6,
+        "H2-H5",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        -11.5,
+        -9.5,
+        "H3a-H3b",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        5.5,
+        7.5,
+        "H3a-H4",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        6.4,
+        8.4,
+        "H3b-H4",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "2-metyl butyl"
+  },
+  "Isopropanol": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        4.4,
+        4.6,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.15,
+        1.35,
+        "H2,3",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      1,
+      6
+    ],
+    "pairHH": [
+      [
+        0,
+        1
+      ]
+    ],
+    "jcplHH": [
+      [
+        3.5,
+        5.5,
+        "H1-H2,3",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Isopropanol"
+  },
+  "Isopropyl": {
+    "chshC": [],
+    "multH": [
+      1
+    ],
+    "chshH": [
+      [
+        5.44,
+        5.64,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.22,
+        1.4200000000000002,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [],
+    "nSpinH": [
+      1,
+      6
+    ],
+    "pairHH": [
+      [
+        0,
+        1
+      ]
+    ],
+    "jcplHH": [
+      [
+        5.27,
+        7.27,
+        "H1-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Isopropyl"
   }
 }

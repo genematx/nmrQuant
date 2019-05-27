@@ -20,6 +20,7 @@ import scipy.signal
 from collections import OrderedDict, MutableMapping
 import os, time
 import marshal, inspect
+import nmrglue
 
 # Functions needed only for Matlab
 from operator import getitem
@@ -571,6 +572,7 @@ class Workspace():
 
         # add QD nodes to the tree based on the mode of the current workspace
         for node in T.items():
+            #if isinstance(node, chemNodeDB): node.dendrolize(self.HCmode)
             if isinstance(node, chemNodeDB) and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
 
         self._updateParameters()
@@ -718,9 +720,10 @@ class Workspace():
                   minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )     #, \
             #      #take_step=MyTakeStep())
         else:
-            res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B')
+            res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
+                  options={'eps':1e-05})       # Step-size for computing the Jacobian
             #print(res['message'])
-
+        print(res)
         return res
 
     def _sample(self, costFuncSmpl, bounds, initVals, nwalkers=None, nsteps=None, verbose=True):
@@ -1493,6 +1496,7 @@ class Datum():
         self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
         self.zF = None        # A matrix of component signals
         self.bF = None        # A baseline
+        self.zF_corr, self.bF_corr = None, None           # Corrections for the model matrix and the baseline
         self.sF, self.sT = None, None        # A lineshape kernel
         self.Gz = None
 
@@ -1806,10 +1810,9 @@ class Datum():
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
     #@profile
-    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, useComplex=True):
+    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField='Re'):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
         #funcType = 'TLS'
-        useComplex = False
 
         # 1. Update the settings
         if frqBlkIds is None:
@@ -1819,7 +1822,7 @@ class Datum():
         if funcType is None:
             funcType=config.SAMPL_funcType
         if funcType is 'TLS':
-            useComplex = False
+            numberField = 'Re'
 
         # 2. Compute a matrix of model signals Z, either in time or frequency domain
         inTimeDomain = (len(frqBlkIds) == 0)
@@ -1837,7 +1840,7 @@ class Datum():
 
             ## Define modelled and measured signals
             Z, y = zTw[0:,:], yTw[0:, :]
-            useComplex = True
+            numberField = 'Cx'
         else:
             # --------------------- FREQUENCY ----------------------------
             nw = len(self.sF) if self.sF is not None else 0         # Length of the adaptive lineshape window (in frequency domain)
@@ -1881,14 +1884,11 @@ class Datum():
             yFinRange *= phFinRange
 
             # Choose only components that are in the optimization range
-            """indxFreq = np.flatnonzero((self.f<=self.freqBlocks[i].max)*(self.f>=self.freqBlocks[i].min))     # Indices of frequency points in the range
-            nf = indxFreq.size
-            bF = lambda nf : np.hstack(( np.ones((nf, 1)), np.linspace(-1,1, nf).reshape(-1,1), np.linspace(-1,1,nf).reshape(-1,1)**2, 1j*np.ones((nf, 1)), 1j*np.linspace(-1,1, nf).reshape(-1,1), 1j*np.linspace(-1,1,nf).reshape(-1,1)**2 ))         # Define baseline in the frequency domain
-            """
+            # TODO!
 
             # Include the baseline
             bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
-            if not useComplex:
+            if numberField == 'Re':
                 bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
             #else: bslnPoly *= phFinRange
             nb = bslnPoly.shape[1]     # Total number of baseline terms
@@ -1917,7 +1917,8 @@ class Datum():
                 m0[i], S0[i,i] = spec.p1, spec.p2
             else:
                 ampl[i] = evalParsH[self.repRootNames[i]]['ampl'][0]
-                if useComplex: ampl[i] *= np.exp(1j*evalParsH[self.repRootNames[i]]['phase'][0])    # Set possibly different phases for each amplitude
+                if numberField == 'Cx':
+                    ampl[i] *= np.exp(1j*evalParsH[self.repRootNames[i]]['phase'][0])    # Set possibly different phases for each amplitude
         iS0 = np.linalg.inv(S0)
 
         # 3.2. Global phase shift
@@ -1931,12 +1932,15 @@ class Datum():
             Sc = np.linalg.inv(ZZ.real)
             theta = np.asscalar( 0.5*np.angle(Zy.T.dot(np.dot(Sc, Zy))) )
         else: theta = evalParsH['.']['theta'][0]
-        if not useComplex:
+        if numberField == 'Re':
+            # Use only the real part
             Z, y = Z.real, (y*np.exp(-1j*theta)).real
-        else:
-            pass
+        elif numberField == 'ReIm':
+            # Concatenate the real and imaginary parts
+            Z, y = np.vstack([Z.real, Z.imag]), np.vstack([(y*np.exp(-1j*theta)).real, (y*np.exp(-1j*theta)).imag])
+        elif numberField == 'Cx':
+            # Use the complex signals
             y = y*np.exp(-1j*theta)
-            #Z, y = np.vstack([Z.real, Z.imag]), np.vstack([(y*np.exp(-1j*theta)).real, (y*np.exp(-1j*theta)).imag])
 
         # 3.3. Variance of noise
         key = ('.', 'sigma2', 0)
@@ -1967,14 +1971,13 @@ class Datum():
             Gz=Gz, Gy=None, gamma=gamma, m0=m0, iS0=iS0, a_sigma2=a_sigma2, b_sigma2=b_sigma2, \
             funcType=funcType, robust=robust)
         diff_theta = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase estimated from the complex valued amplitudes
-        theta = (theta + diff_theta + np.pi) % (2 * np.pi) - np.pi
+        theta = (theta + diff_theta + np.pi) % (2 * np.pi) - np.pi             # Updated value of theta
         m_ampl = ampl*np.exp(-1j*diff_theta)
         #m_ampl[:na] = m_ampl[:na].real
         if m_ampl[:na].real.sum() < 0:      # Make sure that all amplitudes are positive
             m_ampl = - m_ampl
             theta = (theta + np.pi + np.pi) % (2 * np.pi) - np.pi
-            if not useComplex: evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
-        m_ampl[:na] = np.abs(m_ampl[:na])
+            if numberField == 'Re': evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
         gamma = meta['gamma']
         S_ampl = meta['ampl'][1]
         a_sigma2, b_sigma2 = meta['sigma2']
@@ -1983,14 +1986,15 @@ class Datum():
         mult = 1   # sum(m_ampl)     # Multiplier (can be used to output normalized amplitudes)
         for lbl, val in zip(self.repRootNames, m_ampl[:na]):
             evalParsH[lbl]['ampl'][0] = np.asscalar(np.abs(val)) / mult
-            evalParsH[lbl]['phase'][0] = np.asscalar(np.angle(val))
+            evalParsH[lbl]['phase'][0] = np.asscalar(np.angle(val)) if numberField == 'Cx' else 0.0
         evalParsH['.']['mult'][0] = mult
         evalParsH['.']['theta'][0] = theta            # Update the phase
         evalParsH['.']['sigma2'][0] = sigma2
         if gamma is not None: evalParsH['.']['gamma'][0] = gamma
 
         # Save and output the resulting signals zF and bF
-        self.zF, self.bF = None, None
+        self.zF, self.bF = None, None                     # Reset the signals
+        self.zF_corr, self.bF_corr = None, None           # Reset the corrections for the model matrix and the baseline
         if returnSignals:
             # Save the estimated signals
             if inTimeDomain:
@@ -2205,6 +2209,124 @@ class Datum():
 
         return result, meta
 
+    def correct_phase(self, evalParsH=None, frqBlkIds=None, mode='both', mw=1024, verbose=True):
+        """Phase correction by adjusting the residual.
+        Inputs:
+        mode - choose which phase parameters to adjust ('both', 'ph0', 'ph1')
+        """
+
+        if verbose:
+            print('Correcting the phasing parameters...')
+
+        # 1. Update the settings
+        if evalParsH is None:
+            evalParsH = self.crntParsH
+        if frqBlkIds is None:
+            frqBlkIds = self.steps[-1].frqBlkIds
+        indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
+        dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
+
+        # 2. Compute the model spectrum if necessary
+        if self.zF is None:
+            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, autoKeys=[], returnSignals=True)
+        self.zF_corr, self.bF_corr = None, None           # Reset the corrections for the model matrix and the baseline
+
+        # Find the model signal
+        ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames])
+        xF = self.zF[indxInRange, :].dot(ampl).reshape(-1,1) + self.bF[indxInRange]
+
+        # Phase the measured data according to the values in the parameters
+        theta = self.getCrntVal(key=('.', 'theta', 0))
+        tau = self.getCrntVal(key=('.', 'tau', 0))
+        ph = np.exp(-1j*2*np.pi * tau * (self.f[indxInRange]*self.c0-self.f0) - 1j*theta ).reshape((-1,1))   # The phasing term
+
+        # Define the cost function to optimize (in terms of ph0 and ph1)
+        costFuncPhase = lambda x : ph_cost(yF=self.yF[indxInRange]*ph, xF=xF, \
+                        ph0=x[0], ph1=x[1], mw=mw, \
+                        f=(self.f[indxInRange]*self.c0-self.f0)*dt )         # Frequency scale in fractions of the sampling frequrncy
+        if mode == 'both':
+            costFuncOpti = lambda x : costFuncPhase(x)[0]
+            bounds, initVals = ((-0.5, 0.5), (-0.5, 0.5)), [0.0, 0.0]
+        elif mode == 'ph0':
+            costFuncOpti = lambda x : costFuncPhase([x, 0.0])[0]
+            bounds, initVals = ((-0.5, 0.5), ), [0.0]
+        elif mode == 'ph1':
+            costFuncOpti = lambda x : costFuncPhase([0.0, x])[0]
+            bounds, initVals = ((-0.5, 0.5), ), [0.0]
+
+        # Call the optimization routine
+        res = self._optimize(costFuncOpti, bounds, initVals, nhop=0, verbose=verbose)
+
+        # Interpret the results
+        if mode == 'both':
+            ph0, ph1 = res.x
+        elif mode == 'ph0':
+            ph0, ph1 = res.x[0], 0.0
+        elif mode == 'ph1':
+            ph0, ph1 = 0.0, res.x[0]
+
+        # Update and save the phasing parameters
+        self.setCrntVal(key=('.', 'theta', 0), val=theta+ph0)
+        self.setCrntVal(key=('.', 'tau', 0), val=tau+ph1*dt/(2*np.pi))
+
+        #
+        if verbose:
+            print('Found values: ph0 = {:.4f}, ph1 = {:.4f}'.format(ph0, ph1))
+
+    def correct_residual(self, evalParsH=None, frqBlkIds=None, mw=1024, verbose=True):
+        """Correction of the model signals and the baseline to make the residual noise-like."""
+
+        if verbose:
+            print('Correcting the baseline and residual.')
+
+        # 1. Update the settings
+        if evalParsH is None:
+            evalParsH = self.crntParsH
+        if frqBlkIds is None:
+            frqBlkIds = self.steps[-1].frqBlkIds
+        indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
+        dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
+
+        # 2. Compute the model spectrum if necessary
+        if self.zF is None or self.bF is None:
+            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, autoKeys=[], returnSignals=True)
+
+        # Find the model signal
+        ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames])
+        xF = self.zF[indxInRange, :].dot(ampl).reshape(-1,1) + self.bF[indxInRange]
+
+        # Phase the measured data according to the values in the parameters
+        theta = self.getCrntVal(key=('.', 'theta', 0))
+        tau = self.getCrntVal(key=('.', 'tau', 0))
+        ph = np.exp(-1j*2*np.pi * tau * (self.f[indxInRange]*self.c0-self.f0) - 1j*theta ).reshape((-1,1))   # The phasing term
+        yFph=self.yF[indxInRange]*ph
+
+        # Evaluate the phasing cost function to find the residual and baseline
+        result, yFph, res, bln = ph_cost(yFph, xF, mw=mw)
+
+        # Find the corrected amplitudes
+        zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0)           # Values of the first time-domain points for each model signal
+        zF0 = np.sum(self.zF[indxInRange, :] - zT0.ravel()/(2*np.sqrt(len(self.f))), axis=0).real / np.sqrt(len(self.f))     # What the (restricted) models sum to; should be 1/2*zT0 if the entire frequency range
+
+        bF0 = ampl.reshape(1,-1)*zT0.reshape(1,-1)/(2*np.sqrt(len(self.f)))             # Zero-order baselines
+        Za = self.zF[indxInRange, :] * ampl.reshape(1,-1)
+        posZa = Za - bF0      # Remove the constant baseline from the model signals
+        absZa = np.abs(Za)**2
+        C = absZa/np.sum(absZa, axis=1).reshape(-1,1)                     # Weights for redistributing the residual
+
+        posZa_corr = posZa + res.real*C           # Corrected models without the constant baselines
+        ampl_corr = np.sum(posZa_corr.real, axis=0)/zF0.real.ravel()
+        ampl_corr *= np.nanmean(ampl.ravel()/np.sum(posZa.real, axis=0))     # Corrected amplitudes. Introduces a scaling factor to make the sum of Za approximately equal the intensities
+        Za_corr = self.zF[indxInRange, :] * ampl_corr.reshape(1,-1)
+
+        # Save the corrections and amplitudes
+        for name, val in zip(self.repRootNames, ampl_corr):
+            self.setCrntVal(key=(name, 'ampl', 0), val=val)
+        self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)
+        self.zF_corr[indxInRange, :] = (posZa_corr - Za_corr)               # Additive correction for the model signals
+        self.zF_corr[np.ix_(indxInRange, ampl_corr.nonzero()[0])] /= ampl_corr[ampl_corr.nonzero()]       # Scale by the amplitudes. Only those where ampl_corr != 0
+        self.bF_corr[indxInRange] = bln + np.sum(bF0)                     # Additive correction for the baseline
+
     def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
 
@@ -2276,72 +2398,6 @@ class Datum():
         self.smplDistF[key] = smplSpec_from_data(result[key])
 
         return(result)
-
-    def correct_residual(self, frqBlkIds=None, marginalize=True, customPriors=None):
-        # Corrects the model signals and the associated amplitudes by taking into account the residual in the Re channel (with denoising).
-        savedSignalsExist = True
-        if savedSignalsExist:
-            # Need to (re-)evaluate the model if it has not been done before
-            pass
-
-        if frqBlkIds is None:
-            frqBlkIds = self.steps[-1].frqBlkIds
-
-        # Phase the input signal
-        indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
-        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape((-1,1))
-        yFphR = (self.yF * ph).real
-
-        # 1. Compute and smooth the residual
-        ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(-1,1)
-        xFR = (self.zF.dot(ampl).reshape(-1,1) + self.bF).real
-        rFR = yFphR - xFR      # The residual in the fitting range
-        sF = scipy.signal.wiener(rFR.real.ravel())[indxInRange].reshape(-1,1)   # + 1j*scipy.signal.wiener(rF.imag.ravel()).reshape(-1,1)
-
-        # 3. Define the corrected spectra
-        zT0, repRootNames = getFID(self.T, [0.0], self.c0, self.f0, self.crntParsH, tau=0.0)            # Values of FID at t=0.0 (total integrals)
-        na = len(repRootNames)    # Number of model signals, and hence the resulting amplitudes
-        bslnConst = zT0.real/(2*np.sqrt(len(self.f)))
-        zFnull = self.zF[indxInRange].real - bslnConst           # Remove the constant baselines
-        Zcorr = zFnull + (sF / ampl.T) * np.abs(zFnull**2)/(np.abs(zFnull**2)).sum(axis=1, keepdims=True) # Correction terms
-
-        # Scale to keep the peaks' areas
-        s = np.cumsum(zFnull.real, axis=0) / (bslnConst * len(self.f))    # Normalize by the total sum of the spectrum, zFnull.sum(axis = 0)
-        for i in range(na):
-            indx = np.where((0.01 < s[:, i]) & (s[:, i] < 0.99))[0]
-            if len(indx)>0:
-                Zcorr[:, i] *= zFnull[indx, i].real.sum() / np.abs(Zcorr[indx, i].real).sum()
-
-        # Include the baseline
-        bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
-        bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]    # Keep only real-valued baseline terms
-        nb = bslnPoly.shape[1]     # Total number of baseline terms
-        nz = na + nb     # Number of samples and (model signals + baselines)
-
-        # Determine, which amplitudes can be integrated out; select all aplitudes that are not Gaussianly distributed.
-        m0 = np.zeros((nz, 1))         # Prior amplitudes
-        S0 = np.where(np.identity(nz)>0, np.inf, 0)           # Prior covariance matrix of amplitudes (vague priors)
-        for i in range(na):
-            spec = self.getPrior(key=(self.repRootNames[i], 'ampl', 0), customPriors=customPriors)
-            if spec.distr != 'Gaussian' or not marginalize:
-                # Set a Gaussian (pseudo-)prior with zero variance
-                m0[i] = evalParsH[self.repRootNames[i]]['ampl'][0]
-                S0[i,i] = 0.0
-            else:
-                # Set a Gaussian prior with supplied mean and variance
-                m0[i] = spec.p1
-                S0[i,i] = spec.p2
-
-        # Find new amplitudes
-        mc, Sc, Sr, Q = leastSquares(np.hstack((Zcorr, bslnPoly)), yFphR[indxInRange], m0, S0, Gy=None, indxPositive=list(range(na)))
-
-        # Save the corrected values of amplitudes and the signals
-        self.zF[indxInRange, :] = Zcorr + bslnConst
-        self.bF[indxInRange] = bslnPoly.dot(mc[na:]) - bslnConst.dot(mc[:na])
-        for lbl, val in zip(self.repRootNames, np.abs(mc[:na])):
-            self.setCrntVal((lbl, 'ampl', 0), val)       # .crntParsH[lbl]['ampl'][0] = np.asscalar(val)
-
-        return np.abs(mc[:na])
 
     def sweep(self, key, lims=None, npts=50, reoptimize=False, frqBlkIds=None, evaluatePriors=False):
         # Evaluates the posterior and computes the amplitudes while sweeping the parameter parKey in the range lims
@@ -2487,13 +2543,14 @@ class Datum():
         """Plots the dataset."""
 
         # Phase the data
-        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape((-1,1))
+        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
         yFph = self.yF * ph
         if self.zF is not None:
-            zF = self.zF * np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(1, -1)
+            ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(1, -1)
+            zF = self.zF * ampl if self.zF_corr is None else (self.zF + self.zF_corr)*ampl
             xF = zF.sum(1).reshape(-1,1)
             if self.bF is not None:
-                bF = self.bF
+                bF = self.bF if self.bF_corr is None else self.bF + self.bF_corr
                 xF += bF
 
         inRange, outRange = splitFreq([self.freqBlocks[blk] for blk in self.steps[0].frqBlkIds], f=self.f)
@@ -2863,6 +2920,21 @@ def whitsm(y, lmda=5.0):
 
     return z[0]
 
+def make_causal(xF):
+    """Returns the causal part of a frequency domain data xF."""
+    # Upsample the spectrum
+    xF = scipy.signal.resample_poly(xF, up=2, down=1)
+
+    # Compute the Hilbert transform
+    xFr_h = scipy.signal.hilbert(xF.real, axis=0).conj()
+    xFi_h = 1j*(scipy.signal.hilbert(xF.imag, axis=0).conj())
+    xF_h = xFi_h.real + 1j*xFr_h.imag
+
+    # Compute the time-domain signal and keep only its first half
+    xTc = np.fft.ifft(np.fft.ifftshift(xF_h, axes=0), axis=0)[:len(xF_h)/2]
+    xFc = np.fft.fftshift(np.fft.fft(xTc, axis=0), axes=0)
+    return xTc, xFc
+
 #@profile
 def leastSquares(Z, y, m0=None, S0=None, Gy=None, lockedPhase=True, indxPositive=None, robust=True):
     """Solves a phased-constrained complex-valued least-squares problem, y=Zx for x; nb - number of baseline terms (columns in the end of Z). theta=None - the phase will be determined from the data. Gy - covariance matrix of noise (or the diagonal vecotr of that matrix)"""
@@ -2983,97 +3055,104 @@ def next_pow_of_2(x):
     # Returns the smallest power of 2 greater than x
     return 0 if x == 0 else 2**(x - 1).bit_length()
 
-def wden(x):
-    """Wavelet denoising of a 1D signal."""
-    y = x
-    return y
+# Denoising function
+def wden(x_in, wname = 'sym8', tptr='sqtwolog', sorh='hard', scal='mln', wsize=15):
+    """Wavelet denoising of a 1D signal. Inspired by the Matlab's wden function."""
+    # tptr is the threshold selection rule specified as a string. Supported options for TPTR are:
+    #      TODO: 'modwtsqtwolog' uses the maximal overlap discrete wavelet transform (MODWT) to denoise the signal with Donoho and Johnstone's universal threshold and level-dependent thresholding.
+    #      'rigrsure' uses the principle of Stein's Unbiased Risk.
+    #      'heursure' is a heuristic variant of Stein's Unbiased Risk.
+    #      'sqtwolog' uses Donoho and Johnstone's universal threshold with the DWT.
+    #      'minimaxi' uses minimax thresholding.
+    # sorh specifies soft or hard thresholding with 's' or 'h'.
+    # scal defines the type of threshold rescaling:
+    #      'one' for no rescaling.
+    #      'sln' for rescaling using a noise estimate based on the first-level coefficients.
+    #      'mln' for rescaling using level-dependent estimates of the noise. This is the only option supported for MODWT denoising.
+    # wsize = size of the Wiener filter; 0 for no filtering
+
+    # 1. Multiscale wavelet decomposition
+    wC = pywt.wavedec(x_in, wname, axis=0)
+    nlev = len(wC)-1    # Number of decomposition levels
+    nwcf = sum([len(c) for c in wC])          # Total number of wavelet coefficients
+
+    # 2. Estimate standard deviation of noise on each level of the decomposition
+    if scal == 'one':
+        scl = [1.] * nlev
+    elif scal == 'sln':
+        scl = [np.median(np.abs(wC[-1]))/0.6745] * nlev           # Use the finest scale coefficients
+    elif scal == 'mln':
+        scl = [np.median(np.abs(c))/0.6745 for c in wC[1:]]       # See wnoisest in Matlab
+    else: raise Exception('Unsupported value of parameter scal.')
+
+    # 3. Detrmine the size of the threshold for each coefficient level
+    if tptr == 'modwtsqtwolog':
+        raise NotImplementedError('Not yet implemented for tptr = \'modwtsqtwolog\'.')
+    elif tptr == 'rigrsure':
+        """sx = sort(abs(x),1);
+        sx2 = sx.^2;
+        N1 = repmat((n-2*(1:n))',1,m);
+        N2 = repmat((n-1:-1:0)',1,m);
+        CS1 = cumsum(sx2,1);
+        risks = (N1+CS1+N2.*sx2)./n;
+        [~,best] = min(risks,[],1);
+        % thr will be row vector
+        thr = sx(best);"""
+        pass
+    elif tptr == 'heursure':
+        hthr = np.sqrt(2*np.log(nwcf))
+        eta = np.sum(np.abs(np.concatenate(wC))**2) / nwcf - 1
+        crit = np.log2(nwcf)**1.5 / np.sqrt(nwcf)
+        #thr = thselect(x,'rigrsure');
+        #thr(thr > hthr) = hthr;
+        #thr(eta < crit) = hthr;
+        pass
+    elif tptr == 'minimaxi':
+        thr = [0.0 if nwcf <= 32 else 0.3936+0.1829*np.log2(nwcf)] * nlev
+    elif tptr == 'sqtwolog':
+        thr = [np.sqrt(2*np.log(nwcf))] * nlev
+    else: raise Exception('Unsupported value of parameter tptr.')
+
+    # 5. Apply the thresholding (hard or soft)
+    wC_thr = [wC[0]] + [pywt.threshold(c, t*s, sorh) for c, t, s in zip(wC[1:], thr, scl)]
+
+    # 6. Wavelet reconstruction
+    x_out = pywt.waverec(wC_thr, wname, axis=0)
+
+    x_out = x_out[:len(x_in)]
+
+    # 7. Apply the Wiener filter to the difference
+    if wsize > 0:
+        diff = x_in - x_out
+        diff = scipy.signal.wiener(diff.ravel(), mysize=wsize).reshape(x_in.shape)
+        x_out += diff
+
+    return x_out
+
+# Phasing cost
+def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512):
+    """Calculate the cost function for phasing the data.
+    yF - measured (unphased) spectrum
+    xF - fitted model
+    ph0, ph1 - zero- and first-order phasing terms
+    mw - size of the median filter
+    f - frequency scale in the fractions of angular frequency (i.e. f = [-1/2...(n-2)/2n] for even number of samples n and f = [-(n-1)/2n...(n-1)/2n] for odd n). If yF and xF contain non-contiguous frequency ranges, f should be specified explicitely.
     """
 
-        for k = 1:n
-        flk = first(k):last(k);
-        if strcmp(tptr,'sqtwolog') || strcmp(tptr,'minimaxi')
-            thr = thselect(c,tptr);
-        else
-            if s(k) < sqrt(eps) * max(c(flk))
-                thr = 0;
-            else
-                thr = thselect(c(flk)/s(k),tptr);
-            end
-        end                                     % threshold.
-        thrs(k)      = thr * s(k);                  % rescaled threshold.
-        cxd(flk) = wthresh(c(flk),sorh,thrs(k));    % thresholding or shrinking.
-        end
+    # Define the frequency scale if it's not given
+    if f is None:
+        f = np.fft.fftshift(np.fft.fftfreq(len(yF), 1))
 
+    # Compute the phasing term
+    #### ph = np.exp(-1j*2*np.pi * tau * f_Hz - 1j*theta ).reshape((-1,1))   # The phasing term
+    ph = np.exp(-1j* ph1 * f - 1j*ph0 ).reshape((-1,1))   # The phasing term
+    yFph = yF * ph
 
+    # Find and denoise the residual spectrum
+    den = wden(yFph.real - xF.real, tptr='sqtwolog', scal='mln', wsize=25)
 
-    function thr = thselect(x,tptr)
-    %THSELECT Threshold selection for de-noising.
-    %   THR = THSELECT(X,TPTR) returns threshold X-adapted value
-    %   using selection rule defined by string TPTR.
-    %
-    %   Available selection rules are:
-    %   TPTR = 'rigrsure', adaptive threshold selection using
-    %       principle of Stein's Unbiased Risk Estimate.
-    %   TPTR = 'heursure', heuristic variant of the first option.
-    %   TPTR = 'sqtwolog', threshold is sqrt(2*log(length(X))).
-    %   TPTR = 'minimaxi', minimax thresholding.
-    %
-    %   Threshold selection rules are based on the underlying
-    %   model y = f(t) + e where e is a white noise N(0,1).
-    %   Dealing with unscaled or nonwhite noise can be handled
-    %   using rescaling output threshold THR (see SCAL parameter
-    %   in WDEN).
-    %
-    %   See also WDEN.
+    # Remove the baseline with median filter
+    res = nmrglue.process.proc_bl.med(den.ravel(), mw).reshape(-1,1)
+    bln = (den - res).reshape(-1,1)
 
-    %   M. Misiti, Y. Misiti, G. Oppenheim, J.M. Poggi 12-Mar-96.
-    %   Last Revision: 20-Dec-2010.
-    %   Copyright 1995-2010 The MathWorks, Inc.
-
-    validateattributes(x, {'numeric'}, {'2d'}, 'THSELECT', 'X')
-
-    if isrow(x)
-        x = x(:);
-    end
-    [n,m] = size(x);
-
-    switch tptr
-        case 'rigrsure'
-            sx = sort(abs(x),1);
-            sx2 = sx.^2;
-            N1 = repmat((n-2*(1:n))',1,m);
-            N2 = repmat((n-1:-1:0)',1,m);
-            CS1 = cumsum(sx2,1);
-            risks = (N1+CS1+N2.*sx2)./n;
-            [~,best] = min(risks,[],1);
-            % thr will be row vector
-            thr = sx(best);
-
-        case 'heursure'
-            %%
-            hthr = (2*log(n)).^0.5;
-            eta = sum(abs(x).^2-n,1)./n;
-            crit = (log(n)/log(2))^(1.5)/(n.^0.5);
-            thr = thselect(x,'rigrsure');
-            thr(thr > hthr) = hthr;
-            thr(eta < crit) = hthr;
-
-        case 'sqtwolog'
-            thr = (2*log(n)).^0.5;
-            thr = repelem(thr,size(x,2));
-
-        case 'minimaxi'
-            if n <= 32
-                thr = repelem(0, m);
-            else
-                t = 0.3936 + 0.1829*(log(n)/log(2));
-                thr = repelem(t,m);
-            end
-
-        otherwise
-            error(message('Wavelet:FunctionArgVal:Invalid_ArgVal'))
-    end
-
-
-
-    """
+    return np.linalg.norm(bln - np.mean(bln), 2), yFph, res, bln
