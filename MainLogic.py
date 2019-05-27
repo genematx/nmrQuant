@@ -572,6 +572,7 @@ class Workspace():
 
         # add QD nodes to the tree based on the mode of the current workspace
         for node in T.items():
+            #if isinstance(node, chemNodeDB): node.dendrolize(self.HCmode)
             if isinstance(node, chemNodeDB) and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
 
         self._updateParameters()
@@ -719,7 +720,8 @@ class Workspace():
                   minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )     #, \
             #      #take_step=MyTakeStep())
         else:
-            res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B')
+            res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
+                  options={'eps':1e-05})       # Step-size for computing the Jacobian
             #print(res['message'])
 
         return res
@@ -2304,6 +2306,8 @@ class Datum():
 
         # Find the corrected amplitudes
         zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0)           # Values of the first time-domain points for each model signal
+        zF0 = np.sum(self.zF[indxInRange, :] - zT0.ravel()/(2*np.sqrt(len(self.f))), axis=0).real / np.sqrt(len(self.f))     # What the (restricted) models sum to; should be 1/2*zT0 if the entire frequency range
+
         bF0 = ampl.reshape(1,-1)*zT0.reshape(1,-1)/(2*np.sqrt(len(self.f)))             # Zero-order baselines
         Za = self.zF[indxInRange, :] * ampl.reshape(1,-1)
         posZa = Za - bF0      # Remove the constant baseline from the model signals
@@ -2311,14 +2315,16 @@ class Datum():
         C = absZa/np.sum(absZa, axis=1).reshape(-1,1)                     # Weights for redistributing the residual
 
         posZa_corr = posZa + res.real*C           # Corrected models without the constant baselines
-        ampl_corr = np.sum(posZa_corr.real, axis=0)/zT0.real.ravel() * np.mean(zT0.real.ravel()*ampl.ravel()/np.sum(posZa.real, axis=0))     # Scaling factor to make the sum of Za approximately equal the amplitudes
+        ampl_corr = np.sum(posZa_corr.real, axis=0)/zF0.real.ravel()
+        ampl_corr *= np.nanmean(ampl.ravel()/np.sum(posZa.real, axis=0))     # Corrected amplitudes. Introduces a scaling factor to make the sum of Za approximately equal the intensities
         Za_corr = self.zF[indxInRange, :] * ampl_corr.reshape(1,-1)
 
         # Save the corrections and amplitudes
         for name, val in zip(self.repRootNames, ampl_corr):
             self.setCrntVal(key=(name, 'ampl', 0), val=val)
         self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)
-        self.zF_corr[indxInRange, :] = (posZa_corr - Za_corr) / ampl_corr               # Additive correction for the model signals
+        self.zF_corr[indxInRange, :] = (posZa_corr - Za_corr)               # Additive correction for the model signals
+        self.zF_corr[np.ix_(indxInRange, ampl_corr.nonzero()[0])] /= ampl_corr[ampl_corr.nonzero()]       # Scale by the amplitudes. Only those where ampl_corr != 0
         self.bF_corr[indxInRange] = bln + np.sum(bF0)                     # Additive correction for the baseline
 
     def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):

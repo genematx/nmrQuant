@@ -606,11 +606,14 @@ def QDsimsGrpd2(H, T):
     #p = range(max( n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) ))
     #p = p[range(max( 0*n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) ))]
 
-    #p = p[0:n_spin*(2**(n_spin-1))]    # Keep only peaks corresponding to single transitions (assuming they are the largest)
-    #p = p[(intn[p] > 0.00000001)]                # Keep only the largest peaks
+    p = p[0:n_spin*(2**(n_spin-1))]    # Keep only peaks corresponding to single transitions (assuming they are the largest)
+    p = p[(intn[p] > 0.00000001)]                # Keep only the largest peaks
     #print(n_spin, len(p))
-    p_max = np.argmin( np.diff(np.log(intn[p]))[:2*n_spin*(2**(n_spin-1))] ) + 1     # All coefficients before the sharpest drop in their intensity but at most 2*n_spin*(2**(n_spin-1))
+
+    """p_max = np.argmin( np.diff(np.log(intn[p]))[:2*n_spin*(2**(n_spin-1))] ) + 1     # All coefficients before the sharpest drop in their intensity but at most 2*n_spin*(2**(n_spin-1))
+    #p_max=1000
     p = p[:p_max]
+    print(p_max)"""
 
     omega = omega[p]
     intn = intn[p]
@@ -949,7 +952,7 @@ class treeNode:
             output += "\t"*depth + "|------"
 
         output += str(self.name)
-        if self.alias != '' : output += self.alias
+        if self.alias != '' : output += ' (' + self.alias + ')'
         output += '\n'
 
         depth += 1
@@ -1241,7 +1244,7 @@ class chemNodeQD(chemNode):
 
                 # 9. Add the transitions to the arrays of their closest resonances
                 freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
-                indMin = np.argmin(abs(omega.reshape(-1,1) - chshQD.reshape(1,-1)), axis = 1)    # Indices of the closest chem shift in freqArr for each transition
+                indMin = np.argmin(abs(omega.reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
                 for i in range(len(chshQD)):
                     indx = np.where(indMin == i)
                     freqQPeaks[i] = omega[indx]
@@ -1400,6 +1403,7 @@ def evalTreeT(tree, t, c0, pars=None):
     # 1. Evaluate all nodes (computes self-responses s(t))
     for node in tree.items():
         node.evalTime(t, c0, **pars[node.name])
+        #print(node.sT)
 
     # 2. Determine the root reported nodes (determine the reported subtrees)
     repRoots = [v for v in tree.repRoots()]

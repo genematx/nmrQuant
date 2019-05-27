@@ -3499,13 +3499,17 @@ class MainView(QMainWindow):
         self.actnFitAllSteps.setStatusTip('Fit all steps for this file')
         self.actnFitAllSteps.triggered.connect(lambda _ : self.fitAllSteps(selectedFiles = None))
         # Fit all files action
-        actnStopFitting = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
-        actnStopFitting.setStatusTip('Stop fitting')
-        actnStopFitting.triggered.connect(self.stopFitting)
-        # Stop fitting action
         self.actnFitAllFiles = QAction(self._icon('icon_fitAllFiles.png'), 'Fit all files', self)
         self.actnFitAllFiles.setStatusTip('Fit all steps for this file')
         self.actnFitAllFiles.triggered.connect(self.fitAllFiles)
+        # Stop fitting action
+        actnStopFitting = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
+        actnStopFitting.setStatusTip('Stop fitting')
+        actnStopFitting.triggered.connect(self.stopFitting)
+        # Phase correction actions
+        """self.actnCorrectPh0 = QAction(self._icon('icon_correctPh0.png'), 'Correct ph0', self)
+        self.actnCorrectPh0.setStatusTip('Correct zero-order phasing.')
+        self.actnCorrectPh0.triggered.connect(self.correct_phase)"""
         # Save current results
         actnSaveResults = QAction(self._icon('icon_saveResults.png'), 'Save results to file', self)
         actnSaveResults.setStatusTip('Save all current results to file')
