@@ -2209,7 +2209,7 @@ class Datum():
 
         return result, meta
 
-    def correct_phase(self, evalParsH=None, frqBlkIds=None, mode='both', mw=1024, verbose=True):
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, mode='both', mw=512, verbose=True):
         """Phase correction by adjusting the residual.
         Inputs:
         mode - choose which phase parameters to adjust ('both', 'ph0', 'ph1')
@@ -2273,7 +2273,7 @@ class Datum():
         if verbose:
             print('Found values: ph0 = {:.4f}, ph1 = {:.4f}'.format(ph0, ph1))
 
-    def correct_residual(self, evalParsH=None, frqBlkIds=None, mw=1024, verbose=True):
+    def adjust_residual(self, evalParsH=None, frqBlkIds=None, mw=2048, verbose=True):
         """Correction of the model signals and the baseline to make the residual noise-like."""
 
         if verbose:

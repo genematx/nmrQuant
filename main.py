@@ -1251,11 +1251,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.datum = datum             # A pointer to the workspace
         self.actvStepIndx = -1         # Currently selected active step id
         self._indxRoot = QtCore.QModelIndex()    # "Invalid" index to point to the root of the display
-        self._buttons = viewNode("_buttons", alias=None)
-        self._ranges = viewNode("_ranges", alias="")
         self._parsSigma2 = viewNode(('.', 'sigma2', 0), alias='Variance of noise, s2', nodeType='param')
-        self._parsPH0 = viewNode(('.', 'theta', 0), alias='Zero-order phase (PH0)', nodeType='param')
-        self._parsPH1 = viewNode(('.', 'tau', 0), alias='Acquisition delay (PH1)', nodeType='param')
+        self._parsPH0 = viewNode(('.', 'theta', 0), alias=None, nodeType='param')         # alias='Zero-order phase (PH0)'
+        self._parsPH1 = viewNode(('.', 'tau', 0), alias=None, nodeType='param')       # alias='Acquisition delay (PH1)'
         self._ratioTLS = viewNode(('.', 'gamma', 0), alias='TLS ratio', nodeType='param')
         self._lshape = viewNode('_lshape', alias='Lineshape correction', nodeType='lshape')
 
@@ -1379,10 +1377,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
     def index(self, row, column, prnt=QtCore.QModelIndex()):
         """Should return a QModelIndex that corresponds to the given row, clmn and parent node. INPUTS: int, int, QModelIndex. OUTPUT: QModelIndex"""
         if prnt == self._indxRoot:         # Parent is the root
-            #if row == 0:
-            #    return self.createIndex(row,column,self._buttons)
-            #elif row == 1:
-            #    return self.createIndex(row,column,self._ranges)
             if row == 0:
                 i = self.createIndex(row, column, self.TP)
                 return i
@@ -1406,8 +1400,16 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
     def indexByKey(self, key):
         """Searches for the element specified by its key in the TP tree and returns its index."""
-        item = self.TP[key]
-        row = item.siblID()
+        try:
+            item = self.TP[key]
+            row = item.siblID()
+        except KeyError:
+            if key == ('.', 'theta', 0):
+                item = self._parsPH0
+                row = 1
+            elif key == ('.', 'tau', 0):
+                item = self._parsPH1
+                row = 2
         column = 0
         return self.createIndex(row, column, item)
 
@@ -1843,8 +1845,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 class ChemTreeView(QTreeView):
     """Model/View based class to display chemical trees."""
 
-    changedParsList = pyqtSignal(int)        # Signalizes to update the parameters list widget and carries the index of the active step
-    changedSelected = pyqtSignal(object)     # Supports signals with any data types
+    changedParsList = pyqtSignal(int)              # Signalizes to update the parameters list widget and carries the index of the active step
+    changedSelected = pyqtSignal(object)           # Supports signals with any data types
+    requestPhaseAdjustment = pyqtSignal(object)    # Requests the phase correction; object = 'ph0', 'ph1', or 'both'
 
     class ParsSpecDialog(QDialog):
         """A dialog to set specification for a parameter."""
@@ -1963,6 +1966,25 @@ class ChemTreeView(QTreeView):
                     self.chckSeries.isChecked(),\
                     self.chckReference.isChecked()
 
+    class LabelButton(QWidget):
+        """A widget consisting of a label and a small button used to display phase correction in the tree"""
+
+        clicked = pyqtSignal()
+
+        def __init__(self, caption, parent = None):
+            super().__init__(parent)
+
+            layout = QHBoxLayout()
+            label = QLabel(caption)
+            #label.setMaximumSize(250, 18)
+            button = QPushButton('B')
+            button.setMaximumSize(18, 18)
+            button.clicked.connect(lambda : self.clicked.emit())            # Emit the clicked signal
+            layout.addWidget(label, Qt.AlignLeft|Qt.AlignBottom)
+            layout.addWidget(button, Qt.AlignRight|Qt.AlignVCenter)
+            layout.setContentsMargins(3,0,2,0)     # void QLayout::setContentsMargins(int left, int top, int right, int bottom)
+            self.setLayout(layout)
+
     def __init__(self, parent=None):
         super().__init__(parent)    # Initialize a QTreeWidget
 
@@ -2036,6 +2058,13 @@ class ChemTreeView(QTreeView):
 
         self.hideExcessiveRows()
         self._copy_buffer.clear()
+
+        # Create buttons for phase correction
+        labelWidgetPH0, labelWidgetPH1 = self.LabelButton('Zero-order phase, PH0'), self.LabelButton('First-order phase, PH1')
+        labelWidgetPH0.clicked.connect(lambda : self.requestPhaseAdjustment.emit('ph0'))
+        labelWidgetPH1.clicked.connect(lambda : self.requestPhaseAdjustment.emit('ph1'))
+        self.setIndexWidget(self.model().indexByKey(key=('.', 'theta', 0)), labelWidgetPH0)
+        self.setIndexWidget(self.model().indexByKey(key=('.', 'tau', 0)), labelWidgetPH1)
 
     def onSectionCountChanged(self, oldCount, newCount):
         """Called by the model after the number of columns is changed."""
@@ -3308,7 +3337,8 @@ class MainView(QMainWindow):
         self.treeModel = ChemTreeModel(self.wsp)
         self.treeView.setModel(self.treeModel)
         self.treeModel.crntChanged.connect(lambda:self.tryStep(indx = self.treeModel.actvStepIndx))       # If current values are changed by the user
-        self.treeView.changedSelected.connect(self.selectStems)             # If new parameter is selected by the user
+        self.treeView.changedSelected.connect(self.selectStems)                  # If new parameter is selected by the user
+        self.treeView.requestPhaseAdjustment.connect(lambda mode : self.adjustPhase(mode, indx = self.treeModel.actvStepIndx))     # Adjust the phase
 
         # create a text edit widget to choose the optimization sequence
         self.stepsEdit = QPlainTextEdit('Please enter a sequence of steps to fit. ALL steps will be fitted consecutively by default.')  # , e.g.: 1, A, 5, (3, 4, A, 1), 2
@@ -3936,6 +3966,16 @@ class MainView(QMainWindow):
         with open('_results.txt', 'w') as fout:
             print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
         #print(tabulate.tabulate(tab[self._crnt.data.index(self._crnt)], headers=head))    # ... and show on the screen
+
+    def adjustPhase(self, mode='ph0', indx=None):
+        """Adjusts the phase according to the fitted model to optimize the residual signal."""
+        if indx is None: indx = -1        # Fit the active step by default
+        step = self._crnt.steps[indx]
+        print(mode, indx)
+        self._crnt.adjust_phase(mode=mode)
+        self._crnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=set([key for key in step.autoKeys if key != ('.', 'theta', 0)]), returnSignals=True)
+        self.plotCurrent()
+        self.treeModel.notifyDataChanged()
 
 # ------------------------ Parameter list --------------------------------------
     def updateParsList(self, indxStep = None):
