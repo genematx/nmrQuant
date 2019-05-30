@@ -1251,7 +1251,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.datum = datum             # A pointer to the workspace
         self.actvStepIndx = -1         # Currently selected active step id
         self._indxRoot = QtCore.QModelIndex()    # "Invalid" index to point to the root of the display
-        self._parsSigma2 = viewNode(('.', 'sigma2', 0), alias='Variance of noise, s2', nodeType='param')
+        self._parsSigma2 = viewNode(('.', 'sigma2', 0), alias=None, nodeType='param')       # alias='Variance of noise, s2'
         self._parsPH0 = viewNode(('.', 'theta', 0), alias=None, nodeType='param')         # alias='Zero-order phase (PH0)'
         self._parsPH1 = viewNode(('.', 'tau', 0), alias=None, nodeType='param')       # alias='Acquisition delay (PH1)'
         self._ratioTLS = viewNode(('.', 'gamma', 0), alias='TLS ratio', nodeType='param')
@@ -1410,6 +1410,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             elif key == ('.', 'tau', 0):
                 item = self._parsPH1
                 row = 2
+            elif key == ('.', 'sigma2', 0):
+                item = self._parsSigma2
+                row = 3
         column = 0
         return self.createIndex(row, column, item)
 
@@ -1847,7 +1850,7 @@ class ChemTreeView(QTreeView):
 
     changedParsList = pyqtSignal(int)              # Signalizes to update the parameters list widget and carries the index of the active step
     changedSelected = pyqtSignal(object)           # Supports signals with any data types
-    requestPhaseAdjustment = pyqtSignal(object)    # Requests the phase correction; object = 'ph0', 'ph1', or 'both'
+    requestAdjustment = pyqtSignal(object)    # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhA'
 
     class ParsSpecDialog(QDialog):
         """A dialog to set specification for a parameter."""
@@ -1966,7 +1969,7 @@ class ChemTreeView(QTreeView):
                     self.chckSeries.isChecked(),\
                     self.chckReference.isChecked()
 
-    class LabelButton(QWidget):
+    class LabelAndButton(QWidget):
         """A widget consisting of a label and a small button used to display phase correction in the tree"""
 
         clicked = pyqtSignal()
@@ -1977,7 +1980,7 @@ class ChemTreeView(QTreeView):
             layout = QHBoxLayout()
             label = QLabel(caption)
             #label.setMaximumSize(250, 18)
-            button = QPushButton('B')
+            button = QPushButton('A')
             button.setMaximumSize(18, 18)
             button.clicked.connect(lambda : self.clicked.emit())            # Emit the clicked signal
             layout.addWidget(label, Qt.AlignLeft|Qt.AlignBottom)
@@ -2060,11 +2063,14 @@ class ChemTreeView(QTreeView):
         self._copy_buffer.clear()
 
         # Create buttons for phase correction
-        labelWidgetPH0, labelWidgetPH1 = self.LabelButton('Zero-order phase, PH0'), self.LabelButton('First-order phase, PH1')
-        labelWidgetPH0.clicked.connect(lambda : self.requestPhaseAdjustment.emit('ph0'))
-        labelWidgetPH1.clicked.connect(lambda : self.requestPhaseAdjustment.emit('ph1'))
+        labelWidgetPH0, labelWidgetPH1 = self.LabelAndButton('Zero-order phase, PH0'), self.LabelAndButton('First-order phase, PH1')
+        labelWidgetSig2 = self.LabelAndButton('Var. of noise, \u03C3\u00B2')
+        labelWidgetPH0.clicked.connect(lambda : self.requestAdjustment.emit('Ph0'))
+        labelWidgetPH1.clicked.connect(lambda : self.requestAdjustment.emit('Ph1'))
+        labelWidgetSig2.clicked.connect(lambda : self.requestAdjustment.emit('Rsd'))
         self.setIndexWidget(self.model().indexByKey(key=('.', 'theta', 0)), labelWidgetPH0)
         self.setIndexWidget(self.model().indexByKey(key=('.', 'tau', 0)), labelWidgetPH1)
+        self.setIndexWidget(self.model().indexByKey(key=('.', 'sigma2', 0)), labelWidgetSig2)
 
     def onSectionCountChanged(self, oldCount, newCount):
         """Called by the model after the number of columns is changed."""
@@ -3202,13 +3208,37 @@ class FittingThread(QThread):
         # Optimize
         if not self._exiting:
             for i, indx in enumerate(self.stepIdsToFit):
-                print("\nOptimizing step No. {:d} ({:d}/{:d})".format(indx+1, i+1, len(self.stepIdsToFit)))
-                step = self.fileToFit.steps[indx]
-                # Update the custom lineshape if requested
-                if step.fitCustomLshape:
-                    self.fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
-                # Fit the model parameters
-                self.fileToFit.optimize(parsKeys=step.parsKeys, autoKeys=step.autoKeys, frqBlkIds=step.frqBlkIds, evaluatePriors=False)
+                if len(self.stepIdsToFit) > 1:
+                    print('\nTask {:d}/{:d}'.format(i+1, len(self.stepIdsToFit)))
+                else: print('\n')
+                if isinstance(indx, int):
+                    print("Optimizing step No. {:d}".format(indx+1))
+                    step = self.fileToFit.steps[indx]
+                    # Update the custom lineshape if requested
+                    if step.fitCustomLshape:
+                        self.fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
+                    # Fit the model parameters
+                    self.fileToFit.optimize(parsKeys=step.parsKeys, autoKeys=step.autoKeys, frqBlkIds=step.frqBlkIds, evaluatePriors=False)
+                else:
+                    # Will evaluate the last step by default (TODO: Maybe need to change this to the active step?)
+                    step = self.fileToFit.steps[-1]
+
+                    if indx in ['Ph0', 'Ph1', 'PhA']:
+                        # Adjust the phasing parameters
+                        self.fileToFit.adjust_phase(frqBlkIds=step.frqBlkIds, mode=indx)
+                        # Re-evaluate the step to update the (marginalized) amplitudes and the signals to be plotted
+                        self.fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys = set([key for key in step.autoKeys if key != ('.', 'theta', 0)]), returnSignals=True)
+                    elif indx == 'Rsd':
+                        # Adjusting the residual
+                        self.fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds)
+                    elif indx == 'Lsh':
+                        # Adjust the lineshape
+                        self.fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
+                        # Re-evaluate the step to update the signals to be plotted
+                        self.fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=None, returnSignals=True)
+
+
+
                 # Finish fitting and return the results
                 self.result.emit(self.fileToFit.crntParsH)
 
@@ -3338,7 +3368,7 @@ class MainView(QMainWindow):
         self.treeView.setModel(self.treeModel)
         self.treeModel.crntChanged.connect(lambda:self.tryStep(indx = self.treeModel.actvStepIndx))       # If current values are changed by the user
         self.treeView.changedSelected.connect(self.selectStems)                  # If new parameter is selected by the user
-        self.treeView.requestPhaseAdjustment.connect(lambda mode : self.adjustPhase(mode, indx = self.treeModel.actvStepIndx))     # Adjust the phase
+        self.treeView.requestAdjustment.connect(lambda mode : self.fitStep(indx=mode))     # Adjust the phase
 
         # create a text edit widget to choose the optimization sequence
         self.stepsEdit = QPlainTextEdit('Please enter a sequence of steps to fit. ALL steps will be fitted consecutively by default.')  # , e.g.: 1, A, 5, (3, 4, A, 1), 2
@@ -3817,7 +3847,7 @@ class MainView(QMainWindow):
             #self.pickingTool.assignPeaks()
 
         # Select which steps to fit
-        if stepIdsToFit is None: stepIdsToFit = [-1]        # Fit the last step by default
+        if stepIdsToFit is None: stepIdsToFit = [self.actvStepIndx]        # Fit the active step by default
 
         # Call the fitting thread
         self.fittingThread.setExitFlag(False)
@@ -3864,7 +3894,7 @@ class MainView(QMainWindow):
         self.fittingThread.quit()
 
     def tryStep(self, indx=None):
-        if indx is None: indx = -1        # Fit the active step by default
+        if indx is None: indx = self.actvStepIndx        # Fit the active step by default
         step = self._crnt.steps[indx]
         if step.fitCustomLshape:
             self._crnt.set_shape(frqBlkIds=step.frqBlkIds)
@@ -3873,22 +3903,20 @@ class MainView(QMainWindow):
         self.treeModel.notifyDataChanged()
 
     def sampleStep(self, indx=None, onlyAutoKeys=False):
-        if indx is None: indx = -1        # Fit the active step by default
+        if indx is None: indx = self.actvStepIndx        # Fit the active step by default
         step = self._crnt.steps[indx]
         samples = self._crnt.sample(frqBlkIds=step.frqBlkIds, parsKeys=None if onlyAutoKeys else step.parsKeys, autoKeys=step.autoKeys, evaluatePriors=True, nwalkers=None, nsteps=250)     # parsKeys=step.parsKeys
         reportMCMC(samples)
 
     def fitStep(self, indx=None):
-        """Fits a single step specified by its indx or the active column. By default, fit the last step."""
-        stepIdsToFit = [-1] if indx is None else [indx]       # Fit the active step by default
-
+        """Fits a single step specified by its indx or the active column or runs phase/residual adjustment if indx in ['Ph0', 'Ph1', 'PhA', 'Rsd']. By default, fit the active step."""
         # Set up the progress bars
         self.progressBarFiles.setRange(0, 1)
         self.progressBarFiles.setValue(0)
 
         # Call the fitting function
         self.fittingQueue = [self._crnt]
-        self.fitQueue(stepIdsToFit = stepIdsToFit)
+        self.fitQueue(stepIdsToFit = [indx] if indx is not None else [self.actvStepIndx])       # Fit the active step by default
 
     def fitAllSteps(self, selectedFiles = None):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
@@ -3924,11 +3952,11 @@ class MainView(QMainWindow):
         """Fits all steps for all Files. The starting values on the next step are copied from the current found values. Starting values for each file are determined by the settings and are set in the self.fitQueue function."""
         # Call the fitting function. It is important to make fittingQue as a copy of self._crnt.data, because items will be popped from it
         if isinstance(self._crnt, Series):
-            selected = [i for i in self._crnt.data]
+            selectedFiles = [i for i in self._crnt.data]
         elif isinstance(self._crnt, Datum):
-            selected = [i for i in self._crnt.parent.data]
+            selectedFiles = [i for i in self._crnt.parent.data]
         else: return 0
-        self.fitAllSteps(selected)
+        self.fitAllSteps(selectedFiles)
 
     def saveResults(self):
         """Saves the current results of computation into the file and prints them on screen."""
@@ -3966,16 +3994,6 @@ class MainView(QMainWindow):
         with open('_results.txt', 'w') as fout:
             print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
         #print(tabulate.tabulate(tab[self._crnt.data.index(self._crnt)], headers=head))    # ... and show on the screen
-
-    def adjustPhase(self, mode='ph0', indx=None):
-        """Adjusts the phase according to the fitted model to optimize the residual signal."""
-        if indx is None: indx = -1        # Fit the active step by default
-        step = self._crnt.steps[indx]
-        print(mode, indx)
-        self._crnt.adjust_phase(mode=mode)
-        self._crnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=set([key for key in step.autoKeys if key != ('.', 'theta', 0)]), returnSignals=True)
-        self.plotCurrent()
-        self.treeModel.notifyDataChanged()
 
 # ------------------------ Parameter list --------------------------------------
     def updateParsList(self, indxStep = None):
@@ -4119,6 +4137,10 @@ class MainView(QMainWindow):
         if isinstance(self._crnt, Series):
             pass
         elif isinstance(self._crnt, Datum):
+            self._crnt.plot(ax_main=self.ax[0], ax_residual=self.ax[2] if self.actnPlotResidual.isChecked() else None, \
+                            showRanges='all', showComponents=self.actnShowComponents.isChecked(), showLegend=True)
+
+            """
             DDD = self._crnt
             ph = np.exp(-1j*2*np.pi * DDD.crntParsH["."]["tau"][0] * (DDD.f*DDD.c0-DDD.f0) - 1j*DDD.crntParsH["."]["theta"][0] ).reshape((-1,1))
             yFph = DDD.yF * ph
@@ -4178,7 +4200,7 @@ class MainView(QMainWindow):
                     # Plot the residuals
                     if self.actnPlotResidual.isChecked():
                         self.ax[2].plot(f_inR - dref_chsh, yF_inR.real - xF_inR.real, '-', color='darkkhaki')
-                        rmsResidual += np.sqrt(np.nanmean(np.abs(yF_inR - xF_inR)**2))
+                        rmsResidual += np.sqrt(np.nanmean(np.abs(yF_inR - xF_inR)**2))"""
 
             # Show or hide stems depending on the state of the checkable action self.actnShowStems
             if self.actnShowStems.isChecked():
@@ -4191,24 +4213,20 @@ class MainView(QMainWindow):
                 self.ax[0].set_position(self.figureGrid[0].get_position(self.figure))
                 self.ax[1].set_position(self.figureGrid[0].get_position(self.figure))
                 # Set ticks and labels
-                plt.setp(self.ax[0].get_xticklabels(), visible=False)
-                self.ax[0].set_xlabel('')
-                self.ax[0].ticklabel_format(scilimits=(-3,3))
-                self.ax[2].ticklabel_format(scilimits=(-3,3))
-                self.ax[2].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-                # Show RMS of the residual
-                self.ax[2].text(0.01,0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
-                                horizontalalignment='left', verticalalignment='top', transform = self.ax[2].transAxes)
+                #plt.setp(self.ax[0].get_xticklabels(), visible=False)
+                #self.ax[0].set_xlabel('')
+                #self.ax[0].ticklabel_format(scilimits=(-3,3))
+                #self.ax[2].ticklabel_format(scilimits=(-3,3))
+                #self.ax[2].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
+                ## Show RMS of the residual
+                #self.ax[2].text(0.01,0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
+                #                horizontalalignment='left', verticalalignment='top', transform = self.ax[2].transAxes)
             else:
                 self.ax[2].set_visible(False)
                 self.ax[0].set_position(self.figureGrid[0:2].get_position(self.figure))
                 self.ax[1].set_position(self.figureGrid[0:2].get_position(self.figure))
-                self.ax[0].ticklabel_format(scilimits=(-3,3))
-                self.ax[0].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-
-            # Plot optimization limits
-            for i, blk in enumerate(DDD.freqBlocks):
-                self.ax[0].axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2 if i in DDD.steps[0].frqBlkIds else 0.05, facecolor='yellow')
+                #self.ax[0].ticklabel_format(scilimits=(-3,3))
+                #self.ax[0].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
 
             self.ax[0].legend(loc=0)
 
@@ -4229,7 +4247,7 @@ class MainView(QMainWindow):
                 ##self.ax[0].autoscale_view(tight=True, scalex=True, scaley=True)
                 settings["ax0Limits"] = new_ax0Limits   # {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
 
-            self.figure.suptitle(str(DDD))
+            self.figure.suptitle(str(self._crnt))
 
             # Output the found results
             self.plotPieChart()

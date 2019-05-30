@@ -2209,14 +2209,14 @@ class Datum():
 
         return result, meta
 
-    def adjust_phase(self, evalParsH=None, frqBlkIds=None, mode='both', mw=512, verbose=True):
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, mode='PhA', mw=512, verbose=True):
         """Phase correction by adjusting the residual.
         Inputs:
-        mode - choose which phase parameters to adjust ('both', 'ph0', 'ph1')
+        mode - choose which phase parameters to adjust ('PhA', 'Ph0', 'Ph1')
         """
 
         if verbose:
-            print('Correcting the phasing parameters...')
+            print('Adjusting the phasing parameters, {}'.format(mode))
 
         # 1. Update the settings
         if evalParsH is None:
@@ -2244,13 +2244,13 @@ class Datum():
         costFuncPhase = lambda x : ph_cost(yF=self.yF[indxInRange]*ph, xF=xF, \
                         ph0=x[0], ph1=x[1], mw=mw, \
                         f=(self.f[indxInRange]*self.c0-self.f0)*dt )         # Frequency scale in fractions of the sampling frequrncy
-        if mode == 'both':
+        if mode == 'PhA':
             costFuncOpti = lambda x : costFuncPhase(x)[0]
             bounds, initVals = ((-0.5, 0.5), (-0.5, 0.5)), [0.0, 0.0]
-        elif mode == 'ph0':
+        elif mode == 'Ph0':
             costFuncOpti = lambda x : costFuncPhase([x, 0.0])[0]
             bounds, initVals = ((-0.5, 0.5), ), [0.0]
-        elif mode == 'ph1':
+        elif mode == 'Ph1':
             costFuncOpti = lambda x : costFuncPhase([0.0, x])[0]
             bounds, initVals = ((-0.5, 0.5), ), [0.0]
 
@@ -2258,11 +2258,11 @@ class Datum():
         res = self._optimize(costFuncOpti, bounds, initVals, nhop=0, verbose=verbose)
 
         # Interpret the results
-        if mode == 'both':
+        if mode == 'PhA':
             ph0, ph1 = res.x
-        elif mode == 'ph0':
+        elif mode == 'Ph0':
             ph0, ph1 = res.x[0], 0.0
-        elif mode == 'ph1':
+        elif mode == 'Ph1':
             ph0, ph1 = 0.0, res.x[0]
 
         # Update and save the phasing parameters
@@ -2277,7 +2277,7 @@ class Datum():
         """Correction of the model signals and the baseline to make the residual noise-like."""
 
         if verbose:
-            print('Correcting the baseline and residual.')
+            print('Adjusting the baseline and residual.')
 
         # 1. Update the settings
         if evalParsH is None:
@@ -2325,7 +2325,7 @@ class Datum():
         self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)
         self.zF_corr[indxInRange, :] = (posZa_corr - Za_corr)               # Additive correction for the model signals
         self.zF_corr[np.ix_(indxInRange, ampl_corr.nonzero()[0])] /= ampl_corr[ampl_corr.nonzero()]       # Scale by the amplitudes. Only those where ampl_corr != 0
-        self.bF_corr[indxInRange] = bln + np.sum(bF0)                     # Additive correction for the baseline
+        self.bF_corr[indxInRange] = bln + np.sum(bF0)                       # Additive correction for the baseline
 
     def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
@@ -2554,13 +2554,14 @@ class Datum():
                 xF += bF
 
         inRange, outRange = splitFreq([self.freqBlocks[blk] for blk in self.steps[0].frqBlkIds], f=self.f)
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
         rmsResidual = 0.0
         if outRange:
             supsRatio = ceil(yFph.size / (2**13))   # Subsampling ratio; take no more than 2^13 points
             allIndx = [np.append(r.indxFreq[:-1:supsRatio], r.indxFreq[-1]) for r in outRange]   # Make sure that the first and the last indices of each group are included
             gapsPos = np.cumsum([r.size for r in allIndx])        # Positions of gaps
             allIndx = np.concatenate(allIndx)
-            f_outR = np.insert(self.f[allIndx], gapsPos, None)
+            f_outR = np.insert(self.f[allIndx], gapsPos, None) - dref_chsh
 
             # Plot measured data
             yF_outR = np.insert(yFph[allIndx], gapsPos, None)
@@ -2572,12 +2573,13 @@ class Datum():
                 ax_main.plot(f_outR, xF_outR.real if real else xF_outR.imag, '-', color='r', label='Fitted model')
 
                 # Plot the residuals
-                ax_residual.plot(f_outR, (yF_outR - xF_outR).real if real else (yF_outR - xF_outR).imag, '-', color='darkkhaki')
+                if ax_residual is not None:
+                    ax_residual.plot(f_outR, (yF_outR - xF_outR).real if real else (yF_outR - xF_outR).imag, '-', color='darkkhaki')
 
         if inRange:
             allIndx = np.concatenate([r.indxFreq for r in inRange])
             gapsPos = np.cumsum([r.indxFreq.size for r in inRange])
-            f_inR = np.insert(self.f[allIndx], gapsPos, None)
+            f_inR = np.insert(self.f[allIndx], gapsPos, None) - dref_chsh
 
             # Plot measured data
             yF_inR = np.insert(yFph[allIndx], gapsPos, np.nan)     #  - 1*step.bFph[allIndx]
@@ -2596,28 +2598,32 @@ class Datum():
                 ax_main.plot(f_inR, xF_inR.real if real else xF_inR.imag, '-', color='r', label='')
 
                 # Plot the residuals
-                rF_inR = (yF_inR - xF_inR).real if real else (yF_inR - xF_inR).imag
-                ax_residual.plot(f_inR, rF_inR, '-', color='darkkhaki')
-                rmsResidual += np.sqrt(np.nanmean(np.abs(rF_inR)**2))
+                if ax_residual is not None:
+                    rF_inR = (yF_inR - xF_inR).real if real else (yF_inR - xF_inR).imag
+                    ax_residual.plot(f_inR, rF_inR, '-', color='darkkhaki')
+                    rmsResidual += np.sqrt(np.nanmean(np.abs(rF_inR)**2))
 
         # Show the residuals plot below the graph
         # Set ticks and labels
         #plt.setp(ax_main.get_xticklabels(), visible=False)
         ax_main.set_xlabel('')
         ax_main.ticklabel_format(scilimits=(-3,3))
-        ax_residual.ticklabel_format(scilimits=(-3,3))
-        ax_residual.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-        # Show RMS of the residual
-        ax_residual.text(0.01, 0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
+        if ax_residual is not None:
+            ax_residual.ticklabel_format(scilimits=(-3,3))
+            ax_residual.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
+            # Show RMS of the residual
+            ax_residual.text(0.01, 0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
                         horizontalalignment='left', verticalalignment='top', transform = ax_residual.transAxes)
+        else:
+            ax_main.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
 
         # Plot optimization limits
         if showRanges:
             for i, blk in enumerate(self.freqBlocks):
                 if showRanges == 'all':
-                    ax_main.axvspan(blk.min, blk.max, alpha=0.2 if i in self.steps[0].frqBlkIds else 0.05, facecolor='yellow')
+                    ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2 if i in self.steps[0].frqBlkIds else 0.05, facecolor='yellow')
                 elif showRanges == 'active' and i in self.steps[0].frqBlkIds:
-                    ax_main.axvspan(blk.min, blk.max, alpha=0.2, facecolor='yellow')
+                    ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2, facecolor='yellow')
 
         if showLegend: ax_main.legend(loc=0)
 
@@ -2627,7 +2633,7 @@ class Datum():
         ax_main.autoscale()    # update ax.viewLim using the new dataLim
         if ax_main.get_xlim()[1] > ax_main.get_xlim()[0]: ax_main.invert_xaxis()
 
-        if returnSignals: return self.f, yFph, xF
+        if returnSignals: return self.f - dref_chsh, yFph, xF
 
     def evalForPlot(self, key, frqBlkIds=None, lims=None, npts=75):
         """Returns an array of argument values and the values of log likelihood, prior, and posterior."""
