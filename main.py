@@ -4140,93 +4140,19 @@ class MainView(QMainWindow):
             self._crnt.plot(ax_main=self.ax[0], ax_residual=self.ax[2] if self.actnPlotResidual.isChecked() else None, \
                             showRanges='all', showComponents=self.actnShowComponents.isChecked(), showLegend=True)
 
-            """
-            DDD = self._crnt
-            ph = np.exp(-1j*2*np.pi * DDD.crntParsH["."]["tau"][0] * (DDD.f*DDD.c0-DDD.f0) - 1j*DDD.crntParsH["."]["theta"][0] ).reshape((-1,1))
-            yFph = DDD.yF * ph
-            if DDD.zF is not None:
-                zF = DDD.zF * np.array([DDD.crntParsH[name]['ampl'][0] for name in DDD.repRootNames]).reshape(1, -1)
-                xF = zF.sum(1).reshape(-1,1)
-                if DDD.bF is not None:
-                    bF = DDD.bF
-                    xF += bF
-            else: zF, xF, bF = None, None, None
-
-            inRange, outRange = splitFreq([DDD.freqBlocks[blk] for blk in DDD.steps[0].frqBlkIds], f=DDD.f)
-            dref_chsh = DDD.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
-            rmsResidual = 0.0
-            if outRange:
-                supsRatio = math.ceil(yFph.size / (2**13))   # Subsampling ratio; take no more than 2^13 points
-                allIndx = [np.append(r.indxFreq[:-1:supsRatio], r.indxFreq[-1]) for r in outRange]   # Make sure that the first and the last indices of each group are included
-                gapsPos = np.cumsum([r.size for r in allIndx])        # Positions of gaps
-                allIndx = np.concatenate(allIndx)
-                f_outR = np.insert(DDD.f[allIndx], gapsPos, None)
-
-                # Plot measured data
-                yF_outR = np.insert(yFph[allIndx], gapsPos, None)
-                self.ax[0].plot(f_outR - dref_chsh, yF_outR.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
-
-                # Plot the fitted model
-                if xF is not None:
-                    xF_outR = np.insert(xF[allIndx], gapsPos, None)
-                    self.ax[0].plot(f_outR - dref_chsh, xF_outR.real, '-', color='r', label='Fitted model')
-
-                    # Plot the residuals
-                    if self.actnPlotResidual.isChecked():
-                        self.ax[2].plot(f_outR - dref_chsh, yF_outR.real - xF_outR.real, '-', color='darkkhaki')
-
-            if inRange:
-                allIndx = np.concatenate([r.indxFreq for r in inRange])
-                gapsPos = np.cumsum([r.indxFreq.size for r in inRange])
-                f_inR = np.insert(DDD.f[allIndx], gapsPos, None)
-
-                # Plot measured data
-                yF_inR = np.insert(yFph[allIndx], gapsPos, np.nan)     #  - 1*step.bFph[allIndx]
-                self.ax[0].plot(f_inR - dref_chsh, yF_inR.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='')
-
-                # Plot the model components
-                if self.actnShowComponents.isChecked():
-                    if zF is not None:
-                        zF = (zF + 1*bF)
-                        zF_inR = np.insert(zF[allIndx, :], gapsPos, None, axis=0)
-                        for i, node in enumerate(DDD.repRootNames):
-                            self.ax[0].plot(f_inR - dref_chsh, zF_inR[:, i], '-', linewidth=0.5, color=config.colrseq[i], label=node)
-
-                # Plot the fitted model
-                if xF is not None:
-                    xF_inR = np.insert(xF[allIndx], gapsPos, None)       #  - 1*step.bFph[allIndx]
-                    self.ax[0].plot(f_inR - dref_chsh, xF_inR.real, '-', color='r', label='')
-
-                    # Plot the residuals
-                    if self.actnPlotResidual.isChecked():
-                        self.ax[2].plot(f_inR - dref_chsh, yF_inR.real - xF_inR.real, '-', color='darkkhaki')
-                        rmsResidual += np.sqrt(np.nanmean(np.abs(yF_inR - xF_inR)**2))"""
-
             # Show or hide stems depending on the state of the checkable action self.actnShowStems
             if self.actnShowStems.isChecked():
                 self.showStems(True)
 
-            # Show the residuals plot below the graph
+            # Show the residuals plot below the graph and rearrange the canvas (resize the main plot)
             if self.actnPlotResidual.isChecked():
                 self.ax[2].set_visible(True)
-                # Rearrange the canvas (resize the main plot)
                 self.ax[0].set_position(self.figureGrid[0].get_position(self.figure))
                 self.ax[1].set_position(self.figureGrid[0].get_position(self.figure))
-                # Set ticks and labels
-                #plt.setp(self.ax[0].get_xticklabels(), visible=False)
-                #self.ax[0].set_xlabel('')
-                #self.ax[0].ticklabel_format(scilimits=(-3,3))
-                #self.ax[2].ticklabel_format(scilimits=(-3,3))
-                #self.ax[2].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-                ## Show RMS of the residual
-                #self.ax[2].text(0.01,0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
-                #                horizontalalignment='left', verticalalignment='top', transform = self.ax[2].transAxes)
             else:
                 self.ax[2].set_visible(False)
                 self.ax[0].set_position(self.figureGrid[0:2].get_position(self.figure))
                 self.ax[1].set_position(self.figureGrid[0:2].get_position(self.figure))
-                #self.ax[0].ticklabel_format(scilimits=(-3,3))
-                #self.ax[0].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
 
             self.ax[0].legend(loc=0)
 
@@ -4241,10 +4167,6 @@ class MainView(QMainWindow):
                 self.ax[0].set_xlim(settings["ax0Limits"]["xlim"])
                 self.ax[0].set_ylim(settings["ax0Limits"]["ylim"])
             else:
-                #self.ax[0].relim()    # recompute the ax.dataLim
-                #self.ax[0].margins(0, 0.05)    # x and y margins in percentages
-                #self.ax[0].autoscale()    # update ax.viewLim using the new dataLim
-                ##self.ax[0].autoscale_view(tight=True, scalex=True, scaley=True)
                 settings["ax0Limits"] = new_ax0Limits   # {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
 
             self.figure.suptitle(str(self._crnt))
