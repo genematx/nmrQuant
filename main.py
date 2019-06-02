@@ -3371,7 +3371,7 @@ class MainView(QMainWindow):
         self.treeView.requestAdjustment.connect(lambda mode : self.fitStep(indx=mode))     # Adjust the phase
 
         # create a text edit widget to choose the optimization sequence
-        self.stepsEdit = QPlainTextEdit('Please enter a sequence of steps to fit. ALL steps will be fitted consecutively by default.')  # , e.g.: 1, A, 5, (3, 4, A, 1), 2
+        self.stepsEdit = QPlainTextEdit('Please enter a sequence of steps to fit. All steps will be fitted consecutively by default.')  # , e.g.: 1, A, 5, (3, 4, A, 1), 2
         self.stepsEdit.setMaximumHeight(50)
 
         # ------------------ 3. Navigation and processing plane ---------------
@@ -3503,7 +3503,7 @@ class MainView(QMainWindow):
         # Add import datafile action
         actnImportData = QAction(self._icon('icon_addFile.png'), 'Import files', self)
         actnImportData.setStatusTip('Import new data and add them to the current series')
-        actnImportData.triggered.connect(lambda : self.naviTreeModel.importData(parent=self._crnt))
+        actnImportData.triggered.connect(lambda : self.naviTreeModel.importData(parent=None))
         actnRemoveCurrent = QAction(self._icon('icon_removeFile.png'), 'Remove file', self)
         actnRemoveCurrent.setStatusTip('Remove file from the workspace')
         actnRemoveCurrent.triggered.connect(self.removeCurrent)
@@ -3922,16 +3922,16 @@ class MainView(QMainWindow):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
         # Form the list of steps to Fit
         s = self.stepsEdit.toPlainText()
-        if re.search('[0-9A]', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
-        s = " ".join(re.split("(A)", s ))      # Prevent any consecutive A's from occuring in the string; separate them with spaces
+        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhA)|(Rsd)|(Lsh)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
+        s = "A ".join(re.split("A", s ))      # Prevent any consecutive A's from occuring in the string; separate them with spaces
         while s.find('(') != -1:    # Randomize all elements in all parentheses
             beg, end = s.find('('), s.find(')')
-            R = re.split("[^0-9A]+", s[beg+1:end])
+            R = re.split("[ ,]+", s[beg+1:end])    # R = re.split("[^0-9A]+", s[beg+1:end])
             R = [i for i in R if i != 'A'] + [str(i+1) for i in range(len(self._crnt.steps))]*R.count('A')   # Turn A's into lists of numbers and add them to the array
             shuffle(R)
             s = ", ".join((s[:beg], *R, s[end+1:]))
-        L = re.split("[^0-9A]+", s)   # regex matches any non-digit character followed by any number (1+) of non-digit characters
-        stepIdsToFit = [int(j)-1 for c in L for j in {'A':[str(i+1) for i in range(len(self._crnt.steps))]}.get(c, [c]) if j != '']    # replace 'A' with the list of all items
+        L = re.split("[ ,]+",s)     #  L = re.split("[^0-9A]+", s)   # regex matches any non-digit character followed by any number (1+) of non-digit characters
+        stepIdsToFit = [int(j)-1 if re.match('[0-9]+', j) else j for c in L for j in {'A':[str(i+1) for i in range(len(self._crnt.steps))]}.get(c, [c]) if j != '']    # replace 'A' with the list of all items
 
         # Set up the fitting queue making sure that there are no repeated files
         if selectedFiles is None:
@@ -4296,6 +4296,7 @@ class MainView(QMainWindow):
         dref_chsh = self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
         self.freqTableModel.addFreqBlock(xmin + dref_chsh, xmax + dref_chsh)
 
+        print('Selecting')
         self.ax[0].axvspan(xmin, xmax, alpha=0.1, facecolor='yellow')
         self.canvas.draw()
 

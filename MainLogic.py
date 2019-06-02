@@ -713,6 +713,7 @@ class Workspace():
     #@profile
     def _optimize(self, costFuncOpti, bounds, initVals, nhop=None, verbose=True):
         """Core optimization routine; used by all Series and Datums in this Workspace"""
+        eps_range = np.mean([np.abs(bnd[1]-bnd[0]) for bnd in bounds])     # Find the range of optomiztion (needed to set the step size for Jacobian)
         if len(initVals) > 2 or (nhop is not None and nhop > 0):
             res = optimize.basinhopping(costFuncOpti, initVals, \
                   niter = nhop if nhop is not None else config.OPTIM_maxBasinhoppingSteps, \
@@ -721,7 +722,7 @@ class Workspace():
             #      #take_step=MyTakeStep())
         else:
             res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
-                  options={'eps':1e-05})       # Step-size for computing the Jacobian
+                  options={'eps':eps_range*1e-05})       # Step-size for computing the Jacobian
             #print(res['message'])
         #print(res)
         return res
@@ -2552,6 +2553,7 @@ class Datum():
             if self.bF is not None:
                 bF = self.bF if self.bF_corr is None else self.bF + self.bF_corr
                 xF += bF
+        else: zF, xF, bF = None, None, None
 
         inRange, outRange = splitFreq([self.freqBlocks[blk] for blk in self.steps[0].frqBlkIds], f=self.f)
         dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
@@ -2887,23 +2889,46 @@ def saveFID(xT, c0, f0, dt, tau=0., fname='fid'):
         fid.write('Spectrometer              = "Python"\n')
         fid.write('Software                  = "Python"')
 
-def cut_roi(xT, c0, f0, dt, band, recenter=True, subsample=True):
-    """Applies a bandpass filter to the time-domain signal xT specified but cutoff frquencies defined in the tuple band."""
-    # Center the signal to the middle of the new range in ppm
-    old_center = f0 / c0       # Center of the initial ppm scale (in ppm)
-    new_center = (max(band) + min(band)) / 2      # Center of the new ppm scale
-    f0_new = new_center * c0
+def cut_roi_ver2(xT, lims, c0, f0, dt, subsample=True):
+    """Applies a bandpass filter to the signal to cut a region of interest within the limits lims.
+    Returns the resulting filtered signal along with new fo and dt parameters if the signal was subsampled.
+    A second version of the cut_roi function."""
     nt = len(xT)
-    t = np.linspace(0, (nt-1)*dt, nt)
-    eT = np.exp(-1j*2*np.pi*(f0_new-f0)*t).ravel()
-    yT = xT.ravel() * eT    # Shift the signal
+    t = np.linspace(0.0, dt*(nt-1), nt).reshape(xT.shape)
 
-    # Create a lowpass filter
-    nyq = 0.5/dt
-    b, a = scipy.signal.cheby1(8, 0.01, (max(band)-min(band))*c0*dt)
-    #b, a = scipy.signal.iirdesign(wp=(max(band)-min(band))*c0*dt, ws=1.1*(max(band)-min(band))*c0*dt, gpass=0.1, gstop=30)
-    yT = scipy.signal.filtfilt(b, a, yT).reshape(-1,1)
-    return yT, c0, f0_new, dt
+    # Center the input signal wrt to the specified lims
+    f0_new = c0*np.sum(lims) / 2.0
+    cutoff = c0*(np.max(lims) - np.sum(lims)/2.0) / (1/(2*dt))           # Boundary of the limit in chsh as a fraction of the total chsh range
+    xT = xT * np.exp(1j*2*np.pi * (f0-f0_new) * t)
+
+    # Filter and subsample all at once
+    subs_factor = int(np.floor(0.99 / cutoff))
+    dt_new = dt*subs_factor
+    yT = scipy.signal.decimate(xT, subs_factor, axis=0).reshape(-1,1)
+
+    return yT, f0_new, dt_new
+
+def cut_roi(xT, lims, c0, f0, dt, subsample=True):
+    """Applies a bandpass filter to the signal to cut a region of interest within the limits lims. Returns the resulting filtered signal along with new fo and dt parameters if the signal was subsampled."""
+    nt = len(xT)
+    t = np.linspace(0.0, dt*(nt-1), nt).reshape(xT.shape)
+
+    # Center the input signal wrt to the specified lims
+    f0_new = c0*np.sum(lims) / 2.0
+    cutoff = c0*(np.max(lims) - np.sum(lims)/2.0) / (1/(2*dt))           # Boundary of the limit in chsh as a fraction of the total chsh range
+    xT = xT * np.exp(1j*2*np.pi * (f0-f0_new) * t)
+
+    ## Define the LP filter and apply it to the signal
+    b, a = scipy.signal.butter(10, cutoff, 'low')
+    yT = scipy.signal.filtfilt(b, a, xT, axis=0).reshape(-1,1)
+
+    # Subsample
+    print(cutoff)
+    up_factor, down_factor = 100, int(np.floor(100 / cutoff))
+    dt_new = dt/up_factor*down_factor
+    yT = scipy.signal.resample_poly(yT, up_factor, down_factor).reshape(-1,1)
+
+    return yT, f0_new, dt_new
 
 #@profile
 def whitsm(y, lmda=5.0):
