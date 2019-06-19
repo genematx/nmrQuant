@@ -56,6 +56,96 @@ class EmittingStream(QObject):
     def write(self, text):
         self.textWritten.emit(str(text))
 
+class DraggableVSpan:
+    """Draggable Vertical Span for matplotlib graphs."""
+
+    def __init__(self, axis, xpos=None, direction='left', facecolor='yellow'):
+
+        # Get teh initial boundaries
+        lims = axis.get_xlim()
+        if xpos is not None and len(xpos) == 2:
+            xL, xR = min(xpos), max(xpos)
+        else:
+            if direction == 'right':
+                xL = lims[0]
+                xR = xpos if xpos is not None else lims[0] + np.sum(lims)/3
+            elif direction == 'left':
+                xL = xpos if xpos is not None else lims[1] - np.sum(lims)/3
+                xR = lims[1]
+            elif direction == 'both':
+                xL = lims[0] + np.sum(lims)/3
+                xR = lims[1] - np.sum(lims)/3
+        self.xx = {'L':xL, 'R':xR}
+
+        # Initializa the vspan and the vlines
+        self.vspan = axis.axvspan(self.xx['L'], self.xx['R'], alpha=0.1, facecolor=facecolor)
+        self.vline_R = axis.axvline(self.xx['R'], color='red', linewidth=3)
+        self.vline_L = axis.axvline(self.xx['L'], color='red', linewidth=3)
+
+        if direction == 'left':
+            self.vline_R.set_visible(False)
+        elif direction == 'right':
+            self.vline_L.set_visible(False)
+
+        self.press = None
+        self._lastTS = 0.0          # Last timestamp
+
+    def connect(self):
+        """connect to all the events we need"""
+        self.cidpress = self.vspan.figure.canvas.mpl_connect(
+            'button_press_event', self.on_press)
+        self.cidrelease = self.vspan.figure.canvas.mpl_connect(
+            'button_release_event', self.on_release)
+        self.cidmotion = self.vspan.figure.canvas.mpl_connect(
+            'motion_notify_event', self.on_motion)
+
+    def on_press(self, event):
+        'on button press we will see if the mouse is over us and store some data'
+        if event.inaxes != self.vspan.axes: return
+
+        if self.vline_L.contains(event)[0]:
+            self.press = 'L'
+        elif self.vline_R.contains(event)[0]:
+            self.press = 'R'
+
+        self._lastTS = time.time()
+
+    def on_motion(self, event):
+        'on motion we will move the rect if the mouse is over us'
+        if self.press is None: return
+
+        if time.time() - self._lastTS < 0.001: return      # don't update too often
+
+        if event.inaxes != self.vspan.axes: return
+
+        newx = event.xdata
+        poly = self.vspan.get_xy()
+        # Redraw the vlines and the vspan
+        if self.press == 'L':
+            self.vline_L.set_xdata([newx]*2)
+            poly[[0,1,4],0] = newx
+            self.xx['L'] = newx
+        else:
+            self.vline_R.set_xdata([newx]*2)
+            poly[2:4,0] = newx
+            self.xx['R'] = newx
+        self.vspan.set_xy(poly)
+
+        self.vspan.figure.canvas.draw()
+
+        self._lastTS = time.time()
+
+    def on_release(self, event):
+        'on release we reset the press data'
+        self.press = None
+        self.vspan.figure.canvas.draw()
+
+    def disconnect(self):
+        'disconnect all the stored connection ids'
+        self.vspan.figure.canvas.mpl_disconnect(self.cidpress)
+        self.vspan.figure.canvas.mpl_disconnect(self.cidrelease)
+        self.vspan.figure.canvas.mpl_disconnect(self.cidmotion)
+
 class CustomToolbar(NavigationToolbar2, QToolBar):
 
     def __init__(self, canvas, parent, coordinates=True):
@@ -71,6 +161,7 @@ class CustomToolbar(NavigationToolbar2, QToolBar):
             ('Zoom', 'Zoom to rectangle', 'zoom_to_rect', 'zoom'),
             (None, None, None, None),
             #('My action', 'Description of my action', 'icon_import', 'doSomething'),        # text, tooltip_text, image_file, callback
+            ('ReduceRange', 'Reduce the frequency range', 'reduce_range', 'reduceRange'),
             ('AddRange', 'Add optimization range', 'add_range', 'addRange'),
             ('RemoveRange', 'Remove optimization range', 'remove_range', 'remRange'),
             ('ShowStems', 'Show models for all chemical species', 'show_all_chems', 'showStems'),
@@ -104,7 +195,7 @@ class CustomToolbar(NavigationToolbar2, QToolBar):
                 a = self.addAction(self._icon(image_file + '.png'),
                                          text, getattr(self, callback))
                 self._actions[callback] = a
-                if callback in ['zoom', 'pan', 'addRange', 'remRange']:
+                if callback in ['zoom', 'pan', 'addRange', 'remRange', 'reduceRange']:
                     a.setCheckable(True)
                 if tooltip_text is not None:
                     a.setToolTip(tooltip_text)
@@ -172,6 +263,7 @@ class CustomToolbar(NavigationToolbar2, QToolBar):
         self._actions['zoom'].setChecked(self._active == 'ZOOM')
         self._actions['addRange'].setChecked(self._active == 'ADDRANGE')
         self._actions['remRange'].setChecked(self._active == 'REMRANGE')
+        self._actions['reduceRange'].setChecked(self._active == 'REDUCERANGE')
 
     def home(self):
         """Subclassed home button. Resets the ranges to the best view."""
@@ -185,12 +277,12 @@ class CustomToolbar(NavigationToolbar2, QToolBar):
 
     def pan(self, *args):
         super(CustomToolbar, self).pan(*args)
-        self.parent.freqRangeSelector.active = False
+        self.parent.freqBlocksSelector.active = False
         self._update_buttons_checked()
 
     def zoom(self, *args):
         super(CustomToolbar, self).zoom(*args)
-        self.parent.freqRangeSelector.active = False
+        self.parent.freqBlocksSelector.active = False
         self._update_buttons_checked()
 
     def dynamic_update(self):
@@ -274,8 +366,38 @@ class CustomToolbar(NavigationToolbar2, QToolBar):
                     self, "Error saving file", str(e),
                     QMessageBox.Ok, QMessageBox.NoButton)
 
+    def reduceRange(self):
+        """Activate the reduction of the spectrum size mode."""
+        if self._active == 'REDUCERANGE':
+            self._active = None       # Unclick
+        else:
+            self._active = 'REDUCERANGE'
+            # Turn off previous mode (zoom, pan, or add_range)
+            self.canvas.widgetlock.release(self)
+        for a in self.canvas.figure.get_axes():
+            a.set_navigate_mode(None)
+
+        #Deactivate previous mode (zoom/pan/add/remrange)
+        if self._idPress is not None:
+            self._idPress = self.canvas.mpl_disconnect(self._idPress)
+            self.mode = ''
+
+        if self._idRelease is not None:
+            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
+            self.mode = ''
+
+        #Deactivate the frequency range selector
+        self.parent.freqBlocksSelector.active = False
+
+        if self._active:
+            self.mode = 'reduce range'
+            print(self.parent.reduceRange())
+        else:
+            self.mode = ''
+
+        self._update_buttons_checked()
+
     def addRange(self):
-        #self.parent.addFreqBlock(-1., 1.)
         """Activate the adding a new range mode."""
         if self._active == 'ADDRANGE':
             self._active = None
@@ -300,10 +422,10 @@ class CustomToolbar(NavigationToolbar2, QToolBar):
             #                                        self.press_zoom)
             #self._idRelease = self.canvas.mpl_connect('button_release_event',
             #                                          self.release_zoom)
-            self.parent.freqRangeSelector.active = True
+            self.parent.freqBlocksSelector.active = True
             self.mode = 'add range'
         else:
-            self.parent.freqRangeSelector.active = False
+            self.parent.freqBlocksSelector.active = False
             self.mode = ''
 
         self._update_buttons_checked()
@@ -315,7 +437,7 @@ class CustomToolbar(NavigationToolbar2, QToolBar):
         else:
             self._active = 'REMRANGE'
             self.canvas.widgetlock.release(self)            # Turn off previous mode (zoom or pan)
-            self.parent.freqRangeSelector.active = False    # Deactivate the range adding mode
+            self.parent.freqBlocksSelector.active = False    # Deactivate the range adding mode
         for a in self.canvas.figure.get_axes():
             a.set_navigate_mode(None)
 
@@ -3353,9 +3475,13 @@ class MainView(QMainWindow):
         self.ax[0].set_position(self.figureGrid[0:2].get_position(self.figure))
         self.ax[1].set_position(self.figureGrid[0:2].get_position(self.figure))
         # Set span selector
-        self.freqRangeSelector = SpanSelector(self.ax[1], self.addFreqBlock, 'horizontal', useblit=True, minspan=0.01,
+        self.freqBlocksSelector = SpanSelector(self.ax[1], self.addFreqBlock, 'horizontal', useblit=True, minspan=0.01,
                      rectprops=dict(alpha=0.15, facecolor='yellow'))     # set useblit True on gtkagg for enhanced performance
-        self.freqRangeSelector.active = False
+        self.freqBlocksSelector.active = False
+        ## Set Range Boundaries Selector
+        #self.freqLBoundarySelector = SpanSelector(self.ax[1], self.addFreqBlock, 'horizontal', useblit=True, minspan=0.01,
+        #             rectprops=dict(alpha=0.15, facecolor='red'))     # set useblit True on gtkagg for enhanced performance
+        #self.freqLBoundarySelector.active = False
 
         # ----------------- set up the pie chart figure
         self.pieFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
@@ -4296,7 +4422,6 @@ class MainView(QMainWindow):
         dref_chsh = self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
         self.freqTableModel.addFreqBlock(xmin + dref_chsh, xmax + dref_chsh)
 
-        print('Selecting')
         self.ax[0].axvspan(xmin, xmax, alpha=0.1, facecolor='yellow')
         self.canvas.draw()
 
@@ -4312,6 +4437,10 @@ class MainView(QMainWindow):
                 self.freqTableModel.remFreqBlock(indx)
                 # Update comboboxes
                 self.plotCurrent()
+
+    def reduceRange(self):
+        """Selects and cuts a region of interest in the spectrum and adjusts the underlying data accordingly."""
+        print('In reduce range')
 
     def plotFreqRanges(self):
         """Plots all frequency ranges"""

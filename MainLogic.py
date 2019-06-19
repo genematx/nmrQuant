@@ -1108,6 +1108,7 @@ class Series():
         """Resets the frequency scale for the entire Series and computed spectra."""
         if nf is None:
             nf = next_pow_of_2(len(self.t))     # Determine the number of samples in the full signal spectrum (possibly including zero-filling)
+
         if nf > 0:
             self.f = (np.fft.fftshift(np.fft.fftfreq(nf, self.t[1]-self.t[0]))+self.f0).reshape(-1,1)/self.c0
 
@@ -1176,6 +1177,32 @@ class Series():
             return True
         else:
             return False
+
+    def reduce_range(self, lims):
+        """Reduces the frequency range of the signals to new limits lims (in ppm)."""
+
+        # Filter and cut each Datum
+        dt = self.t[1]-self.t[0]
+        for DDD in self.data:
+            DDD.yT, f0_new, dt_new = cut_roi(DDD.yT, [min(lims), max(lims)], self.c0, self.f0, dt)
+        nt_new = len(self.data[0].yT)
+        self.f0 = f0_new
+        self.t = np.linspace(0.0, dt_new*(nt_new-1), nt_new).reshape(-1, 1)     # Update the vector of sampling times
+
+        # Check if all frequency blocks are within the new range limits. Update/remove if necessary
+        indx_to_remove = []
+        for indx, blk in enumerate(self.freqBlocks):
+            if blk.min < min(lims) and blk.max > max(lims):
+                indx_to_remove.append(indx)       # Take a note to remove this block later
+            elif blk.min < min(lims):
+                self.altFreqBlock(lims=[min(lims), blk.max], indx=indx)
+            elif blk.max > max(lims):
+                self.altFreqBlock(lims=[blk.min, max(lims)], indx=indx)
+        for indx in indx_to_remove:
+            self.remFreqBlock(indx)
+
+        # Reset the signals
+        self.resetFreqs()
 
     def _fnc_prior(self, evalParsH, evalMetaF, parsKeys=None, customPriors=None):
         """Custom prior probability function. Can be used to describe dependencies among parameters in different planes. Use parsKeys to determine if the prior needs to be computed for the specific keys."""
@@ -1811,7 +1838,7 @@ class Datum():
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
     #@profile
-    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField='Re'):
+    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
         #funcType = 'TLS'
 
@@ -1822,6 +1849,8 @@ class Datum():
             robust = config.SAMPL_robustLS
         if funcType is None:
             funcType=config.SAMPL_funcType
+        if numberField is None:
+            numberField = config.SAMPL_numberField
         if funcType is 'TLS':
             numberField = 'Re'
 
@@ -2923,7 +2952,6 @@ def cut_roi(xT, lims, c0, f0, dt, subsample=True):
     yT = scipy.signal.filtfilt(b, a, xT, axis=0).reshape(-1,1)
 
     # Subsample
-    print(cutoff)
     up_factor, down_factor = 100, int(np.floor(100 / cutoff))
     dt_new = dt/up_factor*down_factor
     yT = scipy.signal.resample_poly(yT, up_factor, down_factor).reshape(-1,1)
@@ -3187,3 +3215,4 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512):
     bln = (den - res).reshape(-1,1)
 
     return np.linalg.norm(bln - np.mean(bln), 2), yFph, res, bln
+    #return np.linalg.norm(res - np.mean(res), 2), yFph, res, bln
