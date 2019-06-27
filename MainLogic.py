@@ -2239,7 +2239,7 @@ class Datum():
 
         return result, meta
 
-    def adjust_phase(self, evalParsH=None, frqBlkIds=None, mode='PhA', mw=512, verbose=True):
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, mode='PhA', mw=512, cfun='LS', verbose=True):
         """Phase correction by adjusting the residual.
         Inputs:
         mode - choose which phase parameters to adjust ('PhA', 'Ph0', 'Ph1')
@@ -2273,7 +2273,7 @@ class Datum():
         # Define the cost function to optimize (in terms of ph0 and ph1)
         costFuncPhase = lambda x : ph_cost(yF=self.yF[indxInRange]*ph, xF=xF, \
                         ph0=x[0], ph1=x[1], mw=mw, \
-                        f=(self.f[indxInRange]*self.c0-self.f0)*dt )         # Frequency scale in fractions of the sampling frequrncy
+                        f=(self.f[indxInRange]*self.c0-self.f0)*dt, cfun=cfun )         # Frequency scale in fractions of the sampling frequrncy
         if mode == 'PhA':
             costFuncOpti = lambda x : costFuncPhase(x)[0]
             bounds, initVals = ((-0.5, 0.5), (-0.5, 0.5)), [0.0, 0.0]
@@ -3189,7 +3189,7 @@ def wden(x_in, wname = 'sym8', tptr='sqtwolog', sorh='hard', scal='mln', wsize=1
     return x_out
 
 # Phasing cost
-def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512):
+def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
     """Calculate the cost function for phasing the data.
     yF - measured (unphased) spectrum
     xF - fitted model
@@ -3214,5 +3214,11 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512):
     res = nmrglue.process.proc_bl.med(den.ravel(), mw).reshape(-1,1)
     bln = (den - res).reshape(-1,1)
 
-    return np.linalg.norm(bln - np.mean(bln), 2), yFph, res, bln
+    # Compute teh cost function
+    if cfun == 'LS':
+        val = np.linalg.norm(bln - np.mean(bln), 2)
+    elif cfun == 'TV':
+        val = np.linalg.norm(bln[1:] - bln[:-1], 1)
+
+    return val, yFph, res, bln
     #return np.linalg.norm(res - np.mean(res), 2), yFph, res, bln
