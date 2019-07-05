@@ -1530,9 +1530,11 @@ class Datum():
 
     def resetCrntPars(self, crntParsH=None, priors=None):
         """Resets ALL current parameters."""
+        # Reset the dictionary of priors
         self.parsSpecDict.clear()
         if priors is not None:
             self.parsSpecDict.update(priors)
+
         self.crntParsH = self.getDfltParsH()
         if crntParsH is not None:
             for key, val in crntParsH.items():
