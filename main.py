@@ -3743,7 +3743,7 @@ class MainView(QMainWindow):
         self.cmboxHCSelector.addItem("1H")
         self.cmboxHCSelector.addItem("13C")
         self.cmboxHCSelector.currentIndexChanged.connect(self.onHCSelect)
-        #tbTree.addWidget(self.cmboxHCSelector)
+        tbTree.addWidget(self.cmboxHCSelector)
         tbTree.addAction(actnAddStep)
         tbTree.addAction(actnDelStep)
         tbTree.addSeparator()
