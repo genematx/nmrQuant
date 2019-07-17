@@ -722,8 +722,9 @@ class Workspace():
             #      #take_step=MyTakeStep())
         else:
             res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
-                  options={'eps':eps_range*1e-05})       # Step-size for computing the Jacobian
+                  options={'eps':eps_range*1e-05, 'ftol':1e-12})       # Step-size for computing the Jacobian
             #print(res['message'])
+            #print(eps_range)
         #print(res)
         return res
 
@@ -811,6 +812,7 @@ class Workspace():
                                     'crntMetaF' : ser.crntMetaF,
                                     'smplDistF' : ser.smplDistF,
                                     'meta_function' : ser._meta,
+                                    'jointPrior' : ser._joint,
                                     'apod' : ser.apod,
                                     'data' : []})
             for dat in ser.data:
@@ -825,6 +827,7 @@ class Workspace():
                                                     'pckdPeaks' : dat.pckdPeaks,
                                                     'sF' : dat.sF,
                                                     'sT' : dat.sT,
+                                                    'jointPrior' : dat._joint,
                                                     'refChshKey' : dat.refChshKey
                                                     })
 
@@ -863,6 +866,8 @@ class Workspace():
                 newSeries.setMetaFunction(ser['meta_function'])
             if 'smplDistF' in ser.keys():
                 newSeries.smplDistF.update(ser['smplDistF'])
+            if 'jointPrior' in ser.keys():
+                newSeries.setJointPrior(ser['jointPrior'])
             for stp in ser['steps']:
                 newStep = Step()
                 newStep.frqBlkIds, newStep.parsKeys = stp.frqBlkIds, stp.parsKeys
@@ -882,6 +887,8 @@ class Workspace():
                     newDatum.smplDistF.update(dat['smplDistF'])
                 if 'refChshKey' in dat.keys():
                     newDatum.setReferenceChshKey(dat['refChshKey'])
+                if 'jointPrior' in dat.keys():
+                    newDatum.setJointPrior(dat['jointPrior'])
 
         if lshapeOrder is None: self.set_lshapeOrder(2)
 
@@ -908,6 +915,7 @@ class Series():
         self.crntMetaF = dict()       # A dictionary of current values of meta-parameters
         self.smplDistF = dict()
         self._meta = None             # A function that chnages the Series parameters controlled by the meta-parameters
+        self._joint = None
         self.fullReset(nf, apod, priors)           # Setup the frequency range and compute the spectra
 
     def __getattr__(self, attr):
@@ -1030,6 +1038,14 @@ class Series():
         """Removes the meta function from the Series."""
         self._meta = None
 
+    def setJointPrior(self, func):
+        """Sets an externally defined function func to self._joint"""
+        self._joint = func
+
+    def remJointPrior(self):
+        """Removes the jointPrior from the Series."""
+        self._joint = None
+
     def addDatum(self, yT, **kwargs):
         """Adds a Datum to the Series."""
         # Create new Datum structure and add it to the Series
@@ -1134,7 +1150,7 @@ class Series():
         """Removes al datasets from the series."""
         self.data.clear()
 
-    def addFreqBlock(self, lims=None, bslnOrder=(2, 2)):
+    def addFreqBlock(self, lims=None, bslnOrder=(0, 0)):
         """Adds a frequency block for optimization at certain in the self.freqBlocks arrays."""
         if lims is None:
             self.freqBlocks = []         # Reset the frequency blocks and add the entire signal
@@ -1481,6 +1497,7 @@ class Datum():
         self.mdldPeaks = {}
         self.pckdPeaks = []
         self.refChshKey = None           # A key of the chemical shift that will be used as a reference (will be set to its default value and the rest of the spectrum shifted accordingly)
+        self._joint = None            # A joint prior of all parameters
         self.fullReset(crntParsH, priors)
 
     def __getattr__(self, attr):
@@ -1621,6 +1638,14 @@ class Datum():
                 customPriors[key] = par
             else:
                 self.parsSpecDict[key] = par
+
+    def setJointPrior(self, func):
+        """Sets an externally defined function func to self._joint"""
+        self._joint = func
+
+    def remJointPrior(self):
+        """Removes the jointPrior from the Datum."""
+        self._joint = None
 
     def isAutofittable(self, key, customPriors=None):
         """Checks if a parameter can be fitted algebraically/marginalized based on the definition of its prior distribution."""
@@ -2071,6 +2096,14 @@ class Datum():
                 parsKeys = flatten(self.crntParsH).keys()
             return sum([self.getPrior(key, customPriors).evalPrior(arg=evalParsH[key[0]][key[1]][key[2]]) for key in set(parsKeys) if key[1] not in ['ampl', 'theta', 'sigma2']])
 
+    def _fnc_joint(self, evalParsH):
+        """Evaluates the joint prior."""
+        if self._joint is not None:
+            return self._joint(evalParsH)
+        elif self.parent._joint is not None:
+            return self.parent._joint(evalParsH)
+        else: return 0.0
+
     def measure_noise(self, lims, lmda=5.0):
         """Measures the standard deviation of noise in the spectrum within the limits lims in ppm."""
 
@@ -2206,6 +2239,7 @@ class Datum():
 
         if evaluatePriors:
             result += self._fnc_prior(evalParsH, parsKeys, customPriors=customPriors)
+        result += self._fnc_joint(evalParsH)
 
         return result, meta
 

@@ -1,7 +1,7 @@
 
 import sys
 import numpy as np
-import pickle as pickle
+import dill
 from MainLogic import *
 from MainLogic import Series, Datum, Workspace
 import config
@@ -1881,7 +1881,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             filename = QFileDialog.getOpenFileName(None, 'Import file', '.', filter = "Chemical trees (*.ctr)")
             if filename:
                 with open(filename, 'rb') as fp:
-                    data = pickle.load(fp)
+                    data = dill.load(fp)
                 # New tree and its parameters
                 X = data["tree"]
                 X.setTreeBook()
@@ -3812,7 +3812,7 @@ class MainView(QMainWindow):
         filename = QFileDialog.getOpenFileName(self, 'Import file', '.', filter = "Chemical trees (*.ctr)")
         if filename:
             with open(filename, 'rb') as fp:
-                data = pickle.load(fp)
+                data = dill.load(fp)
 
         #data["pars"]["."] = self.wsp.dfltParsH["."]     # Keep the values for tau and theta used before
         T = data["tree"]
@@ -3849,14 +3849,14 @@ class MainView(QMainWindow):
             stngPack['_config'] = stngConfig
 
             with open(filename, 'wb') as fp:
-                pickle.dump([dataPack, stngPack], fp)
+                dill.dump([dataPack, stngPack], fp)
 
     def onLoadWspAction(self):
         """Loads the workspace including the stepClass class and the steps array."""
         filename = QFileDialog.getOpenFileName(self, 'Import file', '.', filter = "NMR worksapce (*.wsp)")
         if filename:
             with open(filename, 'rb') as fp:
-                dataUnPack = pickle.load(fp)
+                dataUnPack = dill.load(fp)
 
             # Reset the settings and the Workspace
             self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])

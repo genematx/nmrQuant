@@ -349,7 +349,8 @@ def abs2rel(parsSpec, arg=0):
 def priorProb(parsSpec, arg=0):
     """Computes the values of the (log) prior distribution at the relative argument arg."""
     if arg > parsSpec.max or arg < parsSpec.min:
-        return -np.inf     # -1e+100
+        #print('Out of bounds')
+        return -1e+5   # -np.inf     # -1e+100
     else:
         if parsSpec.distr == 'Uniform':
             return 0
@@ -1180,7 +1181,10 @@ class chemNodeQD(chemNode):
         jcplQD = np.array(jcplQD)
 
         # Run the QD simulations only if the parameters have changed (assume that chsh, alph, and t have also changed)
-        if self.oldParsQD["chsh"] is None or self.oldParsQD["jcpl"] is None or any(self.oldParsQD["jcpl"] != jcplQD) or (any(abs(self.oldParsQD["chsh"] - chshQD) > config.QD_RerunQDchshThreshold*c0) and self.jcplQD != []):
+        mind_chshQD = np.concatenate([[abs(cs2 - cs1) for cs2 in chshQD[i+1:]] for i, cs1 in enumerate(chshQD)] + [[np.inf]]).min()     # Minimum distance between any two chemical shifts in this spin system; inf if theer is only one chemical shift
+        if self.oldParsQD["chsh"] is None or self.oldParsQD["jcpl"] is None or any(self.oldParsQD["jcpl"] != jcplQD) \
+                                          or ( any( abs(self.oldParsQD["chsh"] - chshQD) > min(config.QD_RerunQDchshThreshold*c0, 0.5*mind_chshQD) ) \
+                                               and self.jcplQD != []):
             # QD simulations
             n_spin = len(self.chshAsgn)
             if len(jcplQD) > 0:
