@@ -78,11 +78,11 @@ class OrderedSet(collections.MutableSet):
 class chemSpec:
     """Class for database entires."""
 
-    def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None):
+    def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, **kwargs):
         self.name = name
         self.chshH = chshH if chshH is not None else []       # List of chshH parsSpec's
         self.chshC = chshC if chshC is not None else []
-        self.nSpinH = nSpinH if nSpinH is not None else [1]*len(self.chshC)    # List of int 1..3 indicating the number of spins for each chshH
+        self.nSpinH = nSpinH if nSpinH is not None else [1]*len(self.chshH)    # List of int 1..3 indicating the number of spins for each chshH
         self.jcplHH = jcplHH if jcplHH is not None else []    # List of jcplHH parsSpec's
         self.pairHH = pairHH if pairHH is not None else [None]*len(self.jcplHH)     # List of tuples; each tuple contains indices of coupled protons
 
@@ -99,7 +99,7 @@ class chemSpec:
             self._nSpsyH = 0
             self._spsyAsgnH.clear()
         else:
-            ind = np.array([pair for pair in self.pairHH if pair[0] is not None and pair[1] is not None])     # Indices of used J-couplings, if any
+            ind = np.array([pair[:2] for pair in self.pairHH if pair[0] is not None and pair[1] is not None])     # Indices of used J-couplings, if any
             if len(ind) > 0:
                 # There is some coupling
                 M = np.zeros((len(self.chshH),len(self.chshH)))    # Connectivity matrix; 1 if two spins are coupled
@@ -209,8 +209,10 @@ class chemSpec:
             for row in range(len(jcpl)):
                 for i, m in enumerate(chshAsgn):
                     for j, n in enumerate(chshAsgn):
-                        if pair[row][0] == m-1 and pair[row][1] == n-1:
+                        if pair[row][0] == m-1 and pair[row][1] == n-1 and j > i:
+                            if (pair[row][-1] == 'skip_odd' and (i+j)%2==0) or (pair[row][-1] == 'skip_even' and (i+j)%2==1): continue      # Skip the para-hydrogens
                             jcplAsgn[i][j] = row+1
+
         else:
             jcplAsgn = None
 
@@ -347,7 +349,8 @@ def abs2rel(parsSpec, arg=0):
 def priorProb(parsSpec, arg=0):
     """Computes the values of the (log) prior distribution at the relative argument arg."""
     if arg > parsSpec.max or arg < parsSpec.min:
-        return -np.inf     # -1e+100
+        #print('Out of bounds')
+        return -1e+5   # -np.inf     # -1e+100
     else:
         if parsSpec.distr == 'Uniform':
             return 0
@@ -1178,7 +1181,10 @@ class chemNodeQD(chemNode):
         jcplQD = np.array(jcplQD)
 
         # Run the QD simulations only if the parameters have changed (assume that chsh, alph, and t have also changed)
-        if self.oldParsQD["chsh"] is None or self.oldParsQD["jcpl"] is None or any(self.oldParsQD["jcpl"] != jcplQD) or (any(abs(self.oldParsQD["chsh"] - chshQD) > config.QD_RerunQDchshThreshold*c0) and self.jcplQD != []):
+        mind_chshQD = np.concatenate([[abs(cs2 - cs1) for cs2 in chshQD[i+1:]] for i, cs1 in enumerate(chshQD)] + [[np.inf]]).min()     # Minimum distance between any two chemical shifts in this spin system; inf if theer is only one chemical shift
+        if self.oldParsQD["chsh"] is None or self.oldParsQD["jcpl"] is None or any(self.oldParsQD["jcpl"] != jcplQD) \
+                                          or ( any( abs(self.oldParsQD["chsh"] - chshQD) > min(config.QD_RerunQDchshThreshold*c0, 0.5*mind_chshQD) ) \
+                                               and self.jcplQD != []):
             # QD simulations
             n_spin = len(self.chshAsgn)
             if len(jcplQD) > 0:

@@ -14,6 +14,7 @@ SAMPL_funcType = 'LS'                       # Defines the type of the cost funct
                                             # 'TLS' - toal Least Squares
                                             # 'L1' - L1 norm minimization
                                             # 'TV' - total variation
+SAMPL_numberField = 'Re'
 
 MODEL_ShapeKernelSize = 13                  # Size of the custom lineshape correction kernel (must be odd)
 
@@ -43,6 +44,7 @@ def as_dict():
 
             'SAMPL_robustLS' : SAMPL_robustLS,
             'SAMPL_funcType' : SAMPL_funcType,
+            'SAMPL_numberField' : SAMPL_numberField,
 
             'MODEL_ShapeKernelSize' : MODEL_ShapeKernelSize}
 
@@ -64,6 +66,8 @@ def from_dict(self, D):
             self.SAMPL_robustLS = val
         elif key == 'SAMPL_funcType':
             self.SAMPL_funcType = val
+        elif key == 'SAMPL_numberField':
+            self.SAMPL_numberField = val
         elif key == 'MODEL_ShapeKernelSize':
             self.MODEL_ShapeKernelSize = val
 

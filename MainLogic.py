@@ -25,395 +25,6 @@ import nmrglue
 # Functions needed only for Matlab
 from operator import getitem
 
-# ------- Setup predefined mixtures ----------
-def setupSugars():
-    # Create the sugars subtree
-    S = chemNode("Sugars")
-    Fr = chemNode("Fructose", chsh = [parsSpec(-0.05, 0.05)])
-    Fr.addChild(chemNodeDB("alpha-D-Fructofuranose", intn=0.0517))
-    Fr.addChild(chemNodeDB("beta-D-Fructofuranose", intn=0.2246))
-    Fr.addChild(chemNodeDB("alpha-D-Fructopyranose", intn=0.0149))
-    Fr.addChild(chemNodeDB("beta-D-Fructopyranose", intn=0.7088))
-    Gl = chemNode("Glucose", chsh = [parsSpec(-0.05, 0.05)])
-    Gl.addChild(chemNodeDB("alpha-D-Glucopyranose", intn=0.3750))
-    Gl.addChild(chemNodeDB("beta-D-Glucopyranose", intn=0.6250))
-    Su = chemNode("Sucrose", chsh = [parsSpec(-0.05, 0.05)])
-    Su.addChild(chemNodeDB("Sucrose-F", intn=1))
-    Su.addChild(chemNodeDB("Sucrose-G", intn=1))
-    S.addChild(Fr)
-    S.addChild(Gl)
-    S.addChild(Su)
-
-    # add QD nodes to the tree
-    for node in S.items():
-        if isinstance(node, chemNodeDB): node.dendrolize()
-    S.setReported(False)
-
-    # Assign the fitted parameters
-    pars = defaultTreePars(S)
-    pars["alpha-D-Fructofuranose-SPSY1"]["chshQD_rel"] = [-0.2309,0.0909]
-    pars["alpha-D-Fructofuranose-SPSY1"]["jcplQD_rel"] = [-0.0230]
-    pars["alpha-D-Fructofuranose-SPSY2"]["chshQD_rel"] = [-0.0194,-0.2070,-0.7459,-0.2558,-0.0761]
-    pars["alpha-D-Fructofuranose-SPSY2"]["jcplQD_rel"] = [-0.0762,0.0881,0.1501,0.0055,-0.2295,0]
-    pars["beta-D-Fructofuranose-SPSY1"]["chshQD_rel"] = [-0.1184,-0.0875]
-    pars["beta-D-Fructofuranose-SPSY1"]["jcplQD_rel"] = [-0.2046]
-    pars["beta-D-Fructofuranose-SPSY2"]["chshQD_rel"] = [-0.1743,-0.4962,-0.1394,-0.0733,-0.0881]    # [-0.1743,-0.1716,-0.5394,-0.0733,-0.0881]
-    pars["beta-D-Fructofuranose-SPSY2"]["jcplQD_rel"] = [-0.6218,0.2476,0.9005,0.1568,-0.2148,0]
-    pars["alpha-D-Fructopyranose-SPSY1"]["chshQD_rel"] = [-0.025,-0.0500]
-    pars["alpha-D-Fructopyranose-SPSY1"]["jcplQD_rel"] = [0.3619]
-    pars["alpha-D-Fructopyranose-SPSY2"]["chshQD_rel"] = [-0.0370,-0.0219,-0.4281,-0.3327,0.1398]
-    pars["alpha-D-Fructopyranose-SPSY2"]["jcplQD_rel"] = [0.0287,-0.1771,-0.5064,0.2440,-0.5597,0]
-    pars["beta-D-Fructopyranose-SPSY1"]["chshQD_rel"] = [-0.1210,-0.1350]
-    pars["beta-D-Fructopyranose-SPSY1"]["jcplQD_rel"] = [-0.0329]
-    pars["beta-D-Fructopyranose-SPSY2"]["chshQD_rel"] = [-0.1513,-0.1842,-0.1016,-0.2692,-0.1756]
-    pars["beta-D-Fructopyranose-SPSY2"]["jcplQD_rel"] = [-0.0516,-0.1640,-0.0649,-0.2223,-0.1310,0]
-    pars["alpha-D-Glucopyranose-SPSY1"]["chshQD_rel"] = [0.1231,0.1128,0.0962,0.1172,0.0520,0.1289,0.1466]
-    pars["alpha-D-Glucopyranose-SPSY1"]["jcplQD_rel"] = [0.0169,-0.1084,0.1663,0.3671,-0.4402,-0.0515,0.2412]
-    pars["beta-D-Glucopyranose-SPSY1"]["chshQD_rel"] = [0.1074,0.1005,0.1071,0.1194,0.0897,0.1309,0.1375]
-    pars["beta-D-Glucopyranose-SPSY1"]["jcplQD_rel"] = [0.3562,-0.3018,0.2189,-0.3157,-0.2695,0.0124,-0.1188]
-    pars["Sucrose-F-SPSY1"]["chshQD_rel"] = [0.1279, 0.1279]
-    pars["Sucrose-F-SPSY1"]["jcplQD_rel"] = [0]
-    pars["Sucrose-F-SPSY2"]["chshQD_rel"] = [0.0192,0.0337,0.0894,0.2890,-0.0665]
-    pars["Sucrose-F-SPSY2"]["jcplQD_rel"] = [-0.0994,-0.2246,-0.4012,0.3173,-0.0479]
-    pars["Sucrose-G-SPSY1"]["chshQD_rel"] = [0.1845,0.3602,0.1281,0.1974,-0.2918,0.6373,0.7598]
-    pars["Sucrose-G-SPSY1"]["jcplQD_rel"] = [-0.0283,0.1973,-0.2828,0.1321,-0.8838,0.2803,-0.3675]
-
-    # Save the tree and the parameters
-    for node in S.items(): node.reset()
-
-    # Convert from relative values to absolute ones
-    pars = rel2abs(S, pars)
-
-    # Update default tree parameters
-    for key, val in flatten(pars).items():
-        try:
-            getattr(S[key[0]], key[1])[key[2]] = getattr(S[key[0]], key[1])[key[2]]._replace(dval=val)
-        except KeyError:
-            pass
-
-    saveTree('Sugars', S, pars)
-    S, pars = loadTree('Sugars')
-
-    return S, pars
-
-def setupJuices():
-    X = chemNode("Juice")
-    X.addChild(chemNodeDB("Water", alph = [parsSpec(0, 50)]))
-
-    # Load the sugars subtree
-    S, sugarsPars = loadTree('Sugars')
-    X.addChild(S)
-
-    # Create the acids subtree
-    A = chemNode("Acids")
-    X.addChild(A)
-    A.addChild(chemNodeDB("Citric acid"))
-    A.addChild(chemNodeDB("Malic acid"))
-
-    # add QD nodes to the tree
-    for node in X.items():
-        if isinstance(node, chemNodeDB): node.dendrolize()
-
-    # Set the reported flags (must be done in the end when the leaves are added to the tree)
-    S.setReported(False)
-    A.setReported(False)
-
-    # Set up the model parameters
-    pars = defaultTreePars(X)
-    pars.update(sugarsPars)     # use the predefined QD parameters for sugars
-    pars["Juice"]["alph_rel"] = [-0.85]
-
-    # Convert from relative values to absolute ones
-    pars = rel2abs(X, pars)
-
-    # Update default tree parameters
-    for key, val in flatten(pars).items():
-        try:
-            getattr(X[key[0]], key[1])[key[2]] = getattr(X[key[0]], key[1])[key[2]]._replace(dval=val)
-        except KeyError:
-            pass
-
-    saveTree('Juices', X, pars)
-    X, pars = loadTree('Juices')
-
-    return X, pars
-
-def setupACN_Diox():
-    # Create a subtree for caffeine / maleic acid
-    X = chemNode("Mixture")
-    X.addChild(chemNodeDB("Acetonitrile"))
-    X.addChild(chemNodeDB("Dioxane"))
-
-    # add QD nodes to the tree
-    for node in X.items():
-        if isinstance(node, chemNodeDB): node.dendrolize()
-
-    X.setReported(False)
-
-    # Assign the fitted parameters
-    pars = defaultTreePars(X)
-
-    # Update default tree parameters
-    for key, val in flatten(pars).items():
-        try:
-            getattr(X[key[0]], key[1])[key[2]] = getattr(X[key[0]], key[1])[key[2]]._replace(dval=val)
-        except KeyError:
-            pass
-
-    # Save the tree and the parameters
-    for node in X.items(): node.reset()
-    saveTree('ACN_Diox', X, pars)
-    X, pars = loadTree('ACN_Diox')
-
-    return X, pars
-
-def setupCafMA():
-    # Create a subtree for caffeine / maleic acid
-    X = chemNode("Mixture")
-    #X.addChild(chemNodeDB("Water", alph = [parsSpec(0, 75)]))
-    #S = chemNode("Solutes")
-    #X.addChild(S)
-    X.addChild(chemNodeDB("Caffeine"))
-    X.addChild(chemNodeDB("Maleic acid"))
-
-    # add QD nodes to the tree
-    for node in X.items():
-        if isinstance(node, chemNodeDB): node.dendrolize()
-
-    X.setReported(False)
-
-    # Assign the fitted parameters
-    pars = defaultTreePars(X)
-    pars["Mixture"]["alph_rel"] = [-0.85]
-    pars["Caffeine-SPSY1"]["chshQD_rel"] = [0.0847330953486094]
-    pars["Caffeine-SPSY2"]["chshQD_rel"] = [-0.000906643455866547]
-    pars["Caffeine-SPSY3"]["chshQD_rel"] = [-0.0935097134208091, -0.270221261778036]
-    pars["Caffeine-SPSY3"]["jcplQD_rel"] = [0.515823922069580]
-
-    # Convert from relative values to absolute ones
-    pars = rel2abs(X, pars)
-
-    # Update default tree parameters
-    for key, val in flatten(pars).items():
-        try:
-            getattr(X[key[0]], key[1])[key[2]] = getattr(X[key[0]], key[1])[key[2]]._replace(dval=val)
-        except KeyError:
-            pass
-
-    # Save the tree and the parameters
-    for node in X.items(): node.reset()
-    saveTree('CafMA', X, pars)
-    X, pars = loadTree('CafMA')
-
-    return X, pars
-
-def setupScionExp2():
-    X = chemNode("Mixture")
-    #X.addChild(chemNodeDB("Water", alph = [parsSpec(0, 75)]))
-
-    # add sugars
-    Fr = chemNode("Fructose", chsh = [parsSpec(-0.05, 0.05)])
-    Fr.addChild(chemNodeDB("alpha-D-Fructofuranose", intn=0.0517))
-    Fr.addChild(chemNodeDB("beta-D-Fructofuranose", intn=0.2246))
-    Fr.addChild(chemNodeDB("alpha-D-Fructopyranose", intn=0.0149))
-    Fr.addChild(chemNodeDB("beta-D-Fructopyranose", intn=0.7088))
-    Gl = chemNode("Glucose", chsh = [parsSpec(-0.05, 0.05)])
-    Gl.addChild(chemNodeDB("alpha-D-Glucopyranose", intn=0.3750))
-    Gl.addChild(chemNodeDB("beta-D-Glucopyranose", intn=0.6250))
-    Su = chemNode("Sucrose", chsh = [parsSpec(-0.05, 0.05)])
-    Su.addChild(chemNodeDB("Sucrose-F", intn=0.5))
-    Su.addChild(chemNodeDB("Sucrose-G", intn=0.5))
-    #X.addChild(Fr)
-    X.addChild(Gl)
-    X.addChild(Su)
-
-    # Create the acids subtree
-    X.addChild(chemNodeDB("Quinic acid"))
-    X.addChild(chemNodeDB("Shikimic acid"))
-
-    # Add TMS
-    X.addChild(chemNodeDB("TMS"))
-
-    # add QD nodes to the tree
-    for node in X.items():
-        if isinstance(node, chemNodeDB): node.dendrolize()
-
-    # Set the reported flags (must be done in the end when the leaves are added to the tree)
-    X.setReported(False)
-
-    # Set up the model parameters
-    pars = defaultTreePars(X)
-    # Update parameters for acids
-    # Assign the fitted parameters
-    pars["Quinic acid-SPSY1"]["chshQD_rel"] = [-0.0115,-0.0609,-0.0026,0.0200,-0.0066,-0.0968,-0.0422]
-    pars["Quinic acid-SPSY1"]["jcplQD_rel"] = [0.0361,0.3928,-0.2112,0.0105,0.0029,-0.0664,0.0023,0.0607,0.0040]
-    pars["Shikimic acid-SPSY1"]["chshQD_rel"] = [-0.0495,-0.0055,0.0246,-0.0459,-0.0097,0.0243]
-    pars["Shikimic acid-SPSY1"]["jcplQD_rel"] = [0.0430,-0.0310,-0.0195,-0.0126,-0.0103,0.1441,0.0255,0.0396,0.0413,0.3911]
-    # Assign the fitted parameters for sugars
-    """pars["alpha-D-Fructofuranose-SPSY1"]["chshQD_rel"] = [-0.2309,0.0909]
-    pars["alpha-D-Fructofuranose-SPSY1"]["jcplQD_rel"] = [0.0230]
-    pars["alpha-D-Fructofuranose-SPSY2"]["chshQD_rel"] = [-0.0194,-0.2070,-0.7459,-0.2558,-0.0761]
-    pars["alpha-D-Fructofuranose-SPSY2"]["jcplQD_rel"] = [-0.0762,0.0881,0.1501,0.0055,-0.2295,0]
-    pars["beta-D-Fructofuranose-SPSY1"]["chshQD_rel"] = [-0.1184,-0.0875]
-    pars["beta-D-Fructofuranose-SPSY1"]["jcplQD_rel"] = [0.2046]
-    pars["beta-D-Fructofuranose-SPSY2"]["chshQD_rel"] = [-0.1743,-0.1716,-0.5394,-0.0733,-0.0881]
-    pars["beta-D-Fructofuranose-SPSY2"]["jcplQD_rel"] = [-0.6218,0.2476,0.9005,0.1568,-0.2148,0]
-    pars["alpha-D-Fructopyranose-SPSY1"]["chshQD_rel"] = [-0.025,-0.0500]
-    pars["alpha-D-Fructopyranose-SPSY1"]["jcplQD_rel"] = [-0.3619]
-    pars["alpha-D-Fructopyranose-SPSY2"]["chshQD_rel"] = [-0.0370,-0.0219,-0.4281,-0.3327,0.1398]
-    pars["alpha-D-Fructopyranose-SPSY2"]["jcplQD_rel"] = [0.0287,-0.1771,-0.5064,0.2440,-0.5597,0]
-    pars["beta-D-Fructopyranose-SPSY1"]["chshQD_rel"] = [-0.1210,-0.1350]
-    pars["beta-D-Fructopyranose-SPSY1"]["jcplQD_rel"] = [0.0329]
-    pars["beta-D-Fructopyranose-SPSY2"]["chshQD_rel"] = [-0.1513,-0.1842,-0.1016,-0.2692,-0.1756]
-    pars["beta-D-Fructopyranose-SPSY2"]["jcplQD_rel"] = [-0.0516,-0.1640,-0.0649,-0.2223,-0.1310,0]"""
-    pars["alpha-D-Glucopyranose-SPSY1"]["chshQD_rel"] = [0.1231,0.1128,0.0962,0.1172,0.0520,0.1289,0.1466]
-    pars["alpha-D-Glucopyranose-SPSY1"]["jcplQD_rel"] = [0.0169,-0.1084,0.1663,0.3671,-0.4402,-0.0515,0.2412]
-    pars["beta-D-Glucopyranose-SPSY1"]["chshQD_rel"] = [0.1074,0.1005,0.1071,0.1194,0.0897,0.1309,0.1375]
-    pars["beta-D-Glucopyranose-SPSY1"]["jcplQD_rel"] = [0.3562,-0.3018,0.2189,-0.3157,-0.2695,0.0124,-0.1188]
-    pars["Sucrose-F-SPSY1"]["chshQD_rel"] = [0.1279, 0.1279]
-    pars["Sucrose-F-SPSY1"]["jcplQD_rel"] = [0]
-    pars["Sucrose-F-SPSY2"]["chshQD_rel"] = [0.0192,0.0337,0.0894,0.2890,-0.0665]
-    pars["Sucrose-F-SPSY2"]["jcplQD_rel"] = [-0.0994,-0.2246,-0.4012,0.3173,-0.0479]
-    pars["Sucrose-G-SPSY1"]["chshQD_rel"] = [0.1845,0.3602,0.1281,0.1974,-0.2918,0.6373,0.7598]
-    pars["Sucrose-G-SPSY1"]["jcplQD_rel"] = [-0.0283,0.1973,-0.2828,0.1321,-0.8838,0.2803,-0.3675]
-
-    pars["Mixture"]["alph_rel"] = [-0.85]
-
-    # Convert from relative values to absolute ones
-    pars = rel2abs(X, pars)
-
-    # Update default tree parameters
-    for key, val in flatten(pars).items():
-        try:
-            getattr(X[key[0]], key[1])[key[2]] = getattr(X[key[0]], key[1])[key[2]]._replace(dval=val)
-        except KeyError:
-            pass
-
-    saveTree('ScionExp2', X, pars)
-    X, pars = loadTree('ScionExp2')
-
-    return X, pars
-
-def setupMixture():
-    X = chemNode("Mixture")
-    #X.addChild(chemNodeDB("Water", alph = [parsSpec(0, 75)]))
-    #X.addChild(chemNodeDB("Ethanol"))
-    #X.addChild(chemNodeDB("Citric acid"))
-    X.addChild(chemNodeDB("Thiamine"))
-
-    # add QD nodes to the tree
-    for node in X.items():
-        if isinstance(node, chemNodeDB): node.dendrolize()
-
-    # Set the reported flags (must be done in the end when the leaves are added to the tree)
-    X.setReported(False)
-    #Fr.setReported(False)
-    #Gl.setReported(False)
-
-    # Set up the model parameters
-    pars = defaultTreePars(X)
-
-    pars["Mixture"]["alph"] = [2]
-
-    # Update default tree parameters
-    for key, val in flatten(pars).items():
-        try:
-            getattr(X[key[0]], key[1])[key[2]] = getattr(X[key[0]], key[1])[key[2]]._replace(dval=val)
-        except KeyError:
-            pass
-
-    saveTree('Mixture', X, pars)
-    X, pars = loadTree('Mixture')
-
-    return X, pars
-
-def setupElmar():
-    X = chemNode("Mixture")
-
-    # add components
-    X.addChild(chemNodeDB("EvA34"))
-    X.addChild(chemNodeDB("b-EvA34"))
-    X.addChild(chemNodeDB("g-EvA34"))
-    X.addChild(chemNodeDB("b,g-EvA34"))
-    X.addChild(chemNodeDB("HxCO3-"))
-
-    # add QD nodes to the tree
-    for node in X.items():
-        if isinstance(node, chemNodeDB): node.dendrolize('13C')
-
-    # Set the reported flags (must be done in the end when the leaves are added to the tree)
-    X.setReported(False)
-
-    # Set up the model parameters
-    pars = defaultTreePars(X)
-    pars["Mixture"]["alph"] = [2]
-
-    # Update default tree parameters
-    for key, val in flatten(pars).items():
-        try:
-            getattr(X[key[0]], key[1])[key[2]] = getattr(X[key[0]], key[1])[key[2]]._replace(dval=val)
-        except KeyError:
-            pass
-
-    # Save the tree and the parameters
-    for node in X.items(): node.reset()
-    saveTree('Elmar', X, pars)
-    X, pars = loadTree('Elmar')
-
-    return X, pars
-
-def setupEvA02():
-    X = chemNode("Mixture")
-
-    # add components
-    X.addChild(chemNodeDB("EvA02"))
-    #X.addChild(chemNodeDB("b-EvA02"))
-    X.addChild(chemNodeDB("HxCO3-"))
-    #X.addChild(chemNodeDB("CO2"))
-
-    # add QD nodes to the tree
-    for node in X.items():
-        if isinstance(node, chemNodeDB): node.dendrolize('13C')
-
-    # Set the reported flags (must be done in the end when the leaves are added to the tree)
-    X.setReported(False)
-
-    # Set up the model parameters
-    pars = defaultTreePars(X)
-    pars["Mixture"]["alph"] = [3]
-
-    # Save the tree and the parameters
-    for node in X.items(): node.reset()
-
-    # Update default tree parameters
-    for key, val in flatten(pars).items():
-        try:
-            getattr(X[key[0]], key[1])[key[2]] = getattr(X[key[0]], key[1])[key[2]]._replace(dval=val)
-        except KeyError:
-            pass
-
-    saveTree('EvA02', X, pars)
-    X, pars = loadTree('EvA02')
-
-    return X, pars
-
-def rel2abs(tree, relParsH):
-    """Converts a hierarchical structure of relative parameters to the corresponding absolute values for a given tree."""
-    absParsH = defaultTreePars(tree)
-    for name, pars in relParsH.items():
-        if name != '.':
-            for key, val_rel_arr in pars.items():
-                if key[-4:] == '_rel':
-                    val_abs_arr = []
-                    for i, val_rel in enumerate(val_rel_arr):
-                        spec = getattr(tree[name], key[:-4])[i]
-                        val_abs = (spec.max-spec.min)*(val_rel+1)/2 + spec.min
-                        val_abs_arr.append(val_abs)
-                    absParsH[name][key[:-4]] = val_abs_arr
-        #else: absParsH[name] = copy.copy(relParsH['.'])
-
-    return absParsH
-
 # Classes and functions for the basinhopping algorithm
 class RandomDisplacementBounds(object):
     """random displacement with bounds"""
@@ -624,6 +235,7 @@ class Workspace():
 
         # Dendrolize nodes if necessary
         for node in X.items():
+            #print(self.HCmode, node.HCmode)
             if type(node) is chemNodeDB and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
 
         ## Update the tree book
@@ -713,6 +325,7 @@ class Workspace():
     #@profile
     def _optimize(self, costFuncOpti, bounds, initVals, nhop=None, verbose=True):
         """Core optimization routine; used by all Series and Datums in this Workspace"""
+        eps_range = np.mean([np.abs(bnd[1]-bnd[0]) for bnd in bounds])     # Find the range of optomiztion (needed to set the step size for Jacobian)
         if len(initVals) > 2 or (nhop is not None and nhop > 0):
             res = optimize.basinhopping(costFuncOpti, initVals, \
                   niter = nhop if nhop is not None else config.OPTIM_maxBasinhoppingSteps, \
@@ -721,9 +334,8 @@ class Workspace():
             #      #take_step=MyTakeStep())
         else:
             res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
-                  options={'eps':1e-05})       # Step-size for computing the Jacobian
+                  options={'eps':eps_range*1e-05, 'ftol':1e-12})       # Step-size for computing the Jacobian
             #print(res['message'])
-        #print(res)
         return res
 
     def _sample(self, costFuncSmpl, bounds, initVals, nwalkers=None, nsteps=None, verbose=True):
@@ -810,6 +422,7 @@ class Workspace():
                                     'crntMetaF' : ser.crntMetaF,
                                     'smplDistF' : ser.smplDistF,
                                     'meta_function' : ser._meta,
+                                    'jointPrior' : ser._joint,
                                     'apod' : ser.apod,
                                     'data' : []})
             for dat in ser.data:
@@ -824,6 +437,7 @@ class Workspace():
                                                     'pckdPeaks' : dat.pckdPeaks,
                                                     'sF' : dat.sF,
                                                     'sT' : dat.sT,
+                                                    'jointPrior' : dat._joint,
                                                     'refChshKey' : dat.refChshKey
                                                     })
 
@@ -862,6 +476,8 @@ class Workspace():
                 newSeries.setMetaFunction(ser['meta_function'])
             if 'smplDistF' in ser.keys():
                 newSeries.smplDistF.update(ser['smplDistF'])
+            if 'jointPrior' in ser.keys():
+                newSeries.setJointPrior(ser['jointPrior'])
             for stp in ser['steps']:
                 newStep = Step()
                 newStep.frqBlkIds, newStep.parsKeys = stp.frqBlkIds, stp.parsKeys
@@ -881,6 +497,8 @@ class Workspace():
                     newDatum.smplDistF.update(dat['smplDistF'])
                 if 'refChshKey' in dat.keys():
                     newDatum.setReferenceChshKey(dat['refChshKey'])
+                if 'jointPrior' in dat.keys():
+                    newDatum.setJointPrior(dat['jointPrior'])
 
         if lshapeOrder is None: self.set_lshapeOrder(2)
 
@@ -907,6 +525,7 @@ class Series():
         self.crntMetaF = dict()       # A dictionary of current values of meta-parameters
         self.smplDistF = dict()
         self._meta = None             # A function that chnages the Series parameters controlled by the meta-parameters
+        self._joint = None
         self.fullReset(nf, apod, priors)           # Setup the frequency range and compute the spectra
 
     def __getattr__(self, attr):
@@ -1029,6 +648,14 @@ class Series():
         """Removes the meta function from the Series."""
         self._meta = None
 
+    def setJointPrior(self, func):
+        """Sets an externally defined function func to self._joint"""
+        self._joint = func
+
+    def remJointPrior(self):
+        """Removes the jointPrior from the Series."""
+        self._joint = None
+
     def addDatum(self, yT, **kwargs):
         """Adds a Datum to the Series."""
         # Create new Datum structure and add it to the Series
@@ -1107,6 +734,7 @@ class Series():
         """Resets the frequency scale for the entire Series and computed spectra."""
         if nf is None:
             nf = next_pow_of_2(len(self.t))     # Determine the number of samples in the full signal spectrum (possibly including zero-filling)
+
         if nf > 0:
             self.f = (np.fft.fftshift(np.fft.fftfreq(nf, self.t[1]-self.t[0]))+self.f0).reshape(-1,1)/self.c0
 
@@ -1132,7 +760,7 @@ class Series():
         """Removes al datasets from the series."""
         self.data.clear()
 
-    def addFreqBlock(self, lims=None, bslnOrder=(2, 2)):
+    def addFreqBlock(self, lims=None, bslnOrder=(0, 0)):
         """Adds a frequency block for optimization at certain in the self.freqBlocks arrays."""
         if lims is None:
             self.freqBlocks = []         # Reset the frequency blocks and add the entire signal
@@ -1175,6 +803,32 @@ class Series():
             return True
         else:
             return False
+
+    def reduce_range(self, lims):
+        """Reduces the frequency range of the signals to new limits lims (in ppm)."""
+
+        # Filter and cut each Datum
+        dt = self.t[1]-self.t[0]
+        for DDD in self.data:
+            DDD.yT, f0_new, dt_new = cut_roi(DDD.yT, [min(lims), max(lims)], self.c0, self.f0, dt)
+        nt_new = len(self.data[0].yT)
+        self.f0 = f0_new
+        self.t = np.linspace(0.0, dt_new*(nt_new-1), nt_new).reshape(-1, 1)     # Update the vector of sampling times
+
+        # Check if all frequency blocks are within the new range limits. Update/remove if necessary
+        indx_to_remove = []
+        for indx, blk in enumerate(self.freqBlocks):
+            if blk.min < min(lims) and blk.max > max(lims):
+                indx_to_remove.append(indx)       # Take a note to remove this block later
+            elif blk.min < min(lims):
+                self.altFreqBlock(lims=[min(lims), blk.max], indx=indx)
+            elif blk.max > max(lims):
+                self.altFreqBlock(lims=[blk.min, max(lims)], indx=indx)
+        for indx in indx_to_remove:
+            self.remFreqBlock(indx)
+
+        # Reset the signals
+        self.resetFreqs()
 
     def _fnc_prior(self, evalParsH, evalMetaF, parsKeys=None, customPriors=None):
         """Custom prior probability function. Can be used to describe dependencies among parameters in different planes. Use parsKeys to determine if the prior needs to be computed for the specific keys."""
@@ -1453,6 +1107,7 @@ class Datum():
         self.mdldPeaks = {}
         self.pckdPeaks = []
         self.refChshKey = None           # A key of the chemical shift that will be used as a reference (will be set to its default value and the rest of the spectrum shifted accordingly)
+        self._joint = None            # A joint prior of all parameters
         self.fullReset(crntParsH, priors)
 
     def __getattr__(self, attr):
@@ -1502,9 +1157,11 @@ class Datum():
 
     def resetCrntPars(self, crntParsH=None, priors=None):
         """Resets ALL current parameters."""
+        # Reset the dictionary of priors
         self.parsSpecDict.clear()
         if priors is not None:
             self.parsSpecDict.update(priors)
+
         self.crntParsH = self.getDfltParsH()
         if crntParsH is not None:
             for key, val in crntParsH.items():
@@ -1591,6 +1248,14 @@ class Datum():
                 customPriors[key] = par
             else:
                 self.parsSpecDict[key] = par
+
+    def setJointPrior(self, func):
+        """Sets an externally defined function func to self._joint"""
+        self._joint = func
+
+    def remJointPrior(self):
+        """Removes the jointPrior from the Datum."""
+        self._joint = None
 
     def isAutofittable(self, key, customPriors=None):
         """Checks if a parameter can be fitted algebraically/marginalized based on the definition of its prior distribution."""
@@ -1810,7 +1475,7 @@ class Datum():
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
     #@profile
-    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField='Re'):
+    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
         #funcType = 'TLS'
 
@@ -1821,6 +1486,8 @@ class Datum():
             robust = config.SAMPL_robustLS
         if funcType is None:
             funcType=config.SAMPL_funcType
+        if numberField is None:
+            numberField = config.SAMPL_numberField
         if funcType is 'TLS':
             numberField = 'Re'
 
@@ -2039,6 +1706,14 @@ class Datum():
                 parsKeys = flatten(self.crntParsH).keys()
             return sum([self.getPrior(key, customPriors).evalPrior(arg=evalParsH[key[0]][key[1]][key[2]]) for key in set(parsKeys) if key[1] not in ['ampl', 'theta', 'sigma2']])
 
+    def _fnc_joint(self, evalParsH):
+        """Evaluates the joint prior."""
+        if self._joint is not None:
+            return self._joint(evalParsH)
+        elif self.parent._joint is not None:
+            return self.parent._joint(evalParsH)
+        else: return 0.0
+
     def measure_noise(self, lims, lmda=5.0):
         """Measures the standard deviation of noise in the spectrum within the limits lims in ppm."""
 
@@ -2174,6 +1849,7 @@ class Datum():
 
         if evaluatePriors:
             result += self._fnc_prior(evalParsH, parsKeys, customPriors=customPriors)
+        result += self._fnc_joint(evalParsH)
 
         return result, meta
 
@@ -2209,14 +1885,14 @@ class Datum():
 
         return result, meta
 
-    def correct_phase(self, evalParsH=None, frqBlkIds=None, mode='both', mw=1024, verbose=True):
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, mode='PhA', mw=512, cfun='LS', verbose=True):
         """Phase correction by adjusting the residual.
         Inputs:
-        mode - choose which phase parameters to adjust ('both', 'ph0', 'ph1')
+        mode - choose which phase parameters to adjust ('PhA', 'Ph0', 'Ph1')
         """
 
         if verbose:
-            print('Correcting the phasing parameters...')
+            print('Adjusting the phasing parameters, {}'.format(mode))
 
         # 1. Update the settings
         if evalParsH is None:
@@ -2243,14 +1919,14 @@ class Datum():
         # Define the cost function to optimize (in terms of ph0 and ph1)
         costFuncPhase = lambda x : ph_cost(yF=self.yF[indxInRange]*ph, xF=xF, \
                         ph0=x[0], ph1=x[1], mw=mw, \
-                        f=(self.f[indxInRange]*self.c0-self.f0)*dt )         # Frequency scale in fractions of the sampling frequrncy
-        if mode == 'both':
+                        f=(self.f[indxInRange]*self.c0-self.f0)*dt, cfun=cfun )         # Frequency scale in fractions of the sampling frequrncy
+        if mode == 'PhA':
             costFuncOpti = lambda x : costFuncPhase(x)[0]
             bounds, initVals = ((-0.5, 0.5), (-0.5, 0.5)), [0.0, 0.0]
-        elif mode == 'ph0':
+        elif mode == 'Ph0':
             costFuncOpti = lambda x : costFuncPhase([x, 0.0])[0]
             bounds, initVals = ((-0.5, 0.5), ), [0.0]
-        elif mode == 'ph1':
+        elif mode == 'Ph1':
             costFuncOpti = lambda x : costFuncPhase([0.0, x])[0]
             bounds, initVals = ((-0.5, 0.5), ), [0.0]
 
@@ -2258,11 +1934,11 @@ class Datum():
         res = self._optimize(costFuncOpti, bounds, initVals, nhop=0, verbose=verbose)
 
         # Interpret the results
-        if mode == 'both':
+        if mode == 'PhA':
             ph0, ph1 = res.x
-        elif mode == 'ph0':
+        elif mode == 'Ph0':
             ph0, ph1 = res.x[0], 0.0
-        elif mode == 'ph1':
+        elif mode == 'Ph1':
             ph0, ph1 = 0.0, res.x[0]
 
         # Update and save the phasing parameters
@@ -2273,11 +1949,11 @@ class Datum():
         if verbose:
             print('Found values: ph0 = {:.4f}, ph1 = {:.4f}'.format(ph0, ph1))
 
-    def correct_residual(self, evalParsH=None, frqBlkIds=None, mw=1024, verbose=True):
+    def adjust_residual(self, evalParsH=None, frqBlkIds=None, mw=2048, verbose=True):
         """Correction of the model signals and the baseline to make the residual noise-like."""
 
         if verbose:
-            print('Correcting the baseline and residual.')
+            print('Adjusting the baseline and residual.')
 
         # 1. Update the settings
         if evalParsH is None:
@@ -2325,7 +2001,7 @@ class Datum():
         self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)
         self.zF_corr[indxInRange, :] = (posZa_corr - Za_corr)               # Additive correction for the model signals
         self.zF_corr[np.ix_(indxInRange, ampl_corr.nonzero()[0])] /= ampl_corr[ampl_corr.nonzero()]       # Scale by the amplitudes. Only those where ampl_corr != 0
-        self.bF_corr[indxInRange] = bln + np.sum(bF0)                     # Additive correction for the baseline
+        self.bF_corr[indxInRange] = bln + np.sum(bF0)                       # Additive correction for the baseline
 
     def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
@@ -2552,15 +2228,17 @@ class Datum():
             if self.bF is not None:
                 bF = self.bF if self.bF_corr is None else self.bF + self.bF_corr
                 xF += bF
+        else: zF, xF, bF = None, None, None
 
         inRange, outRange = splitFreq([self.freqBlocks[blk] for blk in self.steps[0].frqBlkIds], f=self.f)
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
         rmsResidual = 0.0
         if outRange:
             supsRatio = ceil(yFph.size / (2**13))   # Subsampling ratio; take no more than 2^13 points
             allIndx = [np.append(r.indxFreq[:-1:supsRatio], r.indxFreq[-1]) for r in outRange]   # Make sure that the first and the last indices of each group are included
             gapsPos = np.cumsum([r.size for r in allIndx])        # Positions of gaps
             allIndx = np.concatenate(allIndx)
-            f_outR = np.insert(self.f[allIndx], gapsPos, None)
+            f_outR = np.insert(self.f[allIndx], gapsPos, None) - dref_chsh
 
             # Plot measured data
             yF_outR = np.insert(yFph[allIndx], gapsPos, None)
@@ -2572,12 +2250,13 @@ class Datum():
                 ax_main.plot(f_outR, xF_outR.real if real else xF_outR.imag, '-', color='r', label='Fitted model')
 
                 # Plot the residuals
-                ax_residual.plot(f_outR, (yF_outR - xF_outR).real if real else (yF_outR - xF_outR).imag, '-', color='darkkhaki')
+                if ax_residual is not None:
+                    ax_residual.plot(f_outR, (yF_outR - xF_outR).real if real else (yF_outR - xF_outR).imag, '-', color='darkkhaki')
 
         if inRange:
             allIndx = np.concatenate([r.indxFreq for r in inRange])
             gapsPos = np.cumsum([r.indxFreq.size for r in inRange])
-            f_inR = np.insert(self.f[allIndx], gapsPos, None)
+            f_inR = np.insert(self.f[allIndx], gapsPos, None) - dref_chsh
 
             # Plot measured data
             yF_inR = np.insert(yFph[allIndx], gapsPos, np.nan)     #  - 1*step.bFph[allIndx]
@@ -2596,28 +2275,32 @@ class Datum():
                 ax_main.plot(f_inR, xF_inR.real if real else xF_inR.imag, '-', color='r', label='')
 
                 # Plot the residuals
-                rF_inR = (yF_inR - xF_inR).real if real else (yF_inR - xF_inR).imag
-                ax_residual.plot(f_inR, rF_inR, '-', color='darkkhaki')
-                rmsResidual += np.sqrt(np.nanmean(np.abs(rF_inR)**2))
+                if ax_residual is not None:
+                    rF_inR = (yF_inR - xF_inR).real if real else (yF_inR - xF_inR).imag
+                    ax_residual.plot(f_inR, rF_inR, '-', color='darkkhaki')
+                    rmsResidual += np.sqrt(np.nanmean(np.abs(rF_inR)**2))
 
         # Show the residuals plot below the graph
         # Set ticks and labels
         #plt.setp(ax_main.get_xticklabels(), visible=False)
         ax_main.set_xlabel('')
         ax_main.ticklabel_format(scilimits=(-3,3))
-        ax_residual.ticklabel_format(scilimits=(-3,3))
-        ax_residual.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-        # Show RMS of the residual
-        ax_residual.text(0.01, 0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
+        if ax_residual is not None:
+            ax_residual.ticklabel_format(scilimits=(-3,3))
+            ax_residual.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
+            # Show RMS of the residual
+            ax_residual.text(0.01, 0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
                         horizontalalignment='left', verticalalignment='top', transform = ax_residual.transAxes)
+        else:
+            ax_main.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
 
         # Plot optimization limits
         if showRanges:
             for i, blk in enumerate(self.freqBlocks):
                 if showRanges == 'all':
-                    ax_main.axvspan(blk.min, blk.max, alpha=0.2 if i in self.steps[0].frqBlkIds else 0.05, facecolor='yellow')
+                    ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2 if i in self.steps[0].frqBlkIds else 0.05, facecolor='yellow')
                 elif showRanges == 'active' and i in self.steps[0].frqBlkIds:
-                    ax_main.axvspan(blk.min, blk.max, alpha=0.2, facecolor='yellow')
+                    ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2, facecolor='yellow')
 
         if showLegend: ax_main.legend(loc=0)
 
@@ -2627,7 +2310,7 @@ class Datum():
         ax_main.autoscale()    # update ax.viewLim using the new dataLim
         if ax_main.get_xlim()[1] > ax_main.get_xlim()[0]: ax_main.invert_xaxis()
 
-        if returnSignals: return self.f, yFph, xF
+        if returnSignals: return self.f - dref_chsh, yFph, xF
 
     def evalForPlot(self, key, frqBlkIds=None, lims=None, npts=75):
         """Returns an array of argument values and the values of log likelihood, prior, and posterior."""
@@ -2881,23 +2564,45 @@ def saveFID(xT, c0, f0, dt, tau=0., fname='fid'):
         fid.write('Spectrometer              = "Python"\n')
         fid.write('Software                  = "Python"')
 
-def cut_roi(xT, c0, f0, dt, band, recenter=True, subsample=True):
-    """Applies a bandpass filter to the time-domain signal xT specified but cutoff frquencies defined in the tuple band."""
-    # Center the signal to the middle of the new range in ppm
-    old_center = f0 / c0       # Center of the initial ppm scale (in ppm)
-    new_center = (max(band) + min(band)) / 2      # Center of the new ppm scale
-    f0_new = new_center * c0
+def cut_roi_ver2(xT, lims, c0, f0, dt, subsample=True):
+    """Applies a bandpass filter to the signal to cut a region of interest within the limits lims.
+    Returns the resulting filtered signal along with new fo and dt parameters if the signal was subsampled.
+    A second version of the cut_roi function."""
     nt = len(xT)
-    t = np.linspace(0, (nt-1)*dt, nt)
-    eT = np.exp(-1j*2*np.pi*(f0_new-f0)*t).ravel()
-    yT = xT.ravel() * eT    # Shift the signal
+    t = np.linspace(0.0, dt*(nt-1), nt).reshape(xT.shape)
 
-    # Create a lowpass filter
-    nyq = 0.5/dt
-    b, a = scipy.signal.cheby1(8, 0.01, (max(band)-min(band))*c0*dt)
-    #b, a = scipy.signal.iirdesign(wp=(max(band)-min(band))*c0*dt, ws=1.1*(max(band)-min(band))*c0*dt, gpass=0.1, gstop=30)
-    yT = scipy.signal.filtfilt(b, a, yT).reshape(-1,1)
-    return yT, c0, f0_new, dt
+    # Center the input signal wrt to the specified lims
+    f0_new = c0*np.sum(lims) / 2.0
+    cutoff = c0*(np.max(lims) - np.sum(lims)/2.0) / (1/(2*dt))           # Boundary of the limit in chsh as a fraction of the total chsh range
+    xT = xT * np.exp(1j*2*np.pi * (f0-f0_new) * t)
+
+    # Filter and subsample all at once
+    subs_factor = int(np.floor(0.99 / cutoff))
+    dt_new = dt*subs_factor
+    yT = scipy.signal.decimate(xT, subs_factor, axis=0).reshape(-1,1)
+
+    return yT, f0_new, dt_new
+
+def cut_roi(xT, lims, c0, f0, dt, subsample=True):
+    """Applies a bandpass filter to the signal to cut a region of interest within the limits lims. Returns the resulting filtered signal along with new fo and dt parameters if the signal was subsampled."""
+    nt = len(xT)
+    t = np.linspace(0.0, dt*(nt-1), nt).reshape(xT.shape)
+
+    # Center the input signal wrt to the specified lims
+    f0_new = c0*np.sum(lims) / 2.0
+    cutoff = c0*(np.max(lims) - np.sum(lims)/2.0) / (1/(2*dt))           # Boundary of the limit in chsh as a fraction of the total chsh range
+    xT = xT * np.exp(1j*2*np.pi * (f0-f0_new) * t)
+
+    ## Define the LP filter and apply it to the signal
+    b, a = scipy.signal.butter(10, cutoff, 'low')
+    yT = scipy.signal.filtfilt(b, a, xT, axis=0).reshape(-1,1)
+
+    # Subsample
+    up_factor, down_factor = 100, int(np.floor(100 / cutoff))
+    dt_new = dt/up_factor*down_factor
+    yT = scipy.signal.resample_poly(yT, up_factor, down_factor).reshape(-1,1)
+
+    return yT, f0_new, dt_new
 
 #@profile
 def whitsm(y, lmda=5.0):
@@ -3130,7 +2835,7 @@ def wden(x_in, wname = 'sym8', tptr='sqtwolog', sorh='hard', scal='mln', wsize=1
     return x_out
 
 # Phasing cost
-def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512):
+def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
     """Calculate the cost function for phasing the data.
     yF - measured (unphased) spectrum
     xF - fitted model
@@ -3155,4 +2860,11 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512):
     res = nmrglue.process.proc_bl.med(den.ravel(), mw).reshape(-1,1)
     bln = (den - res).reshape(-1,1)
 
-    return np.linalg.norm(bln - np.mean(bln), 2), yFph, res, bln
+    # Compute teh cost function
+    if cfun == 'LS':
+        val = np.linalg.norm(bln - np.mean(bln), 2)
+    elif cfun == 'TV':
+        val = np.linalg.norm(bln[1:] - bln[:-1], 1)
+
+    return val, yFph, res, bln
+    #return np.linalg.norm(res - np.mean(res), 2), yFph, res, bln
