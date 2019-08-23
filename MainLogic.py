@@ -323,7 +323,7 @@ class Workspace():
         return SSS
 
     #@profile
-    def _optimize(self, costFuncOpti, bounds, initVals, nhop=None, verbose=True):
+    def _optimize(self, costFuncOpti, bounds, initVals, nhop=None, respectBounds=True, verbose=True):
         """Core optimization routine; used by all Series and Datums in this Workspace"""
         eps_range = np.mean([np.abs(bnd[1]-bnd[0]) for bnd in bounds])     # Find the range of optomiztion (needed to set the step size for Jacobian)
         if len(initVals) > 2 or (nhop is not None and nhop > 0):
@@ -336,6 +336,23 @@ class Workspace():
             res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
                   options={'eps':eps_range*1e-05, 'ftol':1e-12})       # Step-size for computing the Jacobian
             #print(res['message'])
+
+        # Discard the found parameters if any of them lies close to its range and run the optimization again
+        if respectBounds:
+            closeToBounds = np.isclose(bounds, res.x.reshape(-1,1)).any(axis=1)
+            if closeToBounds.all():
+                print('Optimization failed. All found values are close to bounds.')
+                return None
+            elif closeToBounds.any():
+                # Sustitute the initial values for the bad parameter in the optimization
+                P = np.delete(np.eye(len(initVals)), np.where(closeToBounds)[0], axis=1)
+                print('Start inner optimization loop with {} parameters'.format( len(np.where(closeToBounds)[0]) ) )
+                res = self._optimize(lambda x : costFuncOpti( P.dot(x).ravel()+np.where(closeToBounds, initVals, 0.0)), \
+                                    [bnd for bnd, flg in zip(bounds, ~ closeToBounds) if flg], \
+                                    [val for val, flg in zip(initVals, ~ closeToBounds) if flg], nhop, verbose=verbose )
+                if res is not None:
+                    res.x = P.dot(res.x.reshape(-1,1)).ravel()+np.where(closeToBounds, initVals, 0.0)
+
         return res
 
     def _sample(self, costFuncSmpl, bounds, initVals, nwalkers=None, nsteps=None, verbose=True):
@@ -515,8 +532,8 @@ class Series():
         self.name = name if name is not None else 'Series ' + str(len(self.parent.series)+1)
         self.c0 = c0
         self.f0 = f0
-        self.t = t.reshape(-1,1) if t is not None else []
-        self.f = []
+        self.t = t.reshape(-1,1) if t is not None else np.array([])
+        self.f = np.array([])
         self.data = []               # A list of Datum structures
         self.steps = [Step(repRootNames=self.repRootNames)]               # Fitting steps; each entry is a set of parsKeys tuples and set of frqBlkIds
         self.freqBlocks = []         # a list of optimization frequency ranges
@@ -840,7 +857,7 @@ class Series():
             parsKeys = [key for key in self.parsSpecDict.keys() if len(key)==2]
             return sum([self.getPrior(key, customPriors).evalPrior(arg=evalMetaF[key]) if len(key)==2 else 0 for key in set(parsKeys) ])
 
-    def evaluate(self, evalParsH=None, evalMetaF=None, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False, evaluateAll=True):
+    def evaluate(self, evalParsH=None, evalMetaF=None, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False, evaluateAll=True):
         """Evaluates the objective function (sum of logLikelihoods for each datum + sum of logPriors).
            Inputs:
            evalParsH - a list of hierarchical dictionaries one for each Datum
@@ -864,7 +881,7 @@ class Series():
             parsKeysDatum = set([key[-3:] for key in parsKeys if key[0]==i or len(key)==3]) if parsKeys is not None else None    # Select only keys of non-linear parameters. This will exclude all meta-parameters' keys
             autoKeysDatum = set([key[-3:] for key in autoKeys if key[0]==i or len(key)==3]) if autoKeys is not None else None
             if (not evaluateAll) and (parsKeysDatum == set([])): continue          # Skip some datasets that we don't need to evaluate (there are no keys relating to the i-th dataset)
-            _res, meta = DDD.evaluate(evalParsH[i], parsKeysDatum, autoKeysDatum, frqBlkIds, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
+            _res, meta = DDD.evaluate(evalParsH[i], parsKeysDatum, autoKeysDatum, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
             result += _res
             m_ampl[..., i] = meta['ampl'][0].ravel()
             S_ampl[...,i] = meta['ampl'][1]
@@ -876,7 +893,7 @@ class Series():
 
         return result, {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
 
-    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nhop=None, verbose=True):
+    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nhop=None, respectBounds=True, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples of the form: (datum_id, node_name, parameter_name, parameter_id), e.g. (2, 'Sucrose-F', 'chshQD', 5) )."""
 
         # Prepare keys and starting parameters. Expand parameter keys (if 3-tuples were provided, they will be substituted with 4-tuples for all datasets) and make sure there are no repeats
@@ -901,19 +918,20 @@ class Series():
                     elif len(k) == 2:
                         evalMetaF[k] = v
                 # Evaluate the function skipping the datasets that are not present in parsKeys
-                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
+                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
 
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
 
-            # Update the structure of all parameters
-            for k, v in zip(parsKeys, res.x):
-                if len(k) == 4:
-                    self.data[k[0]].setCrntVal(k[1:], v) #   crntParsH[k[1]][k[2]][k[3]] = v
-                elif len(k) == 2:
-                    self.crntMetaF[k] = v
+            if res is not None:
+                # Update the structure of all parameters
+                for k, v in zip(parsKeys, res.x):
+                    if len(k) == 4:
+                        self.data[k[0]].setCrntVal(k[1:], v) #   crntParsH[k[1]][k[2]][k[3]] = v
+                    elif len(k) == 2:
+                        self.crntMetaF[k] = v
 
         # Re-evaluatethe posterior
-        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
+        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -924,7 +942,7 @@ class Series():
 
         return result, meta
 
-    def sample(self, parsKeys, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
+    def sample(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=False)
@@ -934,7 +952,7 @@ class Series():
 
         # If there are no parameters to sample
         # First evaluate the cost function with current parameters. If there is nothing to sample, this will be output as the result (at least for some datasets).
-        value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
+        value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
         for j in range(len(self.data)):
             for i, a in enumerate(meta['ampl'][0]):
                 result[(j, self.repRootNames[i], 'ampl', 0)] = np.array([a[j]])
@@ -965,7 +983,7 @@ class Series():
                 elif len(k) == 2:
                     evalMetaF[k] = v
             # Evaluate the function skipping the datasets that are not present in parsKeys
-            return self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, customPriors, evaluateAll=evaluateAll)
+            return self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, evaluateAll=evaluateAll)
 
         sampler = self._sample(costFuncSmpl, bounds, initVals, nwalkers, nsteps)
 
@@ -1012,6 +1030,7 @@ class Series():
         parsKeys = sorted(list(parsKeys))
 
         if verbose:
+            print('\n')
             npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
             npar_fit = len(parsKeys)
             if npar_fit == 0:
@@ -1035,6 +1054,16 @@ class Series():
     def remove(self):
         """Removes itself from the Workspace"""
         self.parent.series.remove(self)
+
+    def copy(self, name=None):
+        """Creates a copy of the Series in the workspace"""
+        newSSS = self.addSeries(name = name if name is not None else self.name+'_COPY', c0=self.c0, f0=self.f0, \
+                                t=self.t.copy(), priors=copy.deepcopy(self.parsSpecDict))
+        for blck in self.freqBlocks:
+            newSSS.addFreqBlock(lims=(blck.min, blck.max), bslnOrder=blck.bslnOrder)
+        for DDD in self.data:
+            newSSS.addDatum(yT=DDD.yT.copy(), name=DDD.name, crntParsH=copy.deepcopy(DDD.crntParsH), priors=copy.deepcopy(DDD.parsSpecDict))
+        return newSSS
 
     def evalForPlot2D(self, keys, frqBlkIds=None, lims=None, npts=25):
         ndim = 2
@@ -1165,7 +1194,10 @@ class Datum():
         self.crntParsH = self.getDfltParsH()
         if crntParsH is not None:
             for key, val in crntParsH.items():
-                self.crntParsH[key].update(val)
+                try:
+                    self.crntParsH[key].update(val)
+                except KeyError:
+                    print('Key {} is absent in the list of parameters.'.format(key))
         self.smplDistF.clear()          # A flat dictionary of sampled (or marginalized) parameters
         self.mdldPeaks.clear()
         self.pckdPeaks.clear()
@@ -1475,7 +1507,7 @@ class Datum():
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
     #@profile
-    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None):
+    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, freqMask=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
         #funcType = 'TLS'
 
@@ -1516,6 +1548,10 @@ class Datum():
             indxPadding = np.concatenate(tuple(np.concatenate([np.arange(self.freqBlocks[i].indxFreq[0]-nw2, self.freqBlocks[i].indxFreq[0]),
                                                                np.arange(self.freqBlocks[i].indxFreq[-1]+1, self.freqBlocks[i].indxFreq[-1]+nw2+1)%len(self.f)] ) \
                                         for i in frqBlkIds)) if nw2>0 else np.array([], dtype='int')   # Extra indices used for padding when convolving the signals with lineshape kernel in frequency domain
+            if freqMask is not None:
+                dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0   # Reference chemical shift
+                unmaskedIndx = np.array([[f>msk[0] and f<msk[1] for msk in freqMask] for f in self.f[indxInRange]-dref_chsh ]).any(axis=1).ravel()
+                indxInRange = indxInRange[unmaskedIndx]
 
             if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
                 zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
@@ -1558,6 +1594,8 @@ class Datum():
             if numberField == 'Re':
                 bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
             #else: bslnPoly *= phFinRange
+            if freqMask is not None:
+                bslnPoly = bslnPoly[unmaskedIndx, :]
             nb = bslnPoly.shape[1]     # Total number of baseline terms
 
             # Define modelled and measured signals
@@ -1831,7 +1869,7 @@ class Datum():
     def set_bline(self):
         pass
 
-    def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False):
+    def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False):
         """Evaluates the objective function (logLikelihood + sum of logPriors).
            Inputs:
            evalParsH - hierarchical dictionary of parameters (node name -> parameter name -> list of parameters); use crntParsH by default
@@ -1845,7 +1883,7 @@ class Datum():
         if evalParsH is None:
             evalParsH = self.crntParsH
 
-        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, funcType, customPriors=customPriors, returnSignals=returnSignals, robust=robust, wnd=wnd)
+        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, freqMask, funcType, customPriors=customPriors, returnSignals=returnSignals, robust=robust, wnd=wnd)
 
         if evaluatePriors:
             result += self._fnc_prior(evalParsH, parsKeys, customPriors=customPriors)
@@ -1853,7 +1891,7 @@ class Datum():
 
         return result, meta
 
-    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nhop=None, verbose=True):
+    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nhop=None, respectBounds=True, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples)."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=verbose)
@@ -1863,18 +1901,19 @@ class Datum():
             evalParsH = copy.deepcopy(self.crntParsH)
             bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
             initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-            costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, robust=False)[0]
+            costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=False)[0]
 
             # Call the optimization routine
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
 
-            # Update the stored parameters
-            updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
-            if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
-            self.smplDistF.clear()
+            if res is not None:
+                # Update the stored parameters
+                updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
+                if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
+                self.smplDistF.clear()
 
         # Re-evaluate the posterior
-        result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
+        result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -1885,7 +1924,7 @@ class Datum():
 
         return result, meta
 
-    def adjust_phase(self, evalParsH=None, frqBlkIds=None, mode='PhA', mw=512, cfun='LS', verbose=True):
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, freqMask=None, mode='PhA', mw=512, cfun='LS', verbose=True):
         """Phase correction by adjusting the residual.
         Inputs:
         mode - choose which phase parameters to adjust ('PhA', 'Ph0', 'Ph1')
@@ -1904,7 +1943,7 @@ class Datum():
 
         # 2. Compute the model spectrum if necessary
         if self.zF is None:
-            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, autoKeys=[], returnSignals=True)
+            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, autoKeys=[], returnSignals=True)
         self.zF_corr, self.bF_corr = None, None           # Reset the corrections for the model matrix and the baseline
 
         # Find the model signal
@@ -1931,7 +1970,7 @@ class Datum():
             bounds, initVals = ((-0.5, 0.5), ), [0.0]
 
         # Call the optimization routine
-        res = self._optimize(costFuncOpti, bounds, initVals, nhop=0, verbose=verbose)
+        res = self._optimize(costFuncOpti, bounds, initVals, nhop=0, respectBounds=False, verbose=verbose)
 
         # Interpret the results
         if mode == 'PhA':
@@ -1949,7 +1988,7 @@ class Datum():
         if verbose:
             print('Found values: ph0 = {:.4f}, ph1 = {:.4f}'.format(ph0, ph1))
 
-    def adjust_residual(self, evalParsH=None, frqBlkIds=None, mw=2048, verbose=True):
+    def adjust_residual(self, evalParsH=None, frqBlkIds=None, freqMask=None, mw=2048, verbose=True):
         """Correction of the model signals and the baseline to make the residual noise-like."""
 
         if verbose:
@@ -1965,7 +2004,7 @@ class Datum():
 
         # 2. Compute the model spectrum if necessary
         if self.zF is None or self.bF is None:
-            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, autoKeys=[], returnSignals=True)
+            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, autoKeys=[], returnSignals=True)
 
         # Find the model signal
         ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames])
@@ -2003,7 +2042,7 @@ class Datum():
         self.zF_corr[np.ix_(indxInRange, ampl_corr.nonzero()[0])] /= ampl_corr[ampl_corr.nonzero()]       # Scale by the amplitudes. Only those where ampl_corr != 0
         self.bF_corr[indxInRange] = bln + np.sum(bF0)                       # Additive correction for the baseline
 
-    def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
+    def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys)
@@ -2013,7 +2052,7 @@ class Datum():
         # If no parameters are set for sampling, just evaluate the marginal posterior
         if len(parsKeys) == 0:
             # Nothing to sample; just evaluate the function
-            value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
+            value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
 
             m_ampl = np.array(meta['ampl'][0]).reshape(-1, 1)
             S_ampl = meta['ampl'][1]
@@ -2036,7 +2075,7 @@ class Datum():
         evalParsH = copy.deepcopy(self.crntParsH)
         bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
         initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-        costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors)
+        costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors)
 
         sampler = self._sample(costFuncSmpl, bounds, initVals, nwalkers, nsteps)
 
@@ -2075,7 +2114,7 @@ class Datum():
 
         return(result)
 
-    def sweep(self, key, lims=None, npts=50, reoptimize=False, frqBlkIds=None, evaluatePriors=False):
+    def sweep(self, key, lims=None, npts=50, reoptimize=False, frqBlkIds=None, freqMask=None, evaluatePriors=False):
         # Evaluates the posterior and computes the amplitudes while sweeping the parameter parKey in the range lims
         par = self.getPrior(key)     # Settings for the prior distribution of this parameter key
         if lims is None: lims = (par.min, par.max)
@@ -2085,7 +2124,7 @@ class Datum():
         evalParsH = copy.deepcopy(self.crntParsH)      # Make a copy of the parameter dictionary that will be used for evaluation
         for i, x in enumerate(x_arr):
             evalParsH[key[0]][key[1]][key[2]] = x
-            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, funcType=None, evaluatePriors=True, parsKeys=[key], autoKeys=None, robust=False)
+            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=None, evaluatePriors=True, parsKeys=[key], autoKeys=None, robust=False)
             lpri_arr[i] = par.evalPrior(arg=x)
 
         llkl_arr = lpst_arr - lpri_arr
@@ -2113,7 +2152,8 @@ class Datum():
         #parsKeys = [key for key in parsKeys if not self.isAutofittable(key)]
 
         if verbose:
-            npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
+            print('\n')
+            npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 'all possible'
             npar_fit = len(parsKeys)
             if npar_fit == 0:
                 print("Nothing to fit; {} parameters inferred in closed form...".format(npar_auto))
@@ -2170,6 +2210,14 @@ class Datum():
         xF = np.fft.fftshift(np.fft.fft(xT, nf, axis=0), axes=0) / np.sqrt(nf)
 
         return xT, xF
+
+    def residual_spectrum(self):
+        """Computes the residual spectrum after model fitting."""
+        # Phase the data
+        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
+        yFph = self.yF * ph
+
+        return yFph - self.modelled_signal(baseline=True)[1]
 
     def remove(self):
         """Removes itself from the Series"""
@@ -2356,7 +2404,7 @@ class Datum():
             evalParsH[keys[1][0]][keys[1][1]][keys[1][2]] = y
             # Evaluate the function skipping the datasets that are not present in parsKeys
             lpst = self.evaluate(evalParsH, parsKeys=keys, frqBlkIds=frqBlkIds, funcType=None, evaluatePriors=True, robust=False)[0]
-            lpri = pars[0].evalPrior(arg=x) + pars[1].evalPrior(arg=y)
+            lpri = self._fnc_prior(evalParsH, parsKeys=keys) + self._fnc_joint(evalParsH)
             return lpst, lpri
 
         lpst_arr, lpri_arr = np.vectorize(func)(*np.meshgrid(x_arr, y_arr, sparse=True))     # Return a table of f(x, y)
@@ -2506,6 +2554,15 @@ def load_workspace(filename):
         dataPack, GUIsettings = dill.load(fp)
     wsp = Workspace()       # Define a new Workspace object
     wsp.unpack(dataPack)    # Unpack the loaded data into it
+
+    # set the global config settings
+    if GUIsettings is not None:
+        try:
+            stngConfig = GUIsettings.pop('_config')
+            config.from_dict(config, stngConfig)
+        except KeyError:
+            print('Using default global settings.')
+
     return wsp, GUIsettings
 
 def save_workspace(filename, wsp, GUIsettings=None):

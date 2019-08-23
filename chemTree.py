@@ -216,6 +216,8 @@ class chemSpec:
         else:
             jcplAsgn = None
 
+        print(jcplAsgn)
+
         spsyBig = spsySpec(chsh, jcpl, chshAsgn, jcplAsgn)
         spsyAll = splitSpSy(spsyBig)
         for i, m in enumerate(mult):
@@ -269,8 +271,8 @@ parsSpec.dflt = lambda self : (self.min + self.max) / 2 if self.dval is None els
 smplSpec = namedtuple('smplSpec', 'min, max, mean, median, var, q1, q3, p5, p95, hpd5')     # Specification of MCMC samples
 smplSpec.__new__.__defaults__ = (-np.inf, np.inf, None, None, None, None, None, None, None, None)
 
-peakSpec = namedtuple('peakSpec', 'chsh, fwhm, intn')
-peakSpec.__new__.__defaults__ = (0, None, 1)     #
+peakSpec = namedtuple('peakSpec', 'chsh, intn, fwhm')
+peakSpec.__new__.__defaults__ = (0, 1, None)     #
 
 spsySpec = namedtuple('spsySpec', 'chsh, jcpl, chshAsgn, jcplAsgn, mult')
 spsySpec.__new__.__defaults__ = (None, None, None, None, None, 1)
@@ -585,8 +587,8 @@ def spinop(n_spin):
 def QDsimsGrpd2(H, T):
     """Simulates a QD system based on the spin frequencies and j couplings in Hz. See, e.g., http://www.users.csbsju.edu/~frioux/nmr/Speclab4.htm"""
     n_spin = int(math.log2(T.shape[0]))
-    # 5. Compute the eigenvalues/eigenvectors of the Hamiltonian
 
+    # 5. Compute the eigenvalues/eigenvectors of the Hamiltonian
     vH, uH = np.linalg.eigh(np.asarray(H))      # Need to make sure that the Hamiltonian is passed as an array, not a matrix
     #vH, uH = scipy.linalg.eigh(H)              # Possibly faster in some cases???
 
@@ -1198,6 +1200,8 @@ class chemNodeQD(chemNode):
                         H = H + jcpl * spinop
                 except AttributeError:
                     # TO BE REMOVED IN LATER VERSIONS. LEFT FOR COMPATIBILITY
+                    print('Using the old version of QM model.')
+
                     def spinop(n_spin):
                         # Construct Carrtesian spin operators; will be used to build the Hamiltonian
                         # 1. Define the Pauli matrices (for proton, a spin-1/2 particle)
@@ -1244,8 +1248,11 @@ class chemNodeQD(chemNode):
                     for jcpl, spinop in zip(jcplQD, self.spinopsJ):
                         H += jcpl * spinop
 
-                #print("H", np.linalg.matrix_rank(H))
+                #print("H", np.linalg.matrix_rank(H), H.shape)
+                # print(self.chshAsgn)
+                # print(self.jcplAsgn)
                 omega, intn = QDsimsGrpd2(H, self.TM)
+                #print(H.shape)
                 #return omega, intn
 
                 # 9. Add the transitions to the arrays of their closest resonances
@@ -1478,9 +1485,9 @@ def collectPeaks(tree, c0, pars=None):
     # 3. Collect the poles
     allPeaks = {}
     for rep in repRoots:
-        allPeaks[rep.name] = {leaf.name : [peakSpec(chsh=pole.imag/(c0*np.pi*2), fwhm=-pole.real/np.pi, intn=leaf.qPolesIntn[i]*leaf.intn) for i, pole in enumerate(leaf.uPoles)] \
+        allPeaks[rep.name] = {leaf.name : [peakSpec(chsh=pole.imag/(c0*np.pi*2), intn=leaf.qPolesIntn[i]*leaf.intn, fwhm=-pole.real/np.pi) for i, pole in enumerate(leaf.uPoles)] \
                               for leaf in rep.leaves() if leaf.uPoles.size > 0}
-        #allPeaks[rep.name] = [peakSpec(chsh=pole.imag/(c0*np.pi*2), fwhm=-pole.real/np.pi, intn=leaf.qPolesIntn[i]*leaf.intn) for leaf in rep.leaves() if leaf.uPoles.size > 0 for i, pole in enumerate(leaf.uPoles)]
+        #allPeaks[rep.name] = [peakSpec(chsh=pole.imag/(c0*np.pi*2), intn=leaf.qPolesIntn[i]*leaf.intn, fwhm=-pole.real/np.pi) for leaf in rep.leaves() if leaf.uPoles.size > 0 for i, pole in enumerate(leaf.uPoles)]
 
     return allPeaks
 
