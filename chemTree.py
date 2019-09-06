@@ -216,7 +216,7 @@ class chemSpec:
         else:
             jcplAsgn = None
 
-        print(jcplAsgn)
+        # print(jcplAsgn)
 
         spsyBig = spsySpec(chsh, jcpl, chshAsgn, jcplAsgn)
         spsyAll = splitSpSy(spsyBig)
@@ -613,12 +613,12 @@ def QDsimsGrpd2(H, T):
 
     p = p[0:n_spin*(2**(n_spin-1))]    # Keep only peaks corresponding to single transitions (assuming they are the largest)
     p = p[(intn[p] > 0.00000001)]                # Keep only the largest peaks
-    #print(n_spin, len(p))
+    # print(n_spin, len(p))
 
-    """p_max = np.argmin( np.diff(np.log(intn[p]))[:2*n_spin*(2**(n_spin-1))] ) + 1     # All coefficients before the sharpest drop in their intensity but at most 2*n_spin*(2**(n_spin-1))
+    p_max = np.argmin( np.diff(np.log(intn[p]))[:2*n_spin*(2**(n_spin-1))] ) + 1     # All coefficients before the sharpest drop in their intensity but at most 2*n_spin*(2**(n_spin-1))
     #p_max=1000
     p = p[:p_max]
-    print(p_max)"""
+    # print(p_max)
 
     omega = omega[p]
     intn = intn[p]
@@ -1356,10 +1356,10 @@ class chemNodeT(chemNode):
 
 class chemNodeDB(chemNode):
     "Class for a node describing a chemical from the database, inherited from chemNode"
-    def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias=''):
+    def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias='', nameDB=None):
         chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
-        if name in chemDB:
-            self.QDpars = chemDB[self.name]    # Parameters from the database
+        if name in chemDB or nameDB in chemDB:
+            self.QDpars = chemDB[self.name if nameDB is None else nameDB]    # Parameters from the database
         else:
             raise RuntimeError("The chemical \'" + self.name + '\' is not in the database.')
         self.HCmode = None            # Mode of experiment if the node is dendrolized
@@ -1376,9 +1376,35 @@ class chemNodeDB(chemNode):
             for chld in self._children:
                 chld.setReported(flag)
 
+    def setDefaultQD(self, key, dval, min=None, max=None):
+        """Sets (updates) the default distributions of QD parameters. key is a 2-tuple of the form ('chshH', i), ('jcplHH', i), or ('chshC', i), where i is the number of the parameter in the zero-order, e.g. ('chshH', 2) for the third chemical shift."""
+
+        # Check if the entire list of parameters need to be updated (e.g. all chshH or all jcplHH, etc.)
+        if not isinstance(key, tuple):
+            if len(getattr(self.QDpars, key)) == len(dval):
+                for i, val in enumerate(dval):
+                    # Call the function recursively
+                    self.setDefaultQD((key, i), val)
+            else:
+                raise RuntimeError("The number of supplied values does not match the size of the parameter array.")
+
+        else:
+            # Set up the range for the parameter
+            if min is None or max is None:
+                if 'chsh' in key[0]:
+                    min, max = np.round(dval, decimals=1) + np.array([-0.05, 0.05])
+                elif 'jcpl' in key[0]:
+                    min, max = np.round(dval) + np.array([-1, 1])
+
+            # Update the specification
+            parsArray = getattr(self.QDpars, key[0])          # An entire array of the parameters, one of which needs to be updated
+            parsArray[key[1]] = parsArray[key[1]]._replace(dval=dval, min=min, max=max)
+
+
+
     def dendrolize(self, experiment="1H"):
         "Creates chemTrees based on the QD parameters of the node"
-        self.QDpars = chemDB[self.name]    # Update the parameters from the database
+        # self.QDpars = chemDB[self.nameDB]    # Update the parameters from the database
         self.HCmode = experiment
         # 1. Define big spin systems based on the type of experiment
         #if experiment == "1H":
@@ -1520,7 +1546,9 @@ def saveTree(fname, tree, pars=None):
     """Saves a chemTree datastructure along with its defauld parameters within a pickled format."""
     if pars is None:
         pars = defaultTreePars(tree)
-    with open(fname+'.ctr', 'wb') as fp:
+    if fname[-4:] != '.ctr':
+        fname += '.ctr'
+    with open(fname, 'wb') as fp:
         pickle.dump({"tree":tree, "pars":pars}, fp)
 
 def loadTree(fname):
