@@ -31,7 +31,7 @@ colrseq = [(0.1216,    0.4706,    0.7059),\
     (0.9843,    0.6039,    0.6000),\
     (0.9922,    0.7490,    0.4353),\
     (0.7922,    0.6980,    0.8392),\
-    (1.0000,    1.0000,    0.6000)]      # Sequence of colors to plot the results
+    (1.0000,    1.0000,    0.6000)]*2      # Sequence of colors to plot the results
 
 def as_dict():
     return {'QD_AggregatePeaksThreshold' : QD_AggregatePeaksThreshold,

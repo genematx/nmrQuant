@@ -1506,7 +1506,7 @@ class Datum():
         meta['ampl'] = (np.abs(m_ampl[:na]), S_ampl[:na, :na].real)
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
-    #@profile
+    # @profile
     def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, freqMask=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
         #funcType = 'TLS'
@@ -1617,7 +1617,7 @@ class Datum():
         for i in range(na):
             key = (self.repRootNames[i], 'ampl', 0)
             if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
-                # Set a Gaussian prior with supplied mean and variance
+                # Set a Gaussian prior with the supplied mean and variance
                 spec = self.getPrior(key, customPriors=customPriors)
                 m0[i], S0[i,i] = spec.p1, spec.p2
             else:

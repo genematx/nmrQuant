@@ -9,6 +9,9 @@ import scipy
 import config
 import math
 from itertools import product
+from numba import njit
+import numexpr as ne
+import copy
 
 # Ordered set class to store children of a node
 import collections
@@ -207,6 +210,7 @@ class chemSpec:
         if mode == '1H':
             jcplAsgn = np.zeros((len(chshAsgn), len(chshAsgn)), 'int32')
             for row in range(len(jcpl)):
+                if pair[row][1] < pair[row][0]: pair[row].reverse()      # Make sure the order of the chemical shifts is right
                 for i, m in enumerate(chshAsgn):
                     for j, n in enumerate(chshAsgn):
                         if pair[row][0] == m-1 and pair[row][1] == n-1 and j > i:
@@ -215,8 +219,6 @@ class chemSpec:
 
         else:
             jcplAsgn = None
-
-        # print(jcplAsgn)
 
         spsyBig = spsySpec(chsh, jcpl, chshAsgn, jcplAsgn)
         spsyAll = splitSpSy(spsyBig)
@@ -236,7 +238,7 @@ class chemSpec:
                 'jcplHH': self.jcplHH,
                 'pairHH': self.pairHH}
 
-def readChemDB(name, fname='chemDB'):
+def readChemDB(fname='chemDB'):
     """Reads a chemDB in JSON format and convers it to dictionary of chemSpec class objects."""
     with open(fname+'.json', 'r') as fp:
         chemDB = json.load(fp)
@@ -520,7 +522,7 @@ def printChemDB():
     for k, v in chemDB.items():
         print(k,v)
 
-chemDB = readChemDB('chemDB.json')     # Load the chemical database
+chemDB = readChemDB()     # Load the chemical database
 
 # QD simulations
 def transition_indices(n_spin, k=0):
@@ -615,10 +617,10 @@ def QDsimsGrpd2(H, T):
     p = p[(intn[p] > 0.00000001)]                # Keep only the largest peaks
     # print(n_spin, len(p))
 
-    p_max = np.argmin( np.diff(np.log(intn[p]))[:2*n_spin*(2**(n_spin-1))] ) + 1     # All coefficients before the sharpest drop in their intensity but at most 2*n_spin*(2**(n_spin-1))
-    #p_max=1000
-    p = p[:p_max]
-    # print(p_max)
+    # p_max = np.argmin( np.diff(np.log(intn[p]))[:2*n_spin*(2**(n_spin-1))] ) + 1     # All coefficients before the sharpest drop in their intensity but at most 2*n_spin*(2**(n_spin-1))
+    # #p_max=1000
+    # p = p[:p_max]
+    # # print(p_max)
 
     omega = omega[p]
     intn = intn[p]
@@ -983,7 +985,7 @@ class chemNode(treeNode):
         super().__init__(name, alias)
         self._reported = True
         self.chsh = chsh if chsh is not None else [parsSpec(min=-0.5, max=0.5)]
-        self.alph = alph if alph is not None else [parsSpec(min=0., max=25., dval=0.0)]
+        self.alph = alph if alph is not None else [parsSpec(min=-5., max=25., dval=0.0)]
         self.ampl = ampl if ampl is not None else [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=1.0)]
         self.phase = phase if phase is not None else [parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)]
         self.intn = intn         # Global intensity
@@ -1092,7 +1094,7 @@ class chemNode(treeNode):
         "Computes the node's response in the frequency domain assuming that all nodes have updated uPoles."
         # # Check if the signal needs to be reevaluated
         # if self.uF == []:
-        self.uF = 0.
+        self.uF = np.zeros((len(f), 1), dtype='complex128').ravel()
         for chld in self.children():
             chld.evalFreq(f, dt, c0, f0, tau)
             self.uF += chld.uF
@@ -1107,7 +1109,7 @@ class chemNodeQD(chemNode):
         self.chshQD = spsy.chsh
         self.jcplQD = spsy.jcpl
         self.intn = spsy.mult
-        self.alphQD = alphQD if alphQD is not None else [parsSpec(min=0, max=25, label=c.label, dval=0) for c in self.chshQD]
+        self.alphQD = alphQD if alphQD is not None else [parsSpec(min=-5.0, max=25.0, label=c.label, dval=0) for c in self.chshQD]
         self.chshAsgn = spsy.chshAsgn
         self.jcplAsgn = spsy.jcplAsgn
         self.oldParsQD = {"chsh":None, "jcpl":None}
@@ -1260,6 +1262,8 @@ class chemNodeQD(chemNode):
                 indMin = np.argmin(abs(omega.reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
                 for i in range(len(chshQD)):
                     indx = np.where(indMin == i)
+                    if len(indx) == 0:
+                        print('No peaks in this group.')
                     freqQPeaks[i] = omega[indx]
                     intnQPeaks[i] = intn[indx]
             else:
@@ -1347,21 +1351,34 @@ class chemNodeT(chemNode):
             return 1
         else: return 0
 
+    # @njit
+    # @profile
     def evalFreq(self, f, dt, c0, f0=0, tau=0):
         "Computes the node's response in the frequency domain assuming that all ancestors have updated uPoles."
         # Check if the signal needs to be reevaluated
         if self.uF == [] or self.uF.size != f.size:
-            self.uF = np.conj( np.exp(1j*tau*(self.uPoles.imag - 2*np.pi*f0)).reshape((1,-1)) / ( 1 - np.exp( (1j*2*np.pi*(c0*f-f0).reshape((-1,1)) + np.conj(self.uPoles - 1j*2*np.pi*f0).reshape((1,-1)) )*dt )) ) * np.sqrt((f[1]-f[0])*c0*dt)
-            self.uF = self.intn * np.inner(self.uF, self.qPolesIntn).ravel()
+            # print(self.name)
+            # print(self.uPoles.shape)
+            self.uF = np.exp(1j*tau*(self.uPoles.imag - 2*np.pi*f0)).reshape((1,-1))
+            x1 = 1j*2*np.pi*(c0*f-f0).reshape((-1,1))
+            x2 = np.conj(self.uPoles - 1j*2*np.pi*f0).reshape((1,-1))
+            # self.uF = self.uF / -np.expm1((x1+x2)*dt)
+            self.uF = ne.evaluate( 'x / -expm1( (x1 + x2)*dt )', local_dict={'x':self.uF, 'x1':x1, 'x2':x2, 'dt':dt})       # Compute exp(x)-1 in one go
+            self.uF = ne.evaluate('sum(conj( x ) * y, axis=1)', local_dict={'x':self.uF, 'y':self.qPolesIntn}).ravel()
+            # self.uF = np.inner(np.conj(self.uF), self.qPolesIntn).ravel()
+            self.uF *= self.intn * np.sqrt((f[1]-f[0])*c0*dt)
+            # print(self.uF.shape)
 
 class chemNodeDB(chemNode):
-    "Class for a node describing a chemical from the database, inherited from chemNode"
-    def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias='', nameDB=None):
+    """Class for a node describing a chemical from the database, inherited from chemNode. The node can be specified either by passing a name of a species in the database or the QDpars structure (an instance of chemSpec class.)"""
+    def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias='', nameDB=None, QDpars=None):
         chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
         if name in chemDB or nameDB in chemDB:
-            self.QDpars = chemDB[self.name if nameDB is None else nameDB]    # Parameters from the database
+            self.QDpars = copy.deepcopy(chemDB[self.name if nameDB is None else nameDB])    # Parameters from the database
+        elif QDpars is not None:
+            self.QDpars = QDpars
         else:
-            raise RuntimeError("The chemical \'" + self.name + '\' is not in the database.')
+            raise RuntimeError("The chemical \'" + self.name + '\' is not in the database and no QD parameters are supplied.')
         self.HCmode = None            # Mode of experiment if the node is dendrolized
 
     def setReported(self, flag=True):
@@ -1399,8 +1416,6 @@ class chemNodeDB(chemNode):
             # Update the specification
             parsArray = getattr(self.QDpars, key[0])          # An entire array of the parameters, one of which needs to be updated
             parsArray[key[1]] = parsArray[key[1]]._replace(dval=dval, min=min, max=max)
-
-
 
     def dendrolize(self, experiment="1H"):
         "Creates chemTrees based on the QD parameters of the node"
@@ -1473,6 +1488,7 @@ def evalTreeT(tree, t, c0, pars=None):
 
     return Z, [i.name for i in repRoots]
 
+# @profile
 def evalTreeF(tree, f, dt, c0, f0=0, pars=None):
     """Evaluates the entire tree of chemNodes and returns a model spectrum directly in the frequency domain. Tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
     tau = 0     #    or use

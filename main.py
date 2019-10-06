@@ -1106,8 +1106,10 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             tau = acqus['DE'] * (1e-06)   # Ringdown time delay in sec
 
             yT = data[ntgrp:].reshape(-1, 1)
+            # nt = min(16384, len(yT))
             nt = len(yT)
             t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+            # yT = yT[:nt].reshape(-1, 1)
 
             ## Subsample if the frequency range is too large
             #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
@@ -3005,6 +3007,20 @@ class PhasingWidget(QWidget):
     RANGE_MIN = -64
     phased = pyqtSignal(float, float)        # Emmited when phasing is completed; outputs the values of ph0 and ph1 in degrees
 
+    def deg2tau(self, p0deg, p1deg):
+        """Converts the phasing parameters from degrees to their tau and theta representations."""
+        f_Hz = self.datum.f*self.datum.c0 - self.datum.f0
+
+        theta = np.asscalar(p0deg*np.pi/180.0 - p1deg*np.pi/180.0*(f_Hz[0])/(f_Hz[1]-f_Hz[0])/len(f_Hz))
+        tau = np.asscalar( p1deg / (f_Hz[1]-f_Hz[0]) / 360. / len(f_Hz) )
+        return theta, tau
+
+    def tau2deg(self, theta, tau):
+        """Converts from theta/tau representation to phase angles in degrees."""
+        f_Hz = self.datum.f*self.datum.c0 - self.datum.f0
+
+        return p0deg, p1deg
+
     def __init__(self, datum, canvas, orientation='Vertical', parent=None):
         #QWidget.__init__(self)
         #PhasingForm.__init__(self)
@@ -3140,8 +3156,7 @@ class PhasingWidget(QWidget):
         """Plots the phased spectrum"""
         self.ax[0].clear()     # discards the old graph
 
-        theta = self.p0deg * np.pi/180.
-        tau = np.asscalar( self.p1deg / (self.datum.f[-1]*self.datum.c0-self.datum.f0) / 360. )
+        theta, tau = self.deg2tau(self.p0deg, self.p1deg)
         ph = np.exp(-1j*2*np.pi * tau * (self.f*self.datum.c0-self.datum.f0) - 1j*theta ).reshape((-1,1))
         yFph = self.yF * ph
         self.ax[0].plot(self.f, yFph.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
@@ -3172,8 +3187,8 @@ class PhasingWidget(QWidget):
         self.pivot = 0.0
         print(self.p0deg, self.p1deg)
 
-        theta = self.p0deg * np.pi/180.
-        tau = np.asscalar( self.p1deg / (self.datum.f[-1]*self.datum.c0-self.datum.f0) / 360. )
+        theta, tau = self.deg2tau(self.p0deg, self.p1deg)
+        print(theta, tau)
 
         # Set the sliders
         self.sliderPh0.blockSignals(True)
@@ -3188,7 +3203,9 @@ class PhasingWidget(QWidget):
 
     def phasingComplete(self):
         print("Phasing complete:", self.p0deg, self.p1deg)
-        self.phased.emit(self.p0deg, self.p1deg)
+        theta, tau = self.deg2tau(self.p0deg, self.p1deg)
+        self.phased.emit(theta, tau)
+        # self.phased.emit(self.p0deg, self.p1deg)
 
 class PreprocessingWidget(QWidget):
     """Handles basic preprocessing operations, e.g. zero-filling and apodization."""
@@ -3919,11 +3936,11 @@ class MainView(QMainWindow):
         self._crnt.resetFreqs(nf, apod)
         self.plotCurrent()
 
-    def onPhased(self, ph0, ph1):
+    def onPhased(self, theta, tau):
         """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
         # Update current parameter; convert phases from degrees to radians for ph0 (theta) and sec for ph1 (tau)
-        theta = ph0*np.pi/180.
-        tau = np.asscalar( ph1/(self._crnt.f[-1]*self._crnt.c0-self._crnt.f0)/360. )
+        # theta = ph0*np.pi/180.
+        # tau = np.asscalar( ph1/(self._crnt.f[-1]*self._crnt.c0-self._crnt.f0)/360. )
         self._crnt.setCrntVal(('.', 'theta', 0), theta)
         self._crnt.setCrntVal(('.', 'tau', 0), tau)
 
@@ -4117,8 +4134,11 @@ class MainView(QMainWindow):
 
                 tab.append(row)
         head = ['Series', 'Filename', 'Signal norm'] + [f for name in self.repRootNames for f in (name, 'var')] + [f for name in names for f in ('x_'+name, '95% cred.i.')]
-        with open('_results.txt', 'w') as fout:
-            print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
+        try:
+            with open('_results.txt', 'w') as fout:
+                print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
+        except PermissionError:
+            print('Can not save the results to file.')
         #print(tabulate.tabulate(tab[self._crnt.data.index(self._crnt)], headers=head))    # ... and show on the screen
 
 # ------------------------ Parameter list --------------------------------------
