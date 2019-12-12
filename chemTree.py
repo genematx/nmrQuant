@@ -895,14 +895,16 @@ class treeNode:
             for c in self._children: yield from c.iterDepth("post-order")
             yield self
 
-    def descendants(self):
-        """All descendants of the node (excluding itself)."""
+    def descendants(self, include_self=False):
+        """All descendants of the node (excluding itself by default)."""
+        if include_self: yield self
         for child in self._children:
             yield child
             yield from child.descendants()
 
-    def ancestors(self):
-        """All ancestors of the node (excluding itself), including the root."""
+    def ancestors(self, include_self=False):
+        """All ancestors of the node (excluding itself by default), including the root."""
+        if include_self: yield self
         if self._parent is not None:
             yield self._parent
             yield from self._parent.ancestors()
@@ -1381,6 +1383,11 @@ class chemNodeDB(chemNode):
             raise RuntimeError("The chemical \'" + self.name + '\' is not in the database and no QD parameters are supplied.')
         self.HCmode = None            # Mode of experiment if the node is dendrolized
 
+    def rename(self, newName):
+        for chld in self.descendants():
+            chld.rename(newName=chld.name.replace(self.name, newName))
+        super().rename(newName)
+
     def setReported(self, flag=True):
         """Self the _reported flag of the node. If the DB node itself is not reported, its terminal leaves, not spin systems become reported."""
         if not self.isLeaf():     # Leafs can only have _reported set to True
@@ -1443,9 +1450,11 @@ class chemNodeDB(chemNode):
 
 # ------------------------- Functions for working with trees -------------------------------
 
-def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, lshapeOrder=2, gamma=0.0):
+def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, lshapeOrder=2, gamma=0.0, startFromRoot=True):
     """Returns a nested array of default tree parameters."""
-    pars = {node.name : node.default_pars() for node in tree.items()}
+    if startFromRoot:
+        tree = tree.findRoot()
+    pars = {node.name : node.default_pars() for node in tree.descendants(include_self=True)}
     pars["."] = {"tau" : [tau], "theta" : [theta],  # "ampl" : [1.0]*len([i for i in tree.repRoots()]),
                  "mult" : [1.0], "sigma2" : [sigma2], 'gamma':[gamma],
                  "lshapeR" : [0.0]*lshapeOrder, "lshapeI" : [0.0]*lshapeOrder}

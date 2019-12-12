@@ -1066,8 +1066,9 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             yT = (np.array(data[nt+6:2*nt+6]) + 1j*np.array(data[-nt:])).reshape(-1,1)
             name = path[path.rfind('\\')+1:path.rfind('.')]
 
-        elif path[-3:] == '.dx':
-            # Read a JCAMP-DX file
+        # Read a JCAMP-DX file
+        elif path[-3:] == '.dx' or path[-4:] == '.jdx':
+
             dic, data = ng.jcampdx.read(path)
             #c0 = float(dic['$BF1'][0])
             #fcar = float(dic['$REFERENCEPOINT'][0])
@@ -1075,6 +1076,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             #nt = float(dic['$TD'][0])
 
             udic = ng.jcampdx.guess_udic(dic,data)[0]     # Dictionary of universal parameters
+            print(data)
 
             c0 = float(udic['obs'])
             fcar = float(udic['car'])
@@ -1093,8 +1095,9 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
             name = os.path.split(os.path.dirname(path))[1]
 
+        # Read a Bruker FID file
         elif path[-3:] == 'fid':
-            # Read a Bruker FID file
+
             dic, data = ng.fileio.bruker.read(path[:-3])
 
             acqus = dic['acqus']
@@ -1118,8 +1121,36 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
             name = os.path.split(os.path.dirname(path))[1]
 
+        # Read a JEOL FID file
+        elif path[-3:] == 'jdf':
+            print(path)
+            #
+            # dic, data = ng.fileio.bruker.read(path[:-3])
+            #
+            # acqus = dic['acqus']
+            # ntgrp = acqus['GRPDLY']    # Number of time samples of the Bruker filter response;
+            # swh = acqus['SW_h']     # Spectral width in Hz
+            # f0 = acqus['O1']        # Offset in Hz
+            # c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
+            # dt = 1 / swh         # Sampling period (dwell time)
+            # tau = acqus['DE'] * (1e-06)   # Ringdown time delay in sec
+            #
+            # yT = data[ntgrp:].reshape(-1, 1)
+            # # nt = min(16384, len(yT))
+            # nt = len(yT)
+            # t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+            # # yT = yT[:nt].reshape(-1, 1)
+            #
+            # ## Subsample if the frequency range is too large
+            # #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+            # #t = t[::k]
+            # #yT = yT[::k, :]
+            #
+            # name = os.path.split(os.path.dirname(path))[1]
+
+        # Read a Spinsolve data.1d file
         elif path[-3:] in ['.1d', '.2d']:
-            # Read a Spinsolve data.1d file
+
             dic, yT = ng.fileio.spinsolve.read(path, bin_file='data'+path[-3:])
             try:
                 c0 = dic['b1Freq']
@@ -1143,6 +1174,37 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             #yT = yT[::k, :]
 
             name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
+
+        # Read an Mnova corrected FID file
+        elif path[-4:] in ['.txt']:
+            with open(path, 'rb') as fp:
+                # Read the file header line by line
+                for line in fp:
+                    pair = line.decode().strip().split('=')
+                    if 'DataPoints' in pair[0]:
+                        break           # The next line will be the first data point -- stop reading the header
+                    elif 'Size' in pair[0]:
+                        nt = int(pair[1])
+                    elif 'SpectrometerFrequency' in pair[0]:
+                        c0 = float(pair[1])
+                    elif 'Hz' in pair[0]:
+                        f0 = -float(pair[1])
+                    elif 'SpectralWidth' in pair[0]:
+                        dt = 1 / float(pair[1])
+
+                # Read the remainder of the file into a np array
+                data = np.fromfile(fp, sep='\t')
+
+            # Form the arrays
+            t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
+            yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
+
+            ## Subsample if the frequency range is too large
+            #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+            #t = t[::k]
+            #yT = yT[::k, :]
+
+            name = path[path.rfind('\\')+1:path.rfind('.')]
 
         # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
         if crnt_series.c0 is None:
@@ -1179,7 +1241,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         elif isinstance(parent, Datum):
             parent = parent.parent    # Go one level up to the Series level
 
-        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.1d; *.2d; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx);;Bruker FID (fid)"):
+        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.jdx; *.1d; *.2d; *.txt; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx; *.jdx);;Mnova FID (*.txt);;Bruker FID (fid)"):   # ;;JEOL FID (*.jdf)
             #try:
             self.addDatumFromFile(parent, newFilePath)
             #except:
@@ -2310,6 +2372,10 @@ class ChemTreeView(QTreeView):
                 actnHideRows.setStatusTip('Hide parameters')
                 actnHideRows.triggered.connect(lambda : self.hideRows(slctdKeys) )
 
+                actnRemovePars = QAction(QIcon('icons\icon_none.png'), 'Remove parameter' if len(slctdKeys) == 1 else 'Remove parameters', self)
+                actnRemovePars.setStatusTip('Remove parameters')
+                actnRemovePars.triggered.connect(lambda : self.removePars(slctdKeys) )
+
                 actnCopyCrnt = QAction(QIcon('icons\icon_copy.png'), 'Copy value' if len(slctdKeys) == 1 else 'Copy values', self)
                 actnCopyCrnt.setStatusTip('Copy current values')
                 actnCopyCrnt.triggered.connect(lambda : self.copyCrntPars(slctdKeys) )
@@ -2335,6 +2401,7 @@ class ChemTreeView(QTreeView):
                     popMenu.addAction(actnPasteDflt)
                 popMenu.addSeparator()
                 popMenu.addAction(actnHideRows)
+                popMenu.addAction(actnRemovePars)
 
                 """elif node.nodeType == 'intn' and len(slctdKeys) == 1:              # Intensity node(s)
                 key = ('.', 'ampl', self.model().datum.repRootNames.index(node.name[0]))
@@ -2499,6 +2566,11 @@ class ChemTreeView(QTreeView):
             if key[0] != '.':
                 self.model().TP[key].hidden = True
         self.hideExcessiveRows()
+
+    def removePars(self, keys):
+        """Removes parameters from the QD system."""
+        print(keys)
+        print(self.model().datum)
 
     def selectPickedParameter(self, stemKey):
         """Selects an active paramter for a picked peak."""

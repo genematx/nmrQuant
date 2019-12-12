@@ -113,6 +113,8 @@ workspaces/
 notebooks/
 main.spec       # File created by pyinstaller
 main.exe
+results.xlsx
+test.py
 image.eps
 fid/
 release.zip

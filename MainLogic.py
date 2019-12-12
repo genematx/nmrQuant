@@ -1219,6 +1219,20 @@ class Datum():
         self.crntParsH[key[0]][key[1]][key[2]] = float(val)
         self.smplDistF.clear()
 
+    def getCrntVals(self, node_name=None):
+        """Returns a flat dictionary of all parameters that affect nodes in the tree below and including the given node."""
+        if node_name is None:
+            node = self.T.findRoot()
+        else: node = self.T[node_name]
+        allParsKeys = [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() if key[1] in ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']]      # List of all parameter keys that affect the subtree
+        parsF = {key:self.getCrntVal(key) for key in allParsKeys}
+        return parsF
+
+    def setCrntVals(self, parsF):
+        """Updates maultiple parameters from a flat dictionary parsF."""
+        for key, val in parsF.items():
+            self.setCrntVal(key, val)
+
     def getGlobalChshVal(self):
         """Returns the value of the top-level chemical shift in the parameter tree."""
         return self.getCrntVal(key = (self.T.findRoot().name, 'chsh', 0))
@@ -2916,8 +2930,9 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
     # Remove the baseline with median filter
     res = nmrglue.process.proc_bl.med(den.ravel(), mw).reshape(-1,1)
     bln = (den - res).reshape(-1,1)
+    # print('here')
 
-    # Compute teh cost function
+    # Compute the cost function
     if cfun == 'LS':
         val = np.linalg.norm(bln - np.mean(bln), 2)
     elif cfun == 'TV':
