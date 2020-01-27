@@ -191,6 +191,19 @@ class Workspace():
         if priors is not None:
             self.parsSpecDict.update(priors)
 
+    def getTree(self, node=None):
+        """Creates a copy of the tree rooted at node with name node."""
+
+        # Extract the subtree starting with the node key and set its parent to None
+        T = copy.deepcopy(self.T[node]) if node is not None else copy.deepcopy(self.T)
+        T.makeRoot()
+
+        # Reset the nodes (to remove any curently stored signals)
+        for node in T.items():
+            node.reset()
+
+        return T
+
     def _updateParameters(self):
         """Updates the existing dictionaries of parameters after the tree has changed (e.g. when adding/removing nodes or setting new root nodes). Updates the structure to match with the new default parameters but keeps the old values."""
         oldRoots = self.repRootNames
@@ -333,7 +346,7 @@ class Workspace():
                   minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )     #, \
             #      #take_step=MyTakeStep())
         else:
-            res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
+            res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method=config.OPTIM_method, \
                   options={'eps':eps_range*1e-05, 'ftol':1e-12})       # Step-size for computing the Jacobian
             #print(res['message'])
 
@@ -431,7 +444,7 @@ class Workspace():
                                     'c0' : ser.c0,
                                     'f0' : ser.f0,
                                     'nt' : len(ser.t),
-                                    'dt' : ser.t[1]-ser.t[0],
+                                    'dt' : ser.t[1]-ser.t[0] if len(ser.t) > 1 else 0.0,
                                     'nf' : len(ser.f),
                                     'steps' : ser.steps,
                                     'freqBlocks' : [blk._replace(indxFreq=None, bF=None) for blk in ser.freqBlocks],
@@ -677,7 +690,8 @@ class Series():
         """Adds a Datum to the Series."""
         # Create new Datum structure and add it to the Series
         yT = yT.reshape(-1,1)     # Make sure the data is reshaped properly
-        DDD = Datum(yT, parent=self, **kwargs)
+        name = kwargs.pop('name', 'Datum #'+str(len(self.data)+1))
+        DDD = Datum(yT, parent=self, name=name, **kwargs)
         self.data.append(DDD)
 
         return DDD
@@ -784,8 +798,9 @@ class Series():
             lims = (-1*float('inf'), float('inf'))
 
         # Choose only samples that are in the optimization range
-        indxFreq = np.flatnonzero((self.f<=max(lims))*(self.f>=min(lims)))     # Indices of frequency points in the range
+        indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), np.searchsorted(self.f.ravel(), max(lims)))     # Indices of frequency points in the range
         nf = indxFreq.size
+
         # Define baseline in the frequency domain
         bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[0]+1)] if bslnOrder[0] is not None else []
         bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[1]+1)] if bslnOrder[1] is not None else []
@@ -793,15 +808,21 @@ class Series():
 
         self.freqBlocks.append(freqSpec(min(lims), max(lims), indxFreq, bslnOrder, bF))
 
+        # Include the new block in all steps
+        for step in self.steps:
+            if 0 in step.frqBlkIds: step.frqBlkIds.clear()    # Make it impossible to optimize over the entire frequency range and some specific smaller ranges
+            step.frqBlkIds.add(len(self.freqBlocks)-1)
+
     def altFreqBlock(self, lims=None, bslnOrder=None, indx=-1):
         """Alters a frequency block at position indx in self.freqBlocks (the last block by default)."""
         if lims is None or indx == 0:         # Can't change the limits of the first block
             lims = (self.freqBlocks[indx].min, self.freqBlocks[indx].max)
-        if bslnOrder is None:
+            # lims = (-np.inf, np.inf)
+        if bslnOrder is None:                 # Don't change the baseline order by default
             bslnOrder = self.freqBlocks[indx].bslnOrder
 
         # Choose only samples that are in the optimization range
-        indxFreq = np.flatnonzero((self.f<=max(lims))*(self.f>=min(lims)))     # Indices of frequency points in the range
+        indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), np.searchsorted(self.f.ravel(), max(lims)))   # Faster than np.arange(*np.searchsorted(f, lims))   or    np.flatnonzero((self.f < max(lims))*(self.f >= min(lims)))     # Indices of frequency points in the range
         nf = indxFreq.size
         # Define baseline in the frequency domain
         bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[0]+1)] if bslnOrder[0] is not None else []
@@ -1128,6 +1149,7 @@ class Datum():
     def __init__(self, yT, parent, name='', arrVal=None, crntParsH=None, priors=None):
         self.name = name
         self.parent = parent               # A series object that will contain this Datum
+        self._f = None                     # Subsampled array of frequencies
         self.yT = yT    # The acquired signal in time domain (FID) without any preprocessing
         self.arrVal = arrVal if arrVal is not None else len(self.parent.data)+1     # Value of the arrayed parameter in the serial experiment (e.g., extent of reaction)
         self.parsSpecDict = {}
@@ -1177,6 +1199,7 @@ class Datum():
                     self.xFph = -1 * self.xFph
 
     def resetSignals(self):
+        self._f = None
         self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
         self.zF = None        # A matrix of component signals
         self.bF = None        # A baseline
@@ -1206,6 +1229,37 @@ class Datum():
         self.resetSignals()
         self.resetCrntPars(crntParsH, priors)
 
+    def alignToSolventPeak(self, chshTo=4.75):
+        """Shifts the entire spectrum to align the highest peak (assumed to be the solvent peak) with a specified chemical shift."""
+        chshFrom = self.f[np.argmax(np.abs(self.yF))]
+        df = (chshTo - chshFrom)*self.c0
+        self.yT *= np.exp(2*np.pi*1j*df*self.t)
+        self.resetSignals()
+
+    def allParsKeys(self, node_name=None):
+        """Returns all parameter keys for a (sub)tree starting from the root node."""
+        if node_name is None:
+            node = self.T.findRoot()
+        else: node = self.T[node_name]
+        return [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
+                if key[1] in ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']]      # List of all parameter keys that affect the subtree
+
+    def getTree(self, node_name=None):
+        """Return a copy of the tree rooted in the node with name node. All default distributions and parameter values are replaced with the current values in this Datum."""
+
+        # Get the copy of the tree
+        T = self.parent.parent.getTree(node_name)
+
+        # Set default tree parameters to the current values from the Datum
+        # allParsKeys = [key for key in flatten(defaultTreePars(T)).keys() \
+        #                if key[1] in ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD'] ]       # All parameters from the subtree
+        for key in self.allParsKeys(node_name):
+            par = copy.deepcopy(self.getPrior(key))       # Prior distribution in the Datum
+            par = par._replace(dval=self.getCrntVal(key))
+            T.setPrior(key, par)
+
+        return T
+
     def getCrntVal(self, key):
         """Returns the relative or absolute value of the parameter key."""
         # TODO: Will be deprecated.
@@ -1221,11 +1275,7 @@ class Datum():
 
     def getCrntVals(self, node_name=None):
         """Returns a flat dictionary of all parameters that affect nodes in the tree below and including the given node."""
-        if node_name is None:
-            node = self.T.findRoot()
-        else: node = self.T[node_name]
-        allParsKeys = [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() if key[1] in ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']]      # List of all parameter keys that affect the subtree
-        parsF = {key:self.getCrntVal(key) for key in allParsKeys}
+        parsF = {key:self.getCrntVal(key) for key in self.allParsKeys(node_name)}
         return parsF
 
     def setCrntVals(self, parsF):
@@ -1280,6 +1330,7 @@ class Datum():
                     return self.parent.parent.parsSpecDict[key]
                 except KeyError:
                     try:
+                        # Use the prior from the tree
                         return getattr(self.T[key[0]], key[1])[key[2]]
                     except KeyError:
                         print("Something is wrong with {}".format(key))
@@ -1380,7 +1431,7 @@ class Datum():
             yFinRange *= phFinRange
 
             # Choose only components that are in the optimization range
-            """indxFreq = np.flatnonzero((self.f<=self.freqBlocks[i].max)*(self.f>=self.freqBlocks[i].min))     # Indices of frequency points in the range
+            """indxFreq = np.flatnonzero((self.f<self.freqBlocks[i].max)*(self.f>=self.freqBlocks[i].min))     # Indices of frequency points in the range
             nf = indxFreq.size
             bF = lambda nf : np.hstack(( np.ones((nf, 1)), np.linspace(-1,1, nf).reshape(-1,1), np.linspace(-1,1,nf).reshape(-1,1)**2, 1j*np.ones((nf, 1)), 1j*np.linspace(-1,1, nf).reshape(-1,1), 1j*np.linspace(-1,1,nf).reshape(-1,1)**2 ))         # Define baseline in the frequency domain
             """
@@ -1563,7 +1614,7 @@ class Datum():
                                                                np.arange(self.freqBlocks[i].indxFreq[-1]+1, self.freqBlocks[i].indxFreq[-1]+nw2+1)%len(self.f)] ) \
                                         for i in frqBlkIds)) if nw2>0 else np.array([], dtype='int')   # Extra indices used for padding when convolving the signals with lineshape kernel in frequency domain
             if freqMask is not None:
-                dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0   # Reference chemical shift
+                dref_chsh = 0.0# self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0   # Reference chemical shift
                 unmaskedIndx = np.array([[f>msk[0] and f<msk[1] for msk in freqMask] for f in self.f[indxInRange]-dref_chsh ]).any(axis=1).ravel()
                 indxInRange = indxInRange[unmaskedIndx]
 
@@ -1769,7 +1820,7 @@ class Datum():
     def measure_noise(self, lims, lmda=5.0):
         """Measures the standard deviation of noise in the spectrum within the limits lims in ppm."""
 
-        indxFreq = np.flatnonzero((self.f<=max(lims))*(self.f>=min(lims)))     # Indices of frequency points in the range
+        indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), np.searchsorted(self.f.ravel(), max(lims)))     # Indices of frequency points in the range
 
         yF = self.yF[indxFreq].ravel()
         yFbsln = whitsm(yF, lmda)
@@ -1830,7 +1881,7 @@ class Datum():
             yFinRange *= np.exp(-1j*2*np.pi * evalParsH["."]["tau"][0] * (self.f.take(indxInRange)*self.c0-self.f0) - 1j*0 ).reshape((-1,1))   # A shorter vector of yF restricted to the optimization range only
 
             # Choose only samples that are in the optimization range
-            """indxFreq = np.flatnonzero((self.f<=self.freqBlocks[i].max)*(self.f>=self.freqBlocks[i].min))     # Indices of frequency points in the range
+            """indxFreq = np.flatnonzero((self.f<self.freqBlocks[i].max)*(self.f>=self.freqBlocks[i].min))     # Indices of frequency points in the range
             nf = indxFreq.size
             bF = lambda nf : np.hstack(( np.ones((nf, 1)), np.linspace(-1,1, nf).reshape(-1,1), np.linspace(-1,1,nf).reshape(-1,1)**2, 1j*np.ones((nf, 1)), 1j*np.linspace(-1,1, nf).reshape(-1,1), 1j*np.linspace(-1,1,nf).reshape(-1,1)**2 ))         # Define baseline in the frequency domain
             """
@@ -2293,7 +2344,7 @@ class Datum():
         else: zF, xF, bF = None, None, None
 
         inRange, outRange = splitFreq([self.freqBlocks[blk] for blk in self.steps[0].frqBlkIds], f=self.f)
-        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
+        dref_chsh = 0.0 # self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
         rmsResidual = 0.0
         if outRange:
             supsRatio = ceil(yFph.size / (2**13))   # Subsampling ratio; take no more than 2^13 points
@@ -2372,7 +2423,7 @@ class Datum():
         ax_main.autoscale()    # update ax.viewLim using the new dataLim
         if ax_main.get_xlim()[1] > ax_main.get_xlim()[0]: ax_main.invert_xaxis()
 
-        if returnSignals: return self.f - dref_chsh, yFph, xF
+        if returnSignals: return self.f - dref_chsh, yFph, xF, zF
 
     def evalForPlot(self, key, frqBlkIds=None, lims=None, npts=75):
         """Returns an array of argument values and the values of log likelihood, prior, and posterior."""

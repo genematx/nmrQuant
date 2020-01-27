@@ -33,6 +33,9 @@ colrseq = [(0.1216,    0.4706,    0.7059),\
     (0.7922,    0.6980,    0.8392),\
     (1.0000,    1.0000,    0.6000)]*2      # Sequence of colors to plot the results
 
+colr_freqBlocks = [255, 245, 175, 25]
+colr_freqBlocks_inactive = [255, 245, 175, 3]
+
 def as_dict():
     return {'QD_AggregatePeaksThreshold' : QD_AggregatePeaksThreshold,
             'QD_RerunQDchshThreshold' : QD_RerunQDchshThreshold,
