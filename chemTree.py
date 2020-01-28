@@ -241,8 +241,12 @@ class chemSpec:
 
 def readChemDB(fname='chemDB'):
     """Reads a chemDB in JSON format and convers it to dictionary of chemSpec class objects."""
-    with open(fname+'.json', 'r') as fp:
-        chemDB = json.load(fp)
+    try:
+        with open(fname+'.json', 'r') as fp:
+            chemDB = json.load(fp)
+    except FileNotFoundError:
+        return dict()
+
     for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
         for kk in ['chshH', 'chshC', 'jcplHH']:
             v[kk] = array2parsSpec(v[kk])
@@ -491,32 +495,6 @@ def hpd(x, alpha=0.05):
         # Sort univariate node
         sx = np.sort(x)
         return np.array(calc_min_interval(sx, alpha))
-
-
-"""def readChemDB(name):
-    '''Reads a chemDB in JSON format and convers it to dictionary of namedtuples.'''
-    with open('chemDB.json', 'r') as fp:
-        chemDB = json.load(fp)
-    for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
-        for kk in ['chshH', 'chshC', 'jcplHH', 'jcplHC']:
-            v[kk] = array2parsSpec(v[kk])
-        for kk in ['chshAsgnH', 'chshAsgnC']:      # Make sure that all single numbers are stored within arrays
-            if v[kk].__class__ is int:
-                v[kk] = [v[kk]]
-    chemDB = {k:chemSpec(name=k,**v) for k,v in chemDB.items()}    # Conver orderedDict to chemSpec namedtuple
-    return chemDB
-
-def writeChemDB(chemDB, fname='result'):
-    '''Writes the chemDB in JSON format and stores it file name'''
-    chemDB = {k:v._asdict() for k,v in chemDB.items()}   # Convert namedtuples to dictionaries
-    for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
-        for kk in ['chshH', 'chshC', 'jcplHH', 'jcplHC']:
-            v[kk] = array2parsSpec(v[kk])
-        for kk in ['chshAsgnH', 'chshAsgnC']:      # Make sure that all single numbers are stored within arrays
-            if v[kk].__class__ is int:
-                v[kk] = [v[kk]]
-    with open(fname+'.json', 'w') as fp:
-        json.dump(chemDB, fp)"""
 
 def printChemDB():
     """Prints chemDB."""
