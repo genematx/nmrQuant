@@ -4917,21 +4917,11 @@ class MainView(QMainWindow):
         if isinstance(self._crnt, Series):
             pass
         elif isinstance(self._crnt, Datum):
-            f, yFph, xF, zF = self._crnt.plot(ax_main=self.ax[0], ax_residual=self.ax[2] if self.actnToggleResid.isChecked() else None, \
-                            showRanges='all', showComponents=self.actnToggleComps.isChecked(), showLegend=True, returnSignals=True)
+            f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
 
             # Compute the stems
             if self.actnToggleStems.isChecked():
-                mdldPeaks = collectPeaks(self._crnt.T, self._crnt.c0, self._crnt.crntParsH)
-                allStems = []     # Dictionary that stores references to all stem lines
-                for i, name in enumerate([name for name in self._crnt.repRootNames if name not in ['Water', 'Chloroform'] ]):         # for i, name in enumerate(DDD.repRootNames):
-                    stems_i = {}
-                    for stemKey, val in mdldPeaks[name].items():   # Loop over the leaves
-                        parsKey = peakName2parsKey(stemKey)
-                        freq = [pk.chsh for pk in val]
-                        intn = [np.abs(pk.intn) for pk in val]
-                        stems_i[parsKey] = (self._crnt.getCrntVal(key=parsKey), freq, intn)
-                    allStems.append(stems_i)
+                allStems = self._crnt.stems_for_plot()
             else: allStems = None
 
             # Plotting function

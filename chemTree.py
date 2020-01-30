@@ -284,68 +284,11 @@ peakSpec.__new__.__defaults__ = (0, 1, None)     #
 spsySpec = namedtuple('spsySpec', 'chsh, jcpl, chshAsgn, jcplAsgn, mult')
 spsySpec.__new__.__defaults__ = (None, None, None, None, None, 1)
 
-freqSpec = namedtuple('freqSpec', 'min, max, indxFreq, bslnOrder, bF')
-freqSpec.__new__.__defaults__ = (-float('inf'), float('inf'), np.array([]), (None, None), np.array([]))
-freqSpec.__str__ = lambda self : '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
-#freqSpec.indxFreq = lambda self, f : np.flatnonzero((f<=self.max)*(f>=self.min))    # Indices of the frequency vector f that fall into the current range
-#freqSpec.bF()
-
-def splitFreq(inRange, f=None):
-    """Given a list of freqSpec tuples, divides the frequency range -inf to +inf into lists of disjoint intervals: inRange and outRange by merging overlapping optimization ranges."""
-
-    if inRange:
-        inRange = mergeFreq(inRange, f)      # Merged and sorted list of freqRanges
-        outRange = []
-        if not np.isinf(inRange[0].min):
-            lwr = -np.inf
-            upr = inRange[0].min
-            outRange.append(freqSpec(min=lwr, max=upr, \
-                            indxFreq = np.concatenate([ np.flatnonzero((f<=upr)*(f>=lwr)), [inRange[0].indxFreq[0]] ] ) if f is not None else np.array([], dtype = int) ) )
-        for i in range(len(inRange)-1):
-            lwr = inRange[i].max
-            upr = inRange[i+1].min
-            outRange.append(freqSpec(min=lwr, max=upr, \
-                            indxFreq = np.concatenate([ [inRange[i].indxFreq[-1]], np.flatnonzero((f<=upr)*(f>=lwr)), [inRange[i+1].indxFreq[0]] ] ) if f is not None else np.array([], dtype = int) ) )
-        if not np.isinf(inRange[-1].max):
-            lwr = inRange[-1].max
-            upr = np.inf
-            outRange.append(freqSpec(min=lwr, max=upr, \
-                            indxFreq = np.concatenate([ [inRange[-1].indxFreq[-1]], np.flatnonzero((f<=upr)*(f>=lwr)) ] ) if f is not None else np.array([], dtype = int) ) )
-    else:
-        outRange = [freqSpec(min=-np.inf, max=np.inf, \
-                        indxFreq = np.arange(len(f)) if f is not None else np.array([], dtype = int) )]  # Infinite interval
-
-    return inRange, outRange
-
-def mergeFreq(intervals, f=None):
-    """
-    Merge oevrlapping intervals. Based on https://codereview.stackexchange.com/questions/69242/merging-overlapping-intervals.
-    A simple algorithm can be used:
-    1. Sort the intervals in increasing order
-    2. Push the first interval on the stack
-    3. Iterate through intervals and for each one compare current interval
-       with the top of the stack and:
-       A. If current interval does not overlap, push on to stack
-       B. If current interval does overlap, merge both intervals in to one
-          and push on to stack
-    4. At the end return stack
-    """
-    sorted_by_lower_bound = sorted(intervals, key=lambda tup: tup.min)
-    merged = []
-
-    for higher in sorted_by_lower_bound:
-        if not merged:
-            merged.append(higher)
-        else:
-            lower = merged[-1]
-            # test for intersection between lower and higher:
-            # we know via sorting that lower[0] <= higher[0]
-            if higher.min <= lower.max:
-                upper_bound = max(lower.max, higher.max)
-                merged[-1] = freqSpec(min=lower.min, max=upper_bound, indxFreq = np.flatnonzero((f<=upper_bound)*(f>=lower.min)) if f is not None else np.array([], dtype = int) )  # replace by merged interval
-            else:
-                merged.append(higher)
-    return merged
+# freqSpec = namedtuple('freqSpec', 'min, max, indxFreq, bslnOrder, bF')
+# freqSpec.__new__.__defaults__ = (-float('inf'), float('inf'), np.array([]), (None, None), None)
+# freqSpec.__str__ = lambda self : '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
+# #freqSpec.indxFreq = lambda self, f : np.flatnonzero((f<=self.max)*(f>=self.min))    # Indices of the frequency vector f that fall into the current range
+# # freqSpec.bF = lambda self, nf : create_baselines(self, nf)
 
 def rel2abs(parsSpec, rel=0):
     """Converts between relative and absolute values of a parameter given its range in parsSpec."""

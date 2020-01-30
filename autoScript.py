@@ -22,7 +22,7 @@ import config
 
 import numpy as np
 from chemTree import loadTree
-from MainLogic import Workspace
+from MainLogic import Workspace, next_pow_of_2
 from dataio import read_spinsolve
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
@@ -47,7 +47,7 @@ def script(dirName, residual=False):
 
     # Create a new Workspace and add the data there
     wsp = Workspace()
-    ser = wsp.addSeries(c0=c0, f0=f0, t=t)
+    ser = wsp.addSeries(c0=c0, f0=f0, t=t, nf=1*next_pow_of_2(len(t)) )
     DDD = ser.addDatum(yT)
 
     # Define and set the chemical tree
@@ -64,16 +64,28 @@ def script(dirName, residual=False):
     # --------------------------- Run optimization -----------------------------
 
     # Optimize global chemical shift
-    DDD.optimize(parsKeys=[('Mixture', 'chsh', 0), ('Water-SPSY1', 'chshQD', 0)])
+    DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'chsh', 0), ('Water-SPSY1', 'chshQD', 0)])
 
     # Optimize the peak width
-    DDD.optimize(parsKeys=[('Water-SPSY1', 'alphQD', 0)])
-    DDD.optimize(parsKeys=[('Mixture', 'alph', 0), ('Water-SPSY1', 'alphQD', 0)])
+    DDD.optimize(frqBlkIds=[1], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
+    DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'alph', 0), ('Water-SPSY1', 'alphQD', 0)])
 
+    # Check if the solution is in H2O
+    val, meta = DDD.evaluate(frqBlkIds=[1], returnSignals=True)
+    ampl = meta['ampl'][0]
+    if ampl[0] / sum(ampl) > 0.95:
+        DDD.addFreqBlock(lims=(3.1, 4.2))      # Add new frequency block
+
+        DDD.optimize(frqBlkIds=[2], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
+        DDD.optimize(frqBlkIds=[2], parsKeys=[('Water-SPSY1', 'chshQD', 0)])
+        DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'chsh', 0)])
+        DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'alph', 0)])
+
+        val, meta = DDD.evaluate(frqBlkIds=[2], returnSignals=True)
 
     # ------------------------- Output the results -----------------------------
 
-    val, meta = DDD.evaluate(frqBlkIds=[1], returnSignals=True)
+    # val, meta = DDD.evaluate(frqBlkIds=[1], returnSignals=True)
     data = {'names': DDD.repRootNames,
             'intns': meta['ampl'][0],
             'image': get_figure(DDD, residual=residual),
@@ -122,7 +134,7 @@ def main(cmdline=None):
     # Wait for an input
     # print( CALLED_PATH)
     # print( SCRIPT_PATH )
-    input()
+#    input()
 
     return 0
 
@@ -134,7 +146,7 @@ def get_figure(DDD, residual=False):
 
         # Scale the displayed range to the sugars region
         xlims = (DDD.freqBlocks[1].max, DDD.freqBlocks[1].min)
-        ymin, ymax = yFph[(3.0 < f) & (f < 4.2)].min(), yFph[(3.0 < f) & (f < 4.2)].max()
+        ymin, ymax = min(0, yFph[(3.0 < f) & (f < 4.2)].min()), yFph[(3.0 < f) & (f < 4.2)].max()
         ylims = (ymin-0.05*(ymax-ymin), ymax+0.05*(ymax-ymin))
         ax[0].set_xlim(*xlims)
         ax[0].set_ylim(*ylims)
@@ -144,7 +156,7 @@ def get_figure(DDD, residual=False):
 
         # Scale the displayed range to the sugars region
         xlims = (DDD.freqBlocks[1].max, DDD.freqBlocks[1].min)
-        ymin, ymax = yFph[(3.0 < f) & (f < 4.2)].min(), yFph[(3.0 < f) & (f < 4.2)].max()
+        ymin, ymax = min(0, yFph[(3.0 < f) & (f < 4.2)].min()), yFph[(3.0 < f) & (f < 4.2)].max()
         ylims = (ymin-0.05*(ymax-ymin), ymax+0.05*(ymax-ymin))
         fig.gca().set_xlim(*xlims)
         fig.gca().set_ylim(*ylims)
@@ -169,11 +181,11 @@ def report(data):
     stylesheet=getSampleStyleSheet()
 
     formatted_time = time.ctime()
-    ptext = '<font size=11>{:s}</font>'.format(formatted_time)
+    ptext = '<font size=10>{:s}</font>'.format(formatted_time)
     Story.append(Paragraph(ptext, stylesheet['Normal']))
     Story.append(Spacer(1, 12))
 
-    ptext = '<font size=11>{:s}</font>'.format(data['path'])
+    ptext = '<font size=10>{:s}</font>'.format(data['path'])
     Story.append(Paragraph(ptext, stylesheet['Normal']))
     Story.append(Spacer(1, 12))
 

@@ -57,6 +57,54 @@ def print_fun(x, f, accepted):
 
 ##### ------------ Main classes for the general program logic ------------ #####
 
+class freqSpec():
+    """A class to store the specifications of frequency blocks along with their baselines"""
+
+    def __init__(self, min=-np.inf, max=np.inf, bslnOrder=(None, None)):
+        self.min = min
+        self.max = max
+        self.bslnOrder = bslnOrder
+        self._bF = None          # An array of baselines
+
+    def repr(self):
+        return '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
+
+    def bline(self, nf):
+        """Creates a set of base polynomial functions to store the baseline of length nf."""
+        if self._bF is None or self._bF.shape[1] != nf:
+            # Define baseline in the frequency domain
+            bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[0]+1)] if self.bslnOrder[0] is not None else []
+            bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[1]+1)] if self.bslnOrder[1] is not None else []
+            self._bF = np.hstack(bFr+bFi) if len(bFr)+len(bFi) > 0 else None
+        return self._bF
+
+    def imin(self, f):
+        """Starting index of the range in the array f."""
+        return np.searchsorted(f.ravel(), self.min)
+
+    def imax(self, f):
+        """Last index of the range in the array f."""
+        return np.searchsorted(f.ravel(), self.max)
+
+    def indxFreq(self, f, nw2=0):
+        """Returns the indices of array f that fall into the range defined by the block. Optionally can include padding with nw samples on both ends of the range."""
+        return np.arange(self.imin(f) - nw2, self.imax(f) + nw2) % len(f)
+
+    def update(self, lims=None, bslnOrder=None):
+        """Updates the parameters of a frequency block."""
+        if lims is not None:
+            self.min = min(lims)
+            self.max = max(lims)
+        if bslnOrder is not None:
+            self.bslnOrder = bslnOrder
+
+        self._bF = None                # Remove all precomputed baselines
+
+    def pars(self):
+        """Returns a named tuple of the main blok parameters."""
+        pars = namedtuple('pars', 'min, max, bslnOrder')
+        return(pars(self.min, self.max, self.bslnOrder))
+
 class Step():
 
     def __init__(self, frqBlkIds = None, parsKeys = None, autoKeys=None, repRootNames=None, fitCustomLshape = False):
@@ -447,7 +495,7 @@ class Workspace():
                                     'dt' : ser.t[1]-ser.t[0] if len(ser.t) > 1 else 0.0,
                                     'nf' : len(ser.f),
                                     'steps' : ser.steps,
-                                    'freqBlocks' : [blk._replace(indxFreq=None, bF=None) for blk in ser.freqBlocks],
+                                    'freqBlocks' : [blk.pars() for blk in ser.freqBlocks],
                                     'parsSpecDict' : ser.parsSpecDict,
                                     'crntMetaF' : ser.crntMetaF,
                                     'smplDistF' : ser.smplDistF,
@@ -767,7 +815,8 @@ class Series():
             nf = next_pow_of_2(len(self.t))     # Determine the number of samples in the full signal spectrum (possibly including zero-filling)
 
         if nf > 0:
-            self.f = (np.fft.fftshift(np.fft.fftfreq(nf, self.t[1]-self.t[0]))+self.f0).reshape(-1,1)/self.c0
+            dt = self.t[1]-self.t[0]
+            self.f = (np.fft.fftshift(np.fft.fftfreq(nf, dt))+self.f0).reshape(-1,1) / self.c0
 
             # Update the frequency blocks
             for i in range(len(self.freqBlocks)):
@@ -797,16 +846,7 @@ class Series():
             self.freqBlocks = []         # Reset the frequency blocks and add the entire signal
             lims = (-1*float('inf'), float('inf'))
 
-        # Choose only samples that are in the optimization range
-        indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), np.searchsorted(self.f.ravel(), max(lims)))     # Indices of frequency points in the range
-        nf = indxFreq.size
-
-        # Define baseline in the frequency domain
-        bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[0]+1)] if bslnOrder[0] is not None else []
-        bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[1]+1)] if bslnOrder[1] is not None else []
-        bF = np.hstack(bFr+bFi) if len(bFr)+len(bFi) > 0 else None
-
-        self.freqBlocks.append(freqSpec(min(lims), max(lims), indxFreq, bslnOrder, bF))
+        self.freqBlocks.append(freqSpec(min(lims), max(lims), bslnOrder))
 
         # Include the new block in all steps
         for step in self.steps:
@@ -815,21 +855,10 @@ class Series():
 
     def altFreqBlock(self, lims=None, bslnOrder=None, indx=-1):
         """Alters a frequency block at position indx in self.freqBlocks (the last block by default)."""
-        if lims is None or indx == 0:         # Can't change the limits of the first block
+        if indx == 0:         # Can't change the limits of the first block
             lims = (self.freqBlocks[indx].min, self.freqBlocks[indx].max)
-            # lims = (-np.inf, np.inf)
-        if bslnOrder is None:                 # Don't change the baseline order by default
-            bslnOrder = self.freqBlocks[indx].bslnOrder
 
-        # Choose only samples that are in the optimization range
-        indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), np.searchsorted(self.f.ravel(), max(lims)))   # Faster than np.arange(*np.searchsorted(f, lims))   or    np.flatnonzero((self.f < max(lims))*(self.f >= min(lims)))     # Indices of frequency points in the range
-        nf = indxFreq.size
-        # Define baseline in the frequency domain
-        bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[0]+1)] if bslnOrder[0] is not None else []
-        bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[1]+1)] if bslnOrder[1] is not None else []
-        bF = np.hstack(bFr+bFi)
-
-        self.freqBlocks[indx] = freqSpec(min(lims), max(lims), indxFreq, bslnOrder, bF)
+        self.freqBlocks[indx].update(lims, bslnOrder)
 
     def remFreqBlock(self, indx):
         """Removes a frequency block from the series and updates all steps accordingly."""
@@ -1437,7 +1466,7 @@ class Datum():
             """
 
             # Include the baseline
-            bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
+            bslnPoly = block_diag(*[self.freqBlocks[i].bline(nf=0) for i in frqBlkIds])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
             if not useComplex:
                 bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
             #else: bslnPoly *= phFinRange
@@ -1571,6 +1600,95 @@ class Datum():
         meta['ampl'] = (np.abs(m_ampl[:na]), S_ampl[:na, :na].real)
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
+    def _get_indxFreq(self, i, nw2=0):
+        """Returns the indices of the frequency scale covered by the block i; takes into account possible padding by nw2 on both sides of the range."""
+
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0   # Reference chemical shift
+        f = self.f - dref_chsh
+
+        return self.freqBlocks[i].indxFreq(f, nw2)
+
+    def _get_signals_in_time(self, evalParsH, wnd=None):
+        # 1. Compute model signals in time domain
+        zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH)            # 1. Compute the model signals
+
+        # 1. Apply custom lineshape correction if defined
+        if self.sT is not None:
+            zT *= self.sT
+
+        # 2. Apply window in the time domain if needed
+        yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
+
+        ## Define modelled and measured signals
+        return zTw[0:,:], yTw[0:, :]
+
+    def _get_signals_in_freq(self, evalParsH, frqBlkIds=None, freqMask=None, wnd=None, numberField=None, convolve=True):
+        """Returns a matrix of modelled signals and the y vector in frequency domain."""
+
+        if frqBlkIds is None:
+            frqBlkIds = self.steps[-1].frqBlkIds
+        if numberField is None:
+            numberField = config.SAMPL_numberField
+
+        nw = len(self.sF) if self.sF is not None else 0         # Length of the adaptive lineshape window (in frequency domain)
+        nw2 = int(nw/2)
+
+        # Find indices for each frequency block (including padding)
+        indxFreqByBlock = [ self._get_indxFreq(i, nw2) for i in frqBlkIds ]
+        indxInRange = np.concatenate(indxFreqByBlock)
+
+        if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
+            zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
+
+            # 1. Apply custom lineshape correction if defined
+            if self.sT is not None:
+                zT *= self.sT
+
+            # 2. Apply window in the time domain if needed
+            yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
+
+            # 3. Compute the spectra
+            zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+            yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+
+            # 4. Take only the valid frequency ranges
+            zFinRange = zF[indxInRange, :]
+            yFinRange = yF[indxInRange, :]
+        else:
+            zFinRange, repRootNames = evalTreeF(self.T, self.f[ indxInRange ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
+
+            # Apply custom lineshape correction (this reduces the range)
+            if nw2 > 0 and convolve:
+                indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]     # Indices showing how to split the concatenated arrays xF, yF, zF, etc.
+                zFinRange = np.vstack([scipy.signal.fftconvolve(z, self.sF, 'valid') for z in np.split(zFinRange, indxSplit)]) / np.sqrt(len(self.f))
+                indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
+
+            yFinRange = self.yF[indxInRange, :]
+
+        if freqMask is not None:
+            pass
+            # # Control which frequencies should be excluded from optimization
+            # unmaskedIndx = np.array([[f>msk[0] and f<msk[1] for msk in freqMask] for f in self.f[indxInRange]-dref_chsh ]).any(axis=1).ravel()
+            # indxInRange = indxInRange[unmaskedIndx]
+
+        # Possibly update the phased signal if the first-order phasing parameter has changed
+        phFinRange = np.exp(-1j*2*np.pi * evalParsH["."]["tau"][0] * (self.f[indxInRange]*self.c0-self.f0) - 1j*0 ).reshape((-1,1))   # The phasing term
+        yFinRange *= phFinRange
+
+        # Choose only components that are in the optimization range
+        # TODO!
+
+        # Include the baseline
+        bslnPoly = block_diag(*[self.freqBlocks[i].bline(nf=len(indx)-2*nw2) for i, indx in zip(frqBlkIds, indxFreqByBlock)])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
+        if numberField == 'Re':
+            bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
+        #else: bslnPoly *= phFinRange
+        if freqMask is not None:
+            bslnPoly = bslnPoly[unmaskedIndx, :]
+        nb = bslnPoly.shape[1]     # Total number of baseline terms
+
+        return zFinRange, bslnPoly, yFinRange, indxInRange
+
     # @profile
     def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, freqMask=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
@@ -1591,83 +1709,14 @@ class Datum():
         # 2. Compute a matrix of model signals Z, either in time or frequency domain
         inTimeDomain = (len(frqBlkIds) == 0)
         if inTimeDomain:
-            # -------------------------- TIME ----------------------------
-            # 1. Compute model signals in time domain
-            zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH)            # 1. Compute the model signals
-
-            # 1. Apply custom lineshape correction if defined
-            if self.sT is not None:
-                zT *= self.sT
-
-            # 2. Apply window in the time domain if needed
-            yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
-
-            ## Define modelled and measured signals
-            Z, y = zTw[0:,:], yTw[0:, :]
             numberField = 'Cx'
+            Z, y = self._get_signals_in_time(evalParsH, wnd)
         else:
-            # --------------------- FREQUENCY ----------------------------
-            nw = len(self.sF) if self.sF is not None else 0         # Length of the adaptive lineshape window (in frequency domain)
-            nw2 = int(nw/2)
-            indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
-            indxPadding = np.concatenate(tuple(np.concatenate([np.arange(self.freqBlocks[i].indxFreq[0]-nw2, self.freqBlocks[i].indxFreq[0]),
-                                                               np.arange(self.freqBlocks[i].indxFreq[-1]+1, self.freqBlocks[i].indxFreq[-1]+nw2+1)%len(self.f)] ) \
-                                        for i in frqBlkIds)) if nw2>0 else np.array([], dtype='int')   # Extra indices used for padding when convolving the signals with lineshape kernel in frequency domain
-            if freqMask is not None:
-                dref_chsh = 0.0# self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0   # Reference chemical shift
-                unmaskedIndx = np.array([[f>msk[0] and f<msk[1] for msk in freqMask] for f in self.f[indxInRange]-dref_chsh ]).any(axis=1).ravel()
-                indxInRange = indxInRange[unmaskedIndx]
-
-            if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
-                zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
-
-                # 1. Apply custom lineshape correction if defined
-                if self.sT is not None:
-                    zT *= self.sT
-
-                # 2. Apply window in the time domain if needed
-                yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
-
-                # 3. Compute the spectra
-                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                zFinRange = zF[indxInRange, :]
-                zFPadding = zF[indxPadding, :]
-                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                yFinRange = yF[indxInRange, :]
-            else:
-                zFall, repRootNames = evalTreeF(self.T, self.f.take(np.concatenate([indxInRange, indxPadding])), self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
-                zFinRange, zFPadding = np.split(zFall, [len(indxInRange)] )
-                yFinRange = self.yF[indxInRange, :]
-
-                # Apply custom lineshape correction
-                if self.sF is not None:
-                    indxSplit = np.cumsum([self.freqBlocks[i].indxFreq.size for i in frqBlkIds])[:-1]     # Indices showing how to split the concatenated arrays xF, yF, zF, etc.
-                    zFPadded = [np.vstack([y[:nw2, :], x, y[-nw2:, :]]) for x, y in\
-                                        zip(np.split(zFinRange, indxSplit, axis=0),
-                                            np.split(zFPadding, len(frqBlkIds), axis=0) )]
-                    zFinRange = np.vstack([scipy.signal.fftconvolve(z, self.sF, 'valid') for z in zFPadded]) / np.sqrt(len(self.f))
-
-            # Possibly update the phased signal if the first-order phasing parameter has changed
-            phFinRange = np.exp(-1j*2*np.pi * evalParsH["."]["tau"][0] * (self.f.take(indxInRange)*self.c0-self.f0) - 1j*0 ).reshape((-1,1))   # The phasing term
-            yFinRange *= phFinRange
-
-            # Choose only components that are in the optimization range
-            # TODO!
-
-            # Include the baseline
-            bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
-            if numberField == 'Re':
-                bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
-            #else: bslnPoly *= phFinRange
-            if freqMask is not None:
-                bslnPoly = bslnPoly[unmaskedIndx, :]
-            nb = bslnPoly.shape[1]     # Total number of baseline terms
-
-            # Define modelled and measured signals
-            Z, y = np.hstack((zFinRange, bslnPoly)), yFinRange
+            zFinRange, bFinRange, yFinRange, indxInRange = self._get_signals_in_freq(evalParsH, frqBlkIds, freqMask, wnd, numberField)
+            Z, y = np.hstack((zFinRange, bFinRange)), yFinRange
 
         ns, nz = Z.shape     # Number of samples and (model signals + baselines)
-        na = len(repRootNames)    # Number of model signals, and hence the resulting amplitudes
+        na = len(self.repRootNames)    # Number of model signals, and hence the resulting amplitudes
         if np.isnan(Z).any() or np.isinf(Z).any():             # This can happen if some chemical shifts are set to None
             return 0.0, {}
 
@@ -1774,12 +1823,11 @@ class Datum():
                     # If there is zT variable computed already
                     zF = np.fft.fftshift(np.fft.fft(zT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
                     zFinRange = zF[indxInRange, :]
+                except NameError: pass
                 except UnboundLocalError: pass        # If there is no zT variable. Don't do anything; computation has been performed in the frequency domain anyway
                 self.zF = np.zeros((len(self.f),na), dtype=complex)
                 self.zF[indxInRange,:] = zFinRange ### / Znrm[:, 0:na]
-                if nz-na > 0:
-                    self.bF = np.zeros((len(self.f),1), dtype=complex)
-                    self.bF[indxInRange] = np.dot(bslnPoly, m_ampl[-(nz-na):])
+
             # Save the characteristics of the marginalized distributions
             for i in range(na):
                 key=(self.repRootNames[i], 'ampl', 0)
@@ -1790,14 +1838,15 @@ class Datum():
             if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
                 self.smplDistF[key] = smplSpec_invGamma( a_sigma2, b_sigma2 )
 
-        # Always save the baseline
+        # Always save the baseline; it may be needed for the adjustmwnt algorithms
         if not inTimeDomain and nz-na>0:
             self.bF = np.zeros((len(self.f),1), dtype=complex)
-            self.bF[indxInRange] = np.dot(bslnPoly, m_ampl[-(nz-na):])
+            self.bF[indxInRange] = np.dot(bFinRange, m_ampl[-(nz-na):])
 
         meta['sigma2'] = (2.0, sigma2)
         meta['theta'] = theta       # distr = {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
         meta['ampl'] = (np.abs(m_ampl[:na]), S_ampl[:na, :na].real)
+
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
     def _fnc_prior(self, evalParsH, parsKeys=None, customPriors=None):
@@ -1820,7 +1869,8 @@ class Datum():
     def measure_noise(self, lims, lmda=5.0):
         """Measures the standard deviation of noise in the spectrum within the limits lims in ppm."""
 
-        indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), np.searchsorted(self.f.ravel(), max(lims)))     # Indices of frequency points in the range
+        indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), \
+                             np.searchsorted(self.f.ravel(), max(lims)))     # Indices of frequency points in the range
 
         yF = self.yF[indxFreq].ravel()
         yFbsln = whitsm(yF, lmda)
@@ -1845,78 +1895,45 @@ class Datum():
         # Compute a matrix of model signals Z, either in time or frequency domain
         if len(frqBlkIds) == 0:
             # -------------------------- TIME ----------------------------
-            # 1. Compute model signals in time domain
-            zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH)            # 1. Compute the model signals
-
-            # 2. Apply window in the time domain if needed
-            yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
-
-            # Define modelled and measured signals
-            Z, y = zTw, yTw
+            pass
         else:
-            # --------------------- FREQUENCY ----------------------------
-            indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
-            indxPadding = np.concatenate(tuple(np.concatenate([np.arange(self.freqBlocks[i].indxFreq[0]-nw2, self.freqBlocks[i].indxFreq[0]),
-                                                               np.arange(self.freqBlocks[i].indxFreq[-1]+1, self.freqBlocks[i].indxFreq[-1]+nw2+1)% nf] ) \
-                                        for i in frqBlkIds)) if nw2>0 else np.array([], dtype='int')   # Extra indices used for padding when convolving the signals with lineshape kernel in frequency domain
+            indxFreqByBlock = [ self._get_indxFreq(i, nw2) for i in frqBlkIds ]
+            indxPadded = np.concatenate(indxFreqByBlock)
+            indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
 
             if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
                 zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
+
+                # 1. Apply custom lineshape correction if defined
+                if self.sT is not None:
+                    zT *= self.sT
 
                 # 2. Apply window in the time domain if needed
                 yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
 
                 # 3. Compute the spectra
-                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(nf)
-                zFinRange = zF[indxInRange, :]
-                zFPadding = zF[indxPadding, :]
-                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(nf)
+                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+
+                # 4. Take only the valid frequency ranges
+                zFPadded = zF[indxPadded, :]
                 yFinRange = yF[indxInRange, :]
             else:
-                zFall, repRootNames = evalTreeF(self.T, self.f.take(np.concatenate([indxInRange, indxPadding])), self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
-                zFinRange, zFPadding = np.split(zFall, [len(indxInRange)] )
-                yFinRange = self.yF[indxInRange, :]
+                zFPadded, repRootNames = evalTreeF(self.T, self.f[ indxPadded ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
+                indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]
+                zFPadded = [z for z in np.split(zFPadded, indxSplit)]
 
-            # Possibly update the phased signal if the first-order phasing parameter has changed
-            yFinRange *= np.exp(-1j*2*np.pi * evalParsH["."]["tau"][0] * (self.f.take(indxInRange)*self.c0-self.f0) - 1j*0 ).reshape((-1,1))   # A shorter vector of yF restricted to the optimization range only
+            mc = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames])           # First na results correspond to the actual amplitudes of components, the rest, if any, correspond to the baselines
+            theta = evalParsH['.']['theta'][0]
 
-            # Choose only samples that are in the optimization range
-            """indxFreq = np.flatnonzero((self.f<self.freqBlocks[i].max)*(self.f>=self.freqBlocks[i].min))     # Indices of frequency points in the range
-            nf = indxFreq.size
-            bF = lambda nf : np.hstack(( np.ones((nf, 1)), np.linspace(-1,1, nf).reshape(-1,1), np.linspace(-1,1,nf).reshape(-1,1)**2, 1j*np.ones((nf, 1)), 1j*np.linspace(-1,1, nf).reshape(-1,1), 1j*np.linspace(-1,1,nf).reshape(-1,1)**2 ))         # Define baseline in the frequency domain
-            """
-
-            # Include the baseline
-            bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros
-            nb = bslnPoly.shape[1]     # Total number of baseline terms
-
-            # Define modelled and measured signals
-            Z, y = np.hstack((zFinRange, bslnPoly)), yFinRange
-        ns, nz = Z.shape     # Number of samples and (model signals + baselines)
-        na = len(repRootNames)    # Number of model signals, and hence the resulting amplitudes
-
-        mc = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames])           # First na results correspond to the actual amplitudes of components, the rest, if any, correspond to the baselines
-        theta = evalParsH['.']['theta'][0]
-        m_ampl = mc[:na]
-
-        # 3.a Apply adaptive lineshape correction and reevaluate the amplitudes
-        if len(frqBlkIds) == 0:
-            # TODO: Estimate lineshape in the time domain as the ratio between the mesured and fitted FIDs
-            pass
-        elif nw2 > 0:
-            # Padd the signal arrays on both ends, separately for each frequency range
-            indxSplit = np.cumsum([self.freqBlocks[i].indxFreq.size for i in frqBlkIds])[:-1]     # Indices showing how to split the concatenated arrays xF, yF, zF, etc.
-            zFPadded = [np.vstack([y[:nw2, :], x, y[-nw2:, :]]) for x, y in\
-                                zip(np.split(zFinRange, indxSplit, axis=0),
-                                    np.split(zFPadding, len(frqBlkIds), axis=0) )]
-            xFPadded = [np.dot(z, mc[:na]*np.exp(1j*theta)).reshape(-1,1) for z in zFPadded]
+            xFPadded = [np.dot(z, mc*np.exp(1j*theta)).reshape(-1,1) for z in zFPadded]
+            yFinRange = self.yF[indxInRange, :]
+            bFinRange = self.bF[indxInRange, :]
 
             # Form the Toeplitz matrix of shifted arrays
             S = np.vstack([np.hstack([x[i:i+len(x)-2*nw2] for i in np.arange(2*nw2, -1, -1, dtype='int')]) for x in xFPadded])
 
-            # Subtract the baseline from the measured data
-            bFinRange = self.bF[indxInRange, :]   # np.dot(bslnPoly, mc[-(nz-na):]) if nz-na>0 else 0
-
+            # Solve the system of equations
             SS = np.dot(S.T.conj(), S) + 0.00*np.eye(nw)
             sF = np.linalg.solve(SS, np.dot(S.T.conj(), yFinRange-bFinRange))
             sF /= sum(sF) / np.sqrt(len(self.f))
@@ -2003,7 +2020,10 @@ class Datum():
             evalParsH = self.crntParsH
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
-        indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
+
+        indxFreqByBlock = [ self._get_indxFreq(i) for i in frqBlkIds ]
+        indxInRange = np.concatenate(indxFreqByBlock)
+        # indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq(self.f) for i in frqBlkIds))
         dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
 
         # 2. Compute the model spectrum if necessary
@@ -2064,7 +2084,10 @@ class Datum():
             evalParsH = self.crntParsH
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
-        indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
+
+        indxFreqByBlock = [ self._get_indxFreq(i) for i in frqBlkIds ]
+        indxInRange = np.concatenate(indxFreqByBlock)
+        # indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq(self.f) for i in frqBlkIds))
         dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
 
         # 2. Compute the model spectrum if necessary
@@ -2329,69 +2352,28 @@ class Datum():
             ax[0].set_ylabel(str(keys[1]))
 
     def plot(self, ax_main, ax_residual=None, showRanges='all', showComponents=False, showLegend=True, returnSignals=False, real=True):
-        """Plots the dataset."""
+        """Plots the dataset using a matplotlib Figure."""
 
-        # Phase the data
-        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
-        yFph = self.yF * ph
-        if self.zF is not None:
-            ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(1, -1)
-            zF = self.zF * ampl if self.zF_corr is None else (self.zF + self.zF_corr)*ampl
-            xF = zF.sum(1).reshape(-1,1)
-            if self.bF is not None:
-                bF = self.bF if self.bF_corr is None else self.bF + self.bF_corr
-                xF += bF
-        else: zF, xF, bF = None, None, None
+        f, yFph, xF, zF, bF = self.signals_for_plot()
 
-        inRange, outRange = splitFreq([self.freqBlocks[blk] for blk in self.steps[0].frqBlkIds], f=self.f)
-        dref_chsh = 0.0 # self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
-        rmsResidual = 0.0
-        if outRange:
-            supsRatio = ceil(yFph.size / (2**13))   # Subsampling ratio; take no more than 2^13 points
-            allIndx = [np.append(r.indxFreq[:-1:supsRatio], r.indxFreq[-1]) for r in outRange]   # Make sure that the first and the last indices of each group are included
-            gapsPos = np.cumsum([r.size for r in allIndx])        # Positions of gaps
-            allIndx = np.concatenate(allIndx)
-            f_outR = np.insert(self.f[allIndx], gapsPos, None) - dref_chsh
+        # Plot measured data
+        ax_main.plot(f, yFph.real if real else yFph.imag, '-', color=(0,0.58,0.86), linewidth=1.5, label='')
 
-            # Plot measured data
-            yF_outR = np.insert(yFph[allIndx], gapsPos, None)
-            ax_main.plot(f_outR, yF_outR.real if real else yF_outR.imag, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
+        # Plot the model components
+        if showComponents and zF is not None:
+            zF = (zF + 1*bF)
+            for i, node in enumerate(self.repRootNames):
+                ax_main.plot(f, zF[:, i].real if real else zF[:, i].imag, '-', linewidth=0.5, color=config.colrseq[i], label=node)
 
-            # Plot the fitted model
-            if xF is not None:
-                xF_outR = np.insert(xF[allIndx], gapsPos, None)
-                ax_main.plot(f_outR, xF_outR.real if real else xF_outR.imag, '-', color='r', label='Fitted model')
+        # Plot the fitted model
+        if xF is not None:
+            ax_main.plot(f, xF.real if real else xF.imag, '-', color='r', label='')
 
-                # Plot the residuals
-                if ax_residual is not None:
-                    ax_residual.plot(f_outR, (yF_outR - xF_outR).real if real else (yF_outR - xF_outR).imag, '-', color='darkkhaki')
-
-        if inRange:
-            allIndx = np.concatenate([r.indxFreq for r in inRange])
-            gapsPos = np.cumsum([r.indxFreq.size for r in inRange])
-            f_inR = np.insert(self.f[allIndx], gapsPos, None) - dref_chsh
-
-            # Plot measured data
-            yF_inR = np.insert(yFph[allIndx], gapsPos, np.nan)     #  - 1*step.bFph[allIndx]
-            ax_main.plot(f_inR, yF_inR.real if real else yF_inR.imag, '-', color=(0,0.58,0.86), linewidth=1.5, label='')
-
-            # Plot the model components
-            if showComponents and zF is not None:
-                zF = (zF + 1*bF)
-                zF_inR = np.insert(zF[allIndx, :], gapsPos, None, axis=0)
-                for i, node in enumerate(self.repRootNames):
-                    ax_main.plot(f_inR, zF_inR[:, i].real if real else zF_inR[:, i].imag, '-', linewidth=0.5, color=config.colrseq[i], label=node)
-
-            # Plot the fitted model
-            if xF is not None:
-                xF_inR = np.insert(xF[allIndx], gapsPos, None)       #  - 1*step.bFph[allIndx]
-                ax_main.plot(f_inR, xF_inR.real if real else xF_inR.imag, '-', color='r', label='')
-
-                # Plot the residuals
-                if ax_residual is not None:
-                    rF_inR = (yF_inR - xF_inR).real if real else (yF_inR - xF_inR).imag
-                    ax_residual.plot(f_inR, rF_inR, '-', color='darkkhaki')
-                    rmsResidual += np.sqrt(np.nanmean(np.abs(rF_inR)**2))
+            # Plot the residuals
+            if ax_residual is not None:
+                rF = (yF - xF).real if real else (yF - xF).imag
+                ax_residual.plot(f, rF, '-', color='darkkhaki')
+                rmsResidual += np.sqrt(np.nanmean(np.abs(rF)**2))
 
         # Show the residuals plot below the graph
         # Set ticks and labels
@@ -2423,7 +2405,116 @@ class Datum():
         ax_main.autoscale()    # update ax.viewLim using the new dataLim
         if ax_main.get_xlim()[1] > ax_main.get_xlim()[0]: ax_main.invert_xaxis()
 
-        if returnSignals: return self.f - dref_chsh, yFph, xF, zF
+        if returnSignals: return f, yFph, xF, zF
+
+    def signals_for_plot(self, showComponents=False):
+        """Computes the signals for plotting. Applies subsampling to the parts of the signals that are out ouf the fitting ranges."""
+
+        minmaxTuple = namedtuple('minmaxTuple', 'min, max')
+        minmaxTuple.__new__.__defaults__ = (-np.inf, np.inf)
+        minmaxTuple.imin = lambda self, f : np.searchsorted(f.ravel(), self.min)
+        minmaxTuple.imax = lambda self, f : np.searchsorted(f.ravel(), self.max)
+
+        def splitFreq(inRange):
+            """Given a list of freqSpec tuples, divides the frequency range -inf to +inf into lists of disjoint intervals: inRange and outRange by merging overlapping optimization ranges."""
+
+            if inRange:
+                inRange = mergeFreq(inRange)      # Merged and sorted list of freqRanges
+                outRange = []
+                if not np.isinf(inRange[0].min):
+                    lwr = -np.inf
+                    upr = inRange[0].min
+                    outRange.append(minmaxTuple(min=lwr, max=upr))
+                for i in range(len(inRange)-1):
+                    lwr = inRange[i].max
+                    upr = inRange[i+1].min
+                    outRange.append(minmaxTuple(min=lwr, max=upr))
+                if not np.isinf(inRange[-1].max):
+                    lwr = inRange[-1].max
+                    upr = np.inf
+                    outRange.append(minmaxTuple(min=lwr, max=upr))
+            else:
+                outRange = [minmaxTuple(-np.inf, np.inf)]  # Infinite interval
+
+            return inRange, outRange
+
+        def mergeFreq(intervals):
+            """
+            Merge oevrlapping intervals. Based on https://codereview.stackexchange.com/questions/69242/merging-overlapping-intervals.
+            A simple algorithm can be used:
+            1. Sort the intervals in increasing order
+            2. Push the first interval on the stack
+            3. Iterate through intervals and for each one compare current interval
+               with the top of the stack and:
+               A. If current interval does not overlap, push on to stack
+               B. If current interval does overlap, merge both intervals in to one
+                  and push on to stack
+            4. At the end return stack
+            """
+            sorted_by_lower_bound = sorted(intervals, key=lambda tup: tup.min)
+            merged = []
+
+            for higher in sorted_by_lower_bound:
+                if not merged:
+                    merged.append(higher)
+                else:
+                    lower = merged[-1]
+                    # test for intersection between lower and higher:
+                    # we know via sorting that lower[0] <= higher[0]
+                    if higher.min <= lower.max:
+                        upper_bound = max(lower.max, higher.max)
+                        merged[-1] = minmaxTuple(min=lower.min, max=upper_bound)  # replace by merged interval
+                    else:
+                        merged.append(higher)
+            return merged
+
+        # Phase the data
+        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
+        yFph = self.yF * ph
+
+        # Subsample out-of-range parts of the spectrum
+        inRange, outRange = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) \
+                                        for blk in self.steps[0].frqBlkIds ])
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
+        f = self.f - dref_chsh
+        rmsResidual = 0.0
+        allRange = sorted(inRange+outRange, key=lambda x : x[0])
+        supsRatio = ceil(yFph.size / (2**12))   # Subsampling ratio; take no more than 2^12 points
+        allIndx = np.concatenate( [np.arange(r.imin(f), r.imax(f), supsRatio if r in outRange else 1) for r in allRange] )
+
+        f, yFph = f[allIndx, :], yFph[allIndx, :]
+
+        if self.zF is not None:
+            ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(1, -1)
+            zF = self.zF * ampl if self.zF_corr is None else (self.zF + self.zF_corr)*ampl
+            xF = zF.sum(1).reshape(-1,1)
+            if self.bF is not None:
+                bF = self.bF if self.bF_corr is None else self.bF + self.bF_corr
+                xF += bF
+            xF, zF, bF = xF[allIndx, :], zF[allIndx, :], bF[allIndx, :]
+        else: zF, xF, bF = None, None, None
+
+        return f, yFph, xF, zF, bF
+
+
+    def stems_for_plot(self):
+        """Computes all stem lines to be displayed on a plot. returns a list with each elemnet corresponding to a dictionary for a specific reported node."""
+
+        allStems = []     # Dictionary that stores references to all stem lines
+        mdldPeaks = collectPeaks(self.T, self.c0, self.crntParsH)
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
+
+        # for i, name in enumerate([name for name in self.repRootNames if name not in ['Water', 'Chloroform'] ]):         #
+        for i, name in enumerate(self.repRootNames):
+            stems_i = {}
+            for stemKey, val in mdldPeaks[name].items():   # Loop over the leaves
+                parsKey = peakName2parsKey(stemKey)
+                freq = [pk.chsh - dref_chsh for pk in val]
+                intn = [np.abs(pk.intn) for pk in val]
+                stems_i[parsKey] = (self.getCrntVal(key=parsKey), freq, intn)
+            allStems.append(stems_i)
+
+        return allStems
 
     def evalForPlot(self, key, frqBlkIds=None, lims=None, npts=75):
         """Returns an array of argument values and the values of log likelihood, prior, and posterior."""
