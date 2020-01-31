@@ -669,7 +669,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(rbtnGroup)
         layout.addWidget(qdConfigGroup)
         layout.addWidget(optiConfigGroup)
-        layout.addWidget(self.chkboxRobustLS)
+        # layout.addWidget(self.chkboxRobustLS)
         # layout.addWidget(lklfConfigGroup)
         # layout.addWidget(smplConfigGroup)
 
@@ -1897,8 +1897,8 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self._parsSigma2 = viewNode(('.', 'sigma2', 0), alias=None, nodeType='param')       # alias='Variance of noise, s2'
         self._parsPH0 = viewNode(('.', 'theta', 0), alias=None, nodeType='param')         # alias='Zero-order phase (PH0)'
         self._parsPH1 = viewNode(('.', 'tau', 0), alias=None, nodeType='param')       # alias='Acquisition delay (PH1)'
-        self._ratioTLS = viewNode(('.', 'gamma', 0), alias='TLS ratio', nodeType='param')
-        self._lshape = viewNode('_lshape', alias='Lineshape correction', nodeType='lshape')
+        # self._ratioTLS = viewNode(('.', 'gamma', 0), alias='TLS ratio', nodeType='param')
+        # self._lshape = viewNode('_lshape', alias='Lineshape correction', nodeType='lshape')           # self._lshape = viewNode('lshapeX', alias='Fit custom shape', nodeType='bool')
 
         self.resetChemTree(flag=False)
         self.resetLshapeTree(flag=False)
@@ -1916,13 +1916,14 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         """Updates the tree of lineshape correction parameters."""
         if flag: self.beginResetModel()
 
-        # Reset the lineshape correction subtree
-        self._lshape.clearChildren()
-        self._lshape.addChild(viewNode('lshapeX', alias='Fit custom shape', nodeType='bool'))       # Custom lineshape
-        supscr = ['nd', 'rd'] + ['th']*(self.datum.lshapeOrder-2)
-        for i in range(self.datum.lshapeOrder):
-            self._lshape.addChild(viewNode(('.','lshapeR',i), alias='{}{} order Re'.format(i+2, supscr[i]), nodeType='param'))
-            self._lshape.addChild(viewNode(('.','lshapeI',i), alias='{}{} order Im'.format(i+2, supscr[i]), nodeType='param'))
+        # Uncomment to show 2nd and 3rd order coreection parameters
+        # # Reset the lineshape correction subtree
+        # self._lshape.clearChildren()
+        # self._lshape.addChild(viewNode('lshapeX', alias='Fit custom shape', nodeType='bool'))       # Custom lineshape
+        # supscr = ['nd', 'rd'] + ['th']*(self.datum.lshapeOrder-2)
+        # for i in range(self.datum.lshapeOrder):
+        #     self._lshape.addChild(viewNode(('.','lshapeR',i), alias='{}{} order Re'.format(i+2, supscr[i]), nodeType='param'))
+        #     self._lshape.addChild(viewNode(('.','lshapeI',i), alias='{}{} order Im'.format(i+2, supscr[i]), nodeType='param'))
 
         if flag: self.endResetModel()
 
@@ -2006,7 +2007,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             return index.internalPointer().childCount()
         else:
             #print("row count: index is invalid")
-            return 6    # Number of rows in the display root
+            return 4    # Number of rows in the display root
 
     def parent(self, index):
         """Should return QModelIndex of the parent of the node with the given QModelIndex. INPUTS: QModelIndex. OUTPUT: QModelIndex"""
@@ -2029,10 +2030,10 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 return self.createIndex(row,column,self._parsPH1)
             elif row == 3:
                 return self.createIndex(row,column,self._parsSigma2)
-            elif row == 4:
-                return self.createIndex(row,column,self._ratioTLS)
-            elif row == 5:
-                return self.createIndex(row, column, self._lshape)
+            # elif row == 4:
+            #     return self.createIndex(row,column,self._ratioTLS)
+            # elif row == 4:
+            #     return self.createIndex(row, column, self._lshape)
         else:
             parent = prnt.internalPointer()
             child = parent.child(row)
@@ -3867,9 +3868,9 @@ class FittingThread(QThread):
                 if isinstance(indx, int):
                     print("Optimizing step No. {:d}".format(indx+1))
                     step = self.fileToFit.steps[indx]
-                    # Update the custom lineshape if requested
-                    if step.fitCustomLshape:
-                        self.fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
+                    # # Update the custom lineshape if requested
+                    # if step.fitCustomLshape:
+                    #     self.fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
                     # Fit the model parameters
                     self.fileToFit.optimize(parsKeys=step.parsKeys, autoKeys=step.autoKeys, frqBlkIds=step.frqBlkIds, evaluatePriors=False)
                 else:
@@ -3888,9 +3889,12 @@ class FittingThread(QThread):
                         # Adjust the lineshape
                         self.fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
                         # Re-evaluate the step to update the signals to be plotted
-                        self.fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=None, returnSignals=True)
-
-
+                        self.fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
+                    elif indx == 'Lor':
+                        # Reset the lineshape to the default (Lorentzian)
+                        print('here')
+                        self.fileToFit.reset_shape()
+                        self.fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
 
                 # Finish fitting and return the results
                 self.result.emit(self.fileToFit.crntParsH)
@@ -4229,6 +4233,13 @@ class MainView(QMainWindow):
         self.actnAutoPhase = QAction(self._icon('icon_autoPhase.png'), 'Autophase', self)
         self.actnAutoPhase.setStatusTip('Apply a phase correction algorithm')
         self.actnAutoPhase.triggered.connect(self.autoPhase)
+        # Set custom lineshape
+        self.actnSetLshape = QAction(self._icon('icon_customShape.png'), 'Set custom lineshape', self)
+        self.actnSetLshape.setStatusTip('Apply a custom lineshape derived by deconvolution')
+        self.actnSetLshape.triggered.connect(lambda mode : self.fitStep(indx='Lsh'))
+        self.actnResetLshape = QAction(self._icon('icon_resetShape.png'), 'Reset the lineshape', self)
+        self.actnResetLshape.setStatusTip('Remove the custom lineshape - reset to default (Lorentzian)')
+        self.actnResetLshape.triggered.connect(lambda mode : self.fitStep(indx='Lor'))
 
         # ----------------------- Actions for the tree -------------------------
         # Add step
@@ -4309,6 +4320,8 @@ class MainView(QMainWindow):
         tbMain.addAction(self.actnSaveImage)
         tbMain.addSeparator()
         tbMain.addAction(self.actnAutoPhase)
+        tbMain.addAction(self.actnSetLshape)
+        tbMain.addAction(self.actnResetLshape)
         # self.addToolBar(CustomToolbar(self.canvas, self, coordinates=False))    # Figure toolbar
         tbTree = self.addToolBar("Tree")               # Tree toolbar
         tbTree.addAction(actnLoadTree)
@@ -4320,7 +4333,7 @@ class MainView(QMainWindow):
         tbTree.addAction(actnAddStep)
         tbTree.addAction(actnDelStep)
         tbTree.addSeparator()
-        tbTree.addAction(self.actnToggleTLS)
+        # tbTree.addAction(self.actnToggleTLS)
         tbTree.addAction(self.actnFitLastStep)
         tbTree.addAction(self.actnFitAllSteps)
         tbTree.addAction(self.actnFitAllFiles)
@@ -4586,7 +4599,7 @@ class MainView(QMainWindow):
 
     # ------------------ Working with the fitting thread -----------------------
 
-    def fitQueue(self, stepIdsToFit = None, autoPhase=False, autoPick=False):
+    def fitQueue(self, stepIdsToFit = None):
         """Fits the files in the self.fittingQueue list. Must be called only when appropriate self.fittingQueue is set."""
         # Disable controls that can start fitting
         #self.actnFitAllSteps.setDisabled(True)
@@ -4671,8 +4684,8 @@ class MainView(QMainWindow):
     def tryStep(self, indx=None):
         if indx is None: indx = self.actvStepIndx        # Fit the active step by default
         step = self._crnt.steps[indx]
-        if step.fitCustomLshape:
-            self._crnt.set_shape(frqBlkIds=step.frqBlkIds)
+        # if step.fitCustomLshape:
+        #     self._crnt.set_shape(frqBlkIds=step.frqBlkIds)
         self._crnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
         self.plotCurrent(autoRange=False)
         self.treeModel.notifyDataChanged()
@@ -4684,7 +4697,7 @@ class MainView(QMainWindow):
         reportMCMC(samples)
 
     def fitStep(self, indx=None):
-        """Fits a single step specified by its indx or the active column or runs phase/residual adjustment if indx in ['Ph0', 'Ph1', 'PhA', 'Rsd']. By default, fit the active step."""
+        """Fits a single step specified by its indx or the active column or runs phase/residual adjustment if indx in ['Ph0', 'Ph1', 'PhA', 'Rsd', 'Lsh', 'Lor']. By default, fit the active step."""
         # Set up the progress bars
         self.progressBarFiles.setRange(0, 1)
         self.progressBarFiles.setValue(0)
