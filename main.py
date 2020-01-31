@@ -609,8 +609,8 @@ class SettingsDialog(QDialog):
         groupLayout.addWidget(self.rbtnStartFromCurrent)
         groupLayout.addWidget(self.rbtnStartFromPrevious)
         groupLayout.addWidget(self.rbtnStartFromDefault)
-        groupLayout.addWidget(self.chkboxAutoPhasing)
-        groupLayout.addWidget(self.chkboxAutoPicking)
+        # groupLayout.addWidget(self.chkboxAutoPhasing)
+        # groupLayout.addWidget(self.chkboxAutoPicking)
         rbtnGroup = QGroupBox("Processing series of spectra")
         rbtnGroup.setLayout(groupLayout)
 
@@ -3712,14 +3712,6 @@ class PhasingWidget(QWidget):
         theta, tau = self.deg2tau(self.p0deg, self.p1deg)
         print(theta, tau)
 
-        # Set the sliders
-        self.sliderPh0.blockSignals(True)
-        self.sliderPh1.blockSignals(True)
-        self.sliderPh0.setValue((self.p0deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
-        self.sliderPh1.setValue((self.p1deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
-        self.sliderPh0.blockSignals(False)
-        self.sliderPh1.blockSignals(False)
-
         self.startPlotting()
         self.phasingComplete()
 
@@ -4236,7 +4228,7 @@ class MainView(QMainWindow):
         # Autophase
         self.actnAutoPhase = QAction(self._icon('icon_autoPhase.png'), 'Autophase', self)
         self.actnAutoPhase.setStatusTip('Apply a phase correction algorithm')
-        self.actnAutoPhase.triggered.connect(self.phasingTool.autoPhase)
+        self.actnAutoPhase.triggered.connect(self.autoPhase)
 
         # ----------------------- Actions for the tree -------------------------
         # Add step
@@ -4615,13 +4607,13 @@ class MainView(QMainWindow):
         else: # i.e. settings["startgFromPars"] == "current"
             pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
 
-        # Phase and pick peaks if necessary
-        if autoPhase:
-            self.phasingTool.autoPhase()
-        if autoPick:
-            pass
-            #self.pickingTool.autoPick()
-            #self.pickingTool.assignPeaks()
+        # # Phase and pick peaks if necessary
+        # if autoPhase:
+        #     self.autoPhase()
+        # if autoPick:
+        #     pass
+        #     #self.pickingTool.autoPick()
+        #     #self.pickingTool.assignPeaks()
 
         # Select which steps to fit
         if stepIdsToFit is None: stepIdsToFit = [self.actvStepIndx]        # Fit the active step by default
@@ -4669,6 +4661,12 @@ class MainView(QMainWindow):
         """Stops fitting in the thread."""
         self.fittingThread.setExitFlag(True)
         self.fittingThread.quit()
+
+    def autoPhase(self):
+        # self._crnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
+        self._crnt.auto_phase()
+        self.plotCurrent(autoRange=False)
+        self.treeModel.notifyDataChanged()
 
     def tryStep(self, indx=None):
         if indx is None: indx = self.actvStepIndx        # Fit the active step by default
