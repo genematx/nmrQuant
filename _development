@@ -13,3 +13,6 @@ pip uninstall packagename
 
 5. Installing geopandas:
 https://geoffboeing.com/2014/09/using-geopandas-windows/
+
+6. Cloning an environment in Anaconda
+conda env export > environment.yml
