@@ -284,11 +284,11 @@ peakSpec.__new__.__defaults__ = (0, 1, None)     #
 spsySpec = namedtuple('spsySpec', 'chsh, jcpl, chshAsgn, jcplAsgn, mult')
 spsySpec.__new__.__defaults__ = (None, None, None, None, None, 1)
 
-# freqSpec = namedtuple('freqSpec', 'min, max, indxFreq, bslnOrder, bF')
-# freqSpec.__new__.__defaults__ = (-float('inf'), float('inf'), np.array([]), (None, None), None)
-# freqSpec.__str__ = lambda self : '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
-# #freqSpec.indxFreq = lambda self, f : np.flatnonzero((f<=self.max)*(f>=self.min))    # Indices of the frequency vector f that fall into the current range
-# # freqSpec.bF = lambda self, nf : create_baselines(self, nf)
+freqSpec = namedtuple('freqSpec', 'min, max, indxFreq, bslnOrder, bF')
+freqSpec.__new__.__defaults__ = (-float('inf'), float('inf'), np.array([]), (None, None), None)
+freqSpec.__str__ = lambda self : '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
+#freqSpec.indxFreq = lambda self, f : np.flatnonzero((f<=self.max)*(f>=self.min))    # Indices of the frequency vector f that fall into the current range
+# freqSpec.bF = lambda self, nf : create_baselines(self, nf)
 
 def rel2abs(parsSpec, rel=0):
     """Converts between relative and absolute values of a parameter given its range in parsSpec."""
