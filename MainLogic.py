@@ -551,8 +551,6 @@ class Workspace():
                                     t=t, nf=ser['nf'], apod=ser['apod'],
                                     priors=ser['parsSpecDict'])
             for blk in ser['freqBlocks']:
-                print(blk)
-                print(newSeries.freqBlocks[0])
                 if blk.min == -np.inf and blk.max == np.inf:
                     newSeries.altFreqBlock(indx=0, bslnOrder=blk.bslnOrder)      # Set the order of baseline for the All frequencies block
                 else: newSeries.addFreqBlock(lims=(blk.min, blk.max), bslnOrder=blk.bslnOrder)

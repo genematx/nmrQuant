@@ -1024,7 +1024,7 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
 
         if True:
 
-            def split_arrays(omega, intn, chsh, n_spin=None):
+            def split_arrays(omega, intn, chsh):
                 n_spin = len(chsh)
 
                 # Sort the values of chemical shifts
@@ -1036,16 +1036,16 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
                 omega, intn = omega[indx], intn[indx]
                 csintn = np.cumsum(intn)
 
-                # Find the indices for splits
+                # Find the indices for splits (indicated by integer values of intensities in the ordered cumsum array)
                 indx_split = [np.searchsorted(csintn, i) for i in range(1, n_spin)]       #     Faster than indx_split = np.searchsorted(csintn, [range(1, n_spin)])[0]
                 indx_split[0] = max(indx_split[0], 1)    # If the first entry csintn[0]>1 then the first split would occur at the index 0 and create an empty array
 
-                # Loop over all splits and move the boundary forward if it's closer to the left (lower) chemical shift, or backward, if the previous transition is closer to the right hemical shift. The boundaries are defined from the left (i.e. the boundary is the lowest frequency in the next group of peaks).
+                # Loop over all splits and move the boundary forward if it's closer to the left (lower) chemical shift, or backward, if the previous transition is closer to the right chemical shift. The boundaries are defined from the left (i.e. the boundary is the lowest frequency in the next group of peaks).
                 for i, ind in enumerate(indx_split):
                     if i > 0 and ind == indx_split[i-1]:
                         ind += 1     # Prevent repeating splits (and resulting empty arrays)
 
-                    if chsh[i] != chsh[i+1]:
+                    if not np.isclose(chsh[i], chsh[i+1]):
                         while True:
                             if omega[ind]-chsh[i] < chsh[i+1]-omega[ind]:
                                 ind += 1
@@ -1069,8 +1069,8 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
             # Diagonalize the Hamiltonian
             omega, intn = QDsims(H, TM)
 
-            # Split the transitions according to their closest chemical shifts
-            omega, intn = split_arrays(omega, intn, chsh=chshQD[np.array(chshAsgn)-1], n_spin=n_spin)
+            # Split the transitions according to their closest chemical shifts (return n_spin arrays)
+            omega, intn = split_arrays(omega, intn, chsh=chshQD[np.array(chshAsgn)-1])
 
         else:
             # 2. Compute the matrix of states.

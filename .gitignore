@@ -107,14 +107,15 @@ venv.bak/
 _results.txt
 _development
 .vs/
+data/
 build/
 dist/
 icons/_dev/
 workspaces/
 notebooks/
-main.spec       # File created by pyinstaller
+*.spec       # Files created by pyinstaller
 main.exe
-results.xlsx
+results.*
 test.py
 test1.py
 test_pyqtgraph.py

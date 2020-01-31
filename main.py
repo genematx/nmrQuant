@@ -4936,7 +4936,7 @@ class MainView(QMainWindow):
             else: allStems = None
 
             # Plotting function
-            self.mainFigureWidget.plot(f, yFph, xF-bF,
+            self.mainFigureWidget.plot(f, yFph, xF,
                 zF = zF if self.actnToggleComps.isChecked() else None,
                 stems = allStems if self.actnToggleStems.isChecked() else None,
                 freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[0].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)])   # if i in self._crnt.steps[0].frqBlkIds])
