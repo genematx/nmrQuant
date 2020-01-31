@@ -62,7 +62,7 @@ colrseq = [(0.1216,    0.4706,    0.7059),\
     (0.7922,    0.6980,    0.8392),\
     (1.0000,    1.0000,    0.6000)]      # Sequence of colors to plot the results
 
-chemDB = readChemDB('chemDB.json')     # Load the chemical database
+chemDB = readChemDB()     # Load the chemical database
 
 ### Run the DB application ###
 

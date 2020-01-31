@@ -1,8 +1,4 @@
 import numpy as np
-from scipy import optimize
-from collections import namedtuple
-
-grad = namedtuple('grad', 'dQda, dQdg, dlda, dldg, d2lda2, d2Qda2')    # Derivatives of Q and logdetGc wrt amplitudes and gamma
 
 def ls(Z, y, m0=None, S0=None, Gy=None, lockedPhase=False, indxPositive=None, robust=True):
     """Solves a phased-constrained complex-valued least-squares problem, y=Zx for x; nb - number of baseline terms (columns in the end of Z). theta=None - the phase will be determined from the data. Gy - covariance matrix of noise (or the diagonal vecotr of that matrix)"""
@@ -457,6 +453,8 @@ def ll_ls_withIntegrationOut(Z, y, ampl=None, m0=None, S0=None, Gy=None, lockedP
     return mc, Sc, Q, logdetS
 
 def ll_tls(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=None, maxiter=15, constr=False):
+    from scipy import optimize
+
     """Finds the ML estimate in the TLS problem; computes the unknown amplitudes and/or gamma if necessary."""
     n, k = Z.shape      # Number of dimensions
 
@@ -523,110 +521,112 @@ def ll_tls(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=None, maxiter=
 
     return mc, fun_Sc, Q, logdetGc, gamma
 
+# from collections import namedtuple
+# grad = namedtuple('grad', 'dQda, dQdg, dlda, dldg, d2lda2, d2Qda2')    # Derivatives of Q and logdetGc wrt amplitudes and gamma
 #@profile
-def ll_tls_eval_BACKUP(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=False, hes=False):
-    """Only evaluates the Structured Total Maximum Likelihood with Gaussian priors on the amplitudes. See Beck and Eldar."""
-    # NOTE: Possibly there are errors in computing the gradients/hessians for complex-valued arguments (e.g. conj().T vs .T, etc...)
-    n, k = Z.shape      # Number of dimensions
-    ampl = ampl.reshape(k, 1)
-    Q, logdetGc, dQdg, dldg = 0.0, 0.0, 0.0, 0.0
-    dQda, dlda = np.zeros((k, 1)), np.zeros((k, 1))
-    d2lda2, d2Qda2 = np.zeros((k, k)), np.zeros((k,k))
-    grad = namedtuple('grad', 'dQda, dQdg, dlda, dldg, d2lda2, d2Qda2')    # Derivatives of Q and logdetGc wrt amplitudes and gamma
-
-    if Gz is None: Gz = np.ones((n, k))
-    if Gy is None: Gy = np.ones((n, 1))
-    Gz, Gy = gamma*Gz, (1-gamma)*Gy
-
-    ey = y - Z.dot(ampl)
-    C_hat = np.hstack([Z, y])     # Initialize C_hat
-
-    # Compute b2Gz
-    if Gz.shape == (n*k, n*k):
-        # Full matrix Qz
-        #iGz = np.linalg.inv(Gz)
-        bGz = Gz.dot(np.kron(np.eye(n), ampl))
-        b2Gz = np.kron(ampl.conj().T, np.eye(n)).dot(bGz)
-    elif Gz.shape == (n, n, k):
-        # Block-diagonal matrix Gz
-        #iGz = np.dstack([np.linalg.inv(Gz[..., i]) for i in range(k)])
-        #bGz = Gz * ampl.reshape(1,-1)
-        b2Gz = Gz.dot(np.abs(ampl)**2).squeeze()
-    elif Gz.size == n*k:
-        # Diagonal matrix Gz, possibly needs to be reshaped
-        Gz = Gz.reshape(n, k)
-        #iGz = 1 / Gz
-        #bGz = Gz * ampl.reshape(1,-1)
-        b2Gz = Gz.dot(np.abs(ampl)**2)
-
-    # Invert the covariance matrix Gy
-    if Gy.shape == (n, n):
-        # Full matrix Gy
-        iGy = np.linalg.inv(Gy)
-    elif Gy.size == n:
-        # Diagonal matrix Gy
-        iGy = 1 / Gy
-
-    if Gy.size == n*n or b2Gz.size == n*n:
-        # If at least one of them is a matrix
-        if Gy.size == n: Gy = np.diag(Gy.ravel())
-        if b2Gz.size == n: b2Gz = np.diag(b2Gz.ravel())
-
-        Gc = Gy + b2Gz
-        iGc = np.linalg.inv( Gc )
-        logdetGc, Q = np.linalg.slogdet(Gc)[1], np.asscalar(ey.conj().T.dot(iGc).dot(ey))
-
-        # Compute the partial derivatives
-        if jac or hes:
-            dGc_dg = b2Gz/gamma-Gy/(1-gamma) if gamma != 0 else b2Gz - Gy      # derivative of Gc wrt to gamma
-            diGc_dg = -iGc.dot(dGc_dg).dot(iGc)
-            dQdg = ey.conj().T.dot(diGc_dg).dot(ey)
-            dldg = np.trace(iGc.dot(dGc_dg))
-            dGc_da = 2*Gz*ampl.reshape(1, 1, -1)         # gradient vector wrt the amplitudes
-            #diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
-            diGc_da = -( ((iGc.T.dot(dGc_da.reshape(n, -1, order='F'))).reshape(n, n, -1, order='F')).transpose(1,0,2).reshape(n,-1,order='F').T.dot(iGc) ).T.reshape(n,n,-1,order='F').transpose(1,0,2)      # The same as    diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
-            #diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
-            dQda = ( -2*(ey.conj().T.dot(iGc)).dot(Z).real + \
-                     np.array([ey.conj().T.dot(diGc_da[..., i]).dot(ey) for i in range(k)]).reshape(1, -1) ).T
-            dlda = np.array([np.trace(iGc.dot(dGc_da[..., i])) for i in range(k)]).reshape(-1, 1)
-
-        # Compute the Hessian matrices
-        if hes:
-            d2lda2 = np.tensordot(diGc_da.T, dGc_da, 2) + 2*np.diag(np.tensordot(iGc, Gz, 2))
-            d2iGc_da2 = - 2*iGc[..., None]*(diGc_da*dGc_da + iGc[..., None]*Gz )
-            d2Qda2 = 2*(Z.conj().T.dot(iGc.dot(Z)) - 2*np.squeeze(ey.conj().T.dot(diGc_da)).T.dot(Z)).real \
-                    + np.diag( np.squeeze(ey.conj().T.dot(d2iGc_da2)).T.dot(ey).ravel() )
-    elif Gy.size == n:
-        # If both are diagonal vectors
-        Gc = Gy + b2Gz             # Covariance matrix of the distribution of the measurement vector
-        iGc = 1 / Gc
-        logdetGc, Q = np.sum(np.log(Gc)), np.sum(iGc*(np.abs(ey)**2))
-
-        # Compute the partial derivatives
-        if jac or hes:
-            dGc_dg = b2Gz/gamma-Gy/(1-gamma) if gamma != 0 else b2Gz - Gy      # derivative of Gc wrt to gamma
-            diGc_dg = -iGc**2 * dGc_dg
-            dQdg = (ey * diGc_dg).conj().T.dot(ey)
-            dldg = (iGc*dGc_dg).sum()
-            dGc_da = 2*Gz*ampl.reshape(1, -1)         # gradient vector wrt the amplitudes
-            diGc_da = -iGc**2 * dGc_da
-            dQda = ( -2*((ey*iGc).conj().T.dot(Z)).real + (ey**2).T.dot(diGc_da) ).T
-            dlda = np.sum(iGc*dGc_da, axis=0).reshape(-1, 1)
-
-        # Compute the Hessian matrices
-        if hes:
-            d2lda2 = diGc_da.T.dot(dGc_da) + np.diag(np.sum(2*Gz*iGc, axis=0))
-            d2iGc_da2 = - 2*(diGc_da*dGc_da*iGc + Gz*(iGc**2) )
-            d2Qda2 = 2*(Z.conj().T.dot(iGc*Z) - 2*(ey.conj()*diGc_da).T.dot(Z)).real + np.diag(np.sum(d2iGc_da2*(np.abs(ey)**2), axis=0))
-
-    # Include the prior
-    if m0 is not None and iS0 is not None:
-        Q += (ampl-m0).T.dot(iS0.dot(ampl-m0))
-        dQda += iS0.dot(ampl-m0)
-
-    Q = np.asscalar(Q)
-    logdetGc = np.asscalar(logdetGc)
-    return Q, logdetGc, grad(dQda, dQdg, dlda, dldg, d2lda2, d2Qda2)
+# def ll_tls_eval_BACKUP(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=False, hes=False):
+#     """Only evaluates the Structured Total Maximum Likelihood with Gaussian priors on the amplitudes. See Beck and Eldar."""
+#     # NOTE: Possibly there are errors in computing the gradients/hessians for complex-valued arguments (e.g. conj().T vs .T, etc...)
+#     n, k = Z.shape      # Number of dimensions
+#     ampl = ampl.reshape(k, 1)
+#     Q, logdetGc, dQdg, dldg = 0.0, 0.0, 0.0, 0.0
+#     dQda, dlda = np.zeros((k, 1)), np.zeros((k, 1))
+#     d2lda2, d2Qda2 = np.zeros((k, k)), np.zeros((k,k))
+#     grad = namedtuple('grad', 'dQda, dQdg, dlda, dldg, d2lda2, d2Qda2')    # Derivatives of Q and logdetGc wrt amplitudes and gamma
+#
+#     if Gz is None: Gz = np.ones((n, k))
+#     if Gy is None: Gy = np.ones((n, 1))
+#     Gz, Gy = gamma*Gz, (1-gamma)*Gy
+#
+#     ey = y - Z.dot(ampl)
+#     C_hat = np.hstack([Z, y])     # Initialize C_hat
+#
+#     # Compute b2Gz
+#     if Gz.shape == (n*k, n*k):
+#         # Full matrix Qz
+#         #iGz = np.linalg.inv(Gz)
+#         bGz = Gz.dot(np.kron(np.eye(n), ampl))
+#         b2Gz = np.kron(ampl.conj().T, np.eye(n)).dot(bGz)
+#     elif Gz.shape == (n, n, k):
+#         # Block-diagonal matrix Gz
+#         #iGz = np.dstack([np.linalg.inv(Gz[..., i]) for i in range(k)])
+#         #bGz = Gz * ampl.reshape(1,-1)
+#         b2Gz = Gz.dot(np.abs(ampl)**2).squeeze()
+#     elif Gz.size == n*k:
+#         # Diagonal matrix Gz, possibly needs to be reshaped
+#         Gz = Gz.reshape(n, k)
+#         #iGz = 1 / Gz
+#         #bGz = Gz * ampl.reshape(1,-1)
+#         b2Gz = Gz.dot(np.abs(ampl)**2)
+#
+#     # Invert the covariance matrix Gy
+#     if Gy.shape == (n, n):
+#         # Full matrix Gy
+#         iGy = np.linalg.inv(Gy)
+#     elif Gy.size == n:
+#         # Diagonal matrix Gy
+#         iGy = 1 / Gy
+#
+#     if Gy.size == n*n or b2Gz.size == n*n:
+#         # If at least one of them is a matrix
+#         if Gy.size == n: Gy = np.diag(Gy.ravel())
+#         if b2Gz.size == n: b2Gz = np.diag(b2Gz.ravel())
+#
+#         Gc = Gy + b2Gz
+#         iGc = np.linalg.inv( Gc )
+#         logdetGc, Q = np.linalg.slogdet(Gc)[1], np.asscalar(ey.conj().T.dot(iGc).dot(ey))
+#
+#         # Compute the partial derivatives
+#         if jac or hes:
+#             dGc_dg = b2Gz/gamma-Gy/(1-gamma) if gamma != 0 else b2Gz - Gy      # derivative of Gc wrt to gamma
+#             diGc_dg = -iGc.dot(dGc_dg).dot(iGc)
+#             dQdg = ey.conj().T.dot(diGc_dg).dot(ey)
+#             dldg = np.trace(iGc.dot(dGc_dg))
+#             dGc_da = 2*Gz*ampl.reshape(1, 1, -1)         # gradient vector wrt the amplitudes
+#             #diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
+#             diGc_da = -( ((iGc.T.dot(dGc_da.reshape(n, -1, order='F'))).reshape(n, n, -1, order='F')).transpose(1,0,2).reshape(n,-1,order='F').T.dot(iGc) ).T.reshape(n,n,-1,order='F').transpose(1,0,2)      # The same as    diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
+#             #diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
+#             dQda = ( -2*(ey.conj().T.dot(iGc)).dot(Z).real + \
+#                      np.array([ey.conj().T.dot(diGc_da[..., i]).dot(ey) for i in range(k)]).reshape(1, -1) ).T
+#             dlda = np.array([np.trace(iGc.dot(dGc_da[..., i])) for i in range(k)]).reshape(-1, 1)
+#
+#         # Compute the Hessian matrices
+#         if hes:
+#             d2lda2 = np.tensordot(diGc_da.T, dGc_da, 2) + 2*np.diag(np.tensordot(iGc, Gz, 2))
+#             d2iGc_da2 = - 2*iGc[..., None]*(diGc_da*dGc_da + iGc[..., None]*Gz )
+#             d2Qda2 = 2*(Z.conj().T.dot(iGc.dot(Z)) - 2*np.squeeze(ey.conj().T.dot(diGc_da)).T.dot(Z)).real \
+#                     + np.diag( np.squeeze(ey.conj().T.dot(d2iGc_da2)).T.dot(ey).ravel() )
+#     elif Gy.size == n:
+#         # If both are diagonal vectors
+#         Gc = Gy + b2Gz             # Covariance matrix of the distribution of the measurement vector
+#         iGc = 1 / Gc
+#         logdetGc, Q = np.sum(np.log(Gc)), np.sum(iGc*(np.abs(ey)**2))
+#
+#         # Compute the partial derivatives
+#         if jac or hes:
+#             dGc_dg = b2Gz/gamma-Gy/(1-gamma) if gamma != 0 else b2Gz - Gy      # derivative of Gc wrt to gamma
+#             diGc_dg = -iGc**2 * dGc_dg
+#             dQdg = (ey * diGc_dg).conj().T.dot(ey)
+#             dldg = (iGc*dGc_dg).sum()
+#             dGc_da = 2*Gz*ampl.reshape(1, -1)         # gradient vector wrt the amplitudes
+#             diGc_da = -iGc**2 * dGc_da
+#             dQda = ( -2*((ey*iGc).conj().T.dot(Z)).real + (ey**2).T.dot(diGc_da) ).T
+#             dlda = np.sum(iGc*dGc_da, axis=0).reshape(-1, 1)
+#
+#         # Compute the Hessian matrices
+#         if hes:
+#             d2lda2 = diGc_da.T.dot(dGc_da) + np.diag(np.sum(2*Gz*iGc, axis=0))
+#             d2iGc_da2 = - 2*(diGc_da*dGc_da*iGc + Gz*(iGc**2) )
+#             d2Qda2 = 2*(Z.conj().T.dot(iGc*Z) - 2*(ey.conj()*diGc_da).T.dot(Z)).real + np.diag(np.sum(d2iGc_da2*(np.abs(ey)**2), axis=0))
+#
+#     # Include the prior
+#     if m0 is not None and iS0 is not None:
+#         Q += (ampl-m0).T.dot(iS0.dot(ampl-m0))
+#         dQda += iS0.dot(ampl-m0)
+#
+#     Q = np.asscalar(Q)
+#     logdetGc = np.asscalar(logdetGc)
+#     return Q, logdetGc, grad(dQda, dQdg, dlda, dldg, d2lda2, d2Qda2)
 
 #@profile
 def ll_tls_eval(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=False, hes=False, constr=False):
@@ -774,7 +774,6 @@ def ll_tls_eval(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=
     Q = np.asscalar(Q)
     logdetGc = np.asscalar(logdetGc)
     return Q, logdetGc, grad(dQda, dQdg, dlda, dldg, d2lda2, d2Qda2)
-
 
 def log_likelihood(Z, y, ampl=None, sigma2=None, Gz=None, Gy=None, gamma=None, m0=None, iS0=None, a_sigma2=2.0, b_sigma2=10.0, funcType='LS', constr=False, robust=False):
     """Computes the value of the Gaussian likelihood function. iG - inverse covariance matrix of the noise."""

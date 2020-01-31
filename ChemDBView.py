@@ -263,7 +263,6 @@ class DoubleDelegate(MyDoubleEdit):
         super().__init__(parent)
 
 class ComboDelegate(QtGui.QItemDelegate):
-    editorItems=['Combo_Zero', 'Combo_One','Combo_Two']
     height = 20
     width = 50
 
@@ -287,7 +286,7 @@ class ComboDelegate(QtGui.QItemDelegate):
         row = index.row()
         column = index.column()
         editor.setModel(self.ListViewModel)
-        editor.setGeometry(column*self.width,row*self.height,self.width,self.height*len(self.editorItems))
+        editor.setGeometry(column*self.width, row*self.height if row < 8 else 0, self.width, 3*self.height)
 
     def setModelData(self, editor, model, index):
         row=editor.currentIndex().row()      # Return the selected row number

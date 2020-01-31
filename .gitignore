@@ -106,6 +106,7 @@ venv.bak/
 # Other private files
 _results.txt
 _development
+.vs/
 build/
 dist/
 icons/_dev/
@@ -113,6 +114,10 @@ workspaces/
 notebooks/
 main.spec       # File created by pyinstaller
 main.exe
+results.xlsx
+test.py
+test1.py
+test_pyqtgraph.py
 image.eps
 fid/
 release.zip

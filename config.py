@@ -18,7 +18,7 @@ SAMPL_numberField = 'Re'
 
 MODEL_ShapeKernelSize = 13                  # Size of the custom lineshape correction kernel (must be odd)
 
-DISPL_ShiftToReference = True          # Display the chemical shift sca;e on the spectrum shifted accordingly to the global chsh parameter of the entire mixture
+DISPL_ShiftToReference = True               # Display the chemical shift scale on the spectrum shifted accordingly to the global chsh parameter of the entire mixture
 
 colrseq = [(0.1216,    0.4706,    0.7059),\
     (0.8902,    0.1020,    0.1098),\
@@ -31,7 +31,10 @@ colrseq = [(0.1216,    0.4706,    0.7059),\
     (0.9843,    0.6039,    0.6000),\
     (0.9922,    0.7490,    0.4353),\
     (0.7922,    0.6980,    0.8392),\
-    (1.0000,    1.0000,    0.6000)]      # Sequence of colors to plot the results
+    (1.0000,    1.0000,    0.6000)]*2      # Sequence of colors to plot the results
+
+colr_freqBlocks = [255, 245, 175, 25]
+colr_freqBlocks_inactive = [255, 245, 175, 3]
 
 def as_dict():
     return {'QD_AggregatePeaksThreshold' : QD_AggregatePeaksThreshold,

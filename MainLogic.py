@@ -57,6 +57,63 @@ def print_fun(x, f, accepted):
 
 ##### ------------ Main classes for the general program logic ------------ #####
 
+class freqSpec():
+    """A class to store the specifications of frequency blocks along with their baselines"""
+
+    def __init__(self, min=-np.inf, max=np.inf, bslnOrder=(None, None)):
+        self.min = min
+        self.max = max
+        self.bslnOrder = bslnOrder
+        self._indxFreq = None
+        self._bF = None          # An array of baselines
+        self._fhash = None       # Hash value for the previously computed f
+
+    def repr(self):
+        return '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
+
+    def bline(self, nf, numberField='Cm'):
+        """Creates a set of base polynomial functions to store the baseline of length nf."""
+        if self._bF is None or self._bF.shape[1] != nf:
+            # Define baseline in the frequency domain
+            bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[0]+1)] if (self.bslnOrder[0] is not None) and (numberField in ['Re', 'Cm']) else []
+            bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[1]+1)] if (self.bslnOrder[1] is not None) and (numberField in ['Im', 'Cm']) else []
+            self._bF = np.hstack(bFr+bFi) if len(bFr)+len(bFi) > 0 else None
+        return self._bF
+
+    def imin(self, f):
+        """Starting index of the range in the array f."""
+        return np.searchsorted(f.ravel(), self.min)
+
+    def imax(self, f):
+        """Last index of the range in the array f."""
+        return np.searchsorted(f.ravel(), self.max)
+
+    def indxFreq(self, f, nw2=0):
+        """Returns the indices of array f that fall into the range defined by the block. Optionally can include padding with nw samples on both ends of the range."""
+        # Compute the hash value for the frequency array to determine wethwer update is necessary
+        newHash = arrhash(f) + nw2
+        if self._indxFreq is None or self._fhash != newHash:
+            self._indxFreq = np.arange(self.imin(f) - nw2, self.imax(f) + nw2) % len(f)
+            self._fhash = newHash
+
+        return self._indxFreq
+
+    def update(self, lims=None, bslnOrder=None):
+        """Updates the parameters of a frequency block."""
+        if lims is not None:
+            self.min = min(lims)
+            self.max = max(lims)
+        if bslnOrder is not None:
+            self.bslnOrder = bslnOrder
+
+        self._bF = None                # Remove all precomputed baselines
+        self._indxFreq = None
+
+    def pars(self):
+        """Returns a named tuple of the main blok parameters."""
+        pars = namedtuple('pars', 'min, max, bslnOrder')
+        return(pars(self.min, self.max, self.bslnOrder))
+
 class Step():
 
     def __init__(self, frqBlkIds = None, parsKeys = None, autoKeys=None, repRootNames=None, fitCustomLshape = False):
@@ -191,6 +248,19 @@ class Workspace():
         if priors is not None:
             self.parsSpecDict.update(priors)
 
+    def getTree(self, node=None):
+        """Creates a copy of the tree rooted at node with name node."""
+
+        # Extract the subtree starting with the node key and set its parent to None
+        T = copy.deepcopy(self.T[node]) if node is not None else copy.deepcopy(self.T)
+        T.makeRoot()
+
+        # Reset the nodes (to remove any curently stored signals)
+        for node in T.items():
+            node.reset()
+
+        return T
+
     def _updateParameters(self):
         """Updates the existing dictionaries of parameters after the tree has changed (e.g. when adding/removing nodes or setting new root nodes). Updates the structure to match with the new default parameters but keeps the old values."""
         oldRoots = self.repRootNames
@@ -323,7 +393,7 @@ class Workspace():
         return SSS
 
     #@profile
-    def _optimize(self, costFuncOpti, bounds, initVals, nhop=None, verbose=True):
+    def _optimize(self, costFuncOpti, bounds, initVals, nhop=None, respectBounds=True, verbose=True):
         """Core optimization routine; used by all Series and Datums in this Workspace"""
         eps_range = np.mean([np.abs(bnd[1]-bnd[0]) for bnd in bounds])     # Find the range of optomiztion (needed to set the step size for Jacobian)
         if len(initVals) > 2 or (nhop is not None and nhop > 0):
@@ -333,9 +403,26 @@ class Workspace():
                   minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )     #, \
             #      #take_step=MyTakeStep())
         else:
-            res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method='L-BFGS-B', \
+            res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method=config.OPTIM_method, \
                   options={'eps':eps_range*1e-05, 'ftol':1e-12})       # Step-size for computing the Jacobian
             #print(res['message'])
+
+        # Discard the found parameters if any of them lies close to its range and run the optimization again
+        if respectBounds:
+            closeToBounds = np.isclose(bounds, res.x.reshape(-1,1)).any(axis=1)
+            if closeToBounds.all():
+                print('Optimization failed. All found values are close to bounds.')
+                return None
+            elif closeToBounds.any():
+                # Sustitute the initial values for the bad parameter in the optimization
+                P = np.delete(np.eye(len(initVals)), np.where(closeToBounds)[0], axis=1)
+                print('Start inner optimization loop with {} parameters'.format( len(np.where(closeToBounds)[0]) ) )
+                res = self._optimize(lambda x : costFuncOpti( P.dot(x).ravel()+np.where(closeToBounds, initVals, 0.0)), \
+                                    [bnd for bnd, flg in zip(bounds, ~ closeToBounds) if flg], \
+                                    [val for val, flg in zip(initVals, ~ closeToBounds) if flg], nhop, verbose=verbose )
+                if res is not None:
+                    res.x = P.dot(res.x.reshape(-1,1)).ravel()+np.where(closeToBounds, initVals, 0.0)
+
         return res
 
     def _sample(self, costFuncSmpl, bounds, initVals, nwalkers=None, nsteps=None, verbose=True):
@@ -414,10 +501,10 @@ class Workspace():
                                     'c0' : ser.c0,
                                     'f0' : ser.f0,
                                     'nt' : len(ser.t),
-                                    'dt' : ser.t[1]-ser.t[0],
+                                    'dt' : ser.t[1]-ser.t[0] if len(ser.t) > 1 else 0.0,
                                     'nf' : len(ser.f),
                                     'steps' : ser.steps,
-                                    'freqBlocks' : [blk._replace(indxFreq=None, bF=None) for blk in ser.freqBlocks],
+                                    'freqBlocks' : [blk.pars() for blk in ser.freqBlocks],
                                     'parsSpecDict' : ser.parsSpecDict,
                                     'crntMetaF' : ser.crntMetaF,
                                     'smplDistF' : ser.smplDistF,
@@ -515,8 +602,8 @@ class Series():
         self.name = name if name is not None else 'Series ' + str(len(self.parent.series)+1)
         self.c0 = c0
         self.f0 = f0
-        self.t = t.reshape(-1,1) if t is not None else []
-        self.f = []
+        self.t = t.reshape(-1,1) if t is not None else np.array([])
+        self.f = np.array([])
         self.data = []               # A list of Datum structures
         self.steps = [Step(repRootNames=self.repRootNames)]               # Fitting steps; each entry is a set of parsKeys tuples and set of frqBlkIds
         self.freqBlocks = []         # a list of optimization frequency ranges
@@ -660,7 +747,8 @@ class Series():
         """Adds a Datum to the Series."""
         # Create new Datum structure and add it to the Series
         yT = yT.reshape(-1,1)     # Make sure the data is reshaped properly
-        DDD = Datum(yT, parent=self, **kwargs)
+        name = kwargs.pop('name', 'Datum #'+str(len(self.data)+1))
+        DDD = Datum(yT, parent=self, name=name, **kwargs)
         self.data.append(DDD)
 
         return DDD
@@ -736,7 +824,8 @@ class Series():
             nf = next_pow_of_2(len(self.t))     # Determine the number of samples in the full signal spectrum (possibly including zero-filling)
 
         if nf > 0:
-            self.f = (np.fft.fftshift(np.fft.fftfreq(nf, self.t[1]-self.t[0]))+self.f0).reshape(-1,1)/self.c0
+            dt = self.t[1]-self.t[0]
+            self.f = (np.fft.fftshift(np.fft.fftfreq(nf, dt))+self.f0).reshape(-1,1) / self.c0
 
             # Update the frequency blocks
             for i in range(len(self.freqBlocks)):
@@ -766,32 +855,19 @@ class Series():
             self.freqBlocks = []         # Reset the frequency blocks and add the entire signal
             lims = (-1*float('inf'), float('inf'))
 
-        # Choose only samples that are in the optimization range
-        indxFreq = np.flatnonzero((self.f<=max(lims))*(self.f>=min(lims)))     # Indices of frequency points in the range
-        nf = indxFreq.size
-        # Define baseline in the frequency domain
-        bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[0]+1)] if bslnOrder[0] is not None else []
-        bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[1]+1)] if bslnOrder[1] is not None else []
-        bF = np.hstack(bFr+bFi) if len(bFr)+len(bFi) > 0 else None
+        self.freqBlocks.append(freqSpec(min(lims), max(lims), bslnOrder))
 
-        self.freqBlocks.append(freqSpec(min(lims), max(lims), indxFreq, bslnOrder, bF))
+        # Include the new block in all steps
+        for step in self.steps:
+            if 0 in step.frqBlkIds: step.frqBlkIds.clear()    # Make it impossible to optimize over the entire frequency range and some specific smaller ranges
+            step.frqBlkIds.add(len(self.freqBlocks)-1)
 
     def altFreqBlock(self, lims=None, bslnOrder=None, indx=-1):
         """Alters a frequency block at position indx in self.freqBlocks (the last block by default)."""
-        if lims is None or indx == 0:         # Can't change the limits of the first block
+        if indx == 0:         # Can't change the limits of the first block
             lims = (self.freqBlocks[indx].min, self.freqBlocks[indx].max)
-        if bslnOrder is None:
-            bslnOrder = self.freqBlocks[indx].bslnOrder
 
-        # Choose only samples that are in the optimization range
-        indxFreq = np.flatnonzero((self.f<=max(lims))*(self.f>=min(lims)))     # Indices of frequency points in the range
-        nf = indxFreq.size
-        # Define baseline in the frequency domain
-        bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[0]+1)] if bslnOrder[0] is not None else []
-        bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(bslnOrder[1]+1)] if bslnOrder[1] is not None else []
-        bF = np.hstack(bFr+bFi)
-
-        self.freqBlocks[indx] = freqSpec(min(lims), max(lims), indxFreq, bslnOrder, bF)
+        self.freqBlocks[indx].update(lims, bslnOrder)
 
     def remFreqBlock(self, indx):
         """Removes a frequency block from the series and updates all steps accordingly."""
@@ -840,7 +916,7 @@ class Series():
             parsKeys = [key for key in self.parsSpecDict.keys() if len(key)==2]
             return sum([self.getPrior(key, customPriors).evalPrior(arg=evalMetaF[key]) if len(key)==2 else 0 for key in set(parsKeys) ])
 
-    def evaluate(self, evalParsH=None, evalMetaF=None, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False, evaluateAll=True):
+    def evaluate(self, evalParsH=None, evalMetaF=None, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False, evaluateAll=True):
         """Evaluates the objective function (sum of logLikelihoods for each datum + sum of logPriors).
            Inputs:
            evalParsH - a list of hierarchical dictionaries one for each Datum
@@ -864,7 +940,7 @@ class Series():
             parsKeysDatum = set([key[-3:] for key in parsKeys if key[0]==i or len(key)==3]) if parsKeys is not None else None    # Select only keys of non-linear parameters. This will exclude all meta-parameters' keys
             autoKeysDatum = set([key[-3:] for key in autoKeys if key[0]==i or len(key)==3]) if autoKeys is not None else None
             if (not evaluateAll) and (parsKeysDatum == set([])): continue          # Skip some datasets that we don't need to evaluate (there are no keys relating to the i-th dataset)
-            _res, meta = DDD.evaluate(evalParsH[i], parsKeysDatum, autoKeysDatum, frqBlkIds, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
+            _res, meta = DDD.evaluate(evalParsH[i], parsKeysDatum, autoKeysDatum, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
             result += _res
             m_ampl[..., i] = meta['ampl'][0].ravel()
             S_ampl[...,i] = meta['ampl'][1]
@@ -876,7 +952,7 @@ class Series():
 
         return result, {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
 
-    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nhop=None, verbose=True):
+    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nhop=None, respectBounds=True, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples of the form: (datum_id, node_name, parameter_name, parameter_id), e.g. (2, 'Sucrose-F', 'chshQD', 5) )."""
 
         # Prepare keys and starting parameters. Expand parameter keys (if 3-tuples were provided, they will be substituted with 4-tuples for all datasets) and make sure there are no repeats
@@ -901,19 +977,20 @@ class Series():
                     elif len(k) == 2:
                         evalMetaF[k] = v
                 # Evaluate the function skipping the datasets that are not present in parsKeys
-                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
+                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
 
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
 
-            # Update the structure of all parameters
-            for k, v in zip(parsKeys, res.x):
-                if len(k) == 4:
-                    self.data[k[0]].setCrntVal(k[1:], v) #   crntParsH[k[1]][k[2]][k[3]] = v
-                elif len(k) == 2:
-                    self.crntMetaF[k] = v
+            if res is not None:
+                # Update the structure of all parameters
+                for k, v in zip(parsKeys, res.x):
+                    if len(k) == 4:
+                        self.data[k[0]].setCrntVal(k[1:], v) #   crntParsH[k[1]][k[2]][k[3]] = v
+                    elif len(k) == 2:
+                        self.crntMetaF[k] = v
 
         # Re-evaluatethe posterior
-        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
+        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -924,7 +1001,7 @@ class Series():
 
         return result, meta
 
-    def sample(self, parsKeys, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
+    def sample(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=False)
@@ -934,7 +1011,7 @@ class Series():
 
         # If there are no parameters to sample
         # First evaluate the cost function with current parameters. If there is nothing to sample, this will be output as the result (at least for some datasets).
-        value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
+        value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
         for j in range(len(self.data)):
             for i, a in enumerate(meta['ampl'][0]):
                 result[(j, self.repRootNames[i], 'ampl', 0)] = np.array([a[j]])
@@ -965,7 +1042,7 @@ class Series():
                 elif len(k) == 2:
                     evalMetaF[k] = v
             # Evaluate the function skipping the datasets that are not present in parsKeys
-            return self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, customPriors, evaluateAll=evaluateAll)
+            return self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, evaluateAll=evaluateAll)
 
         sampler = self._sample(costFuncSmpl, bounds, initVals, nwalkers, nsteps)
 
@@ -1012,6 +1089,7 @@ class Series():
         parsKeys = sorted(list(parsKeys))
 
         if verbose:
+            print('\n')
             npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
             npar_fit = len(parsKeys)
             if npar_fit == 0:
@@ -1035,6 +1113,16 @@ class Series():
     def remove(self):
         """Removes itself from the Workspace"""
         self.parent.series.remove(self)
+
+    def copy(self, name=None):
+        """Creates a copy of the Series in the workspace"""
+        newSSS = self.addSeries(name = name if name is not None else self.name+'_COPY', c0=self.c0, f0=self.f0, \
+                                t=self.t.copy(), priors=copy.deepcopy(self.parsSpecDict))
+        for blck in self.freqBlocks:
+            newSSS.addFreqBlock(lims=(blck.min, blck.max), bslnOrder=blck.bslnOrder)
+        for DDD in self.data:
+            newSSS.addDatum(yT=DDD.yT.copy(), name=DDD.name, crntParsH=copy.deepcopy(DDD.crntParsH), priors=copy.deepcopy(DDD.parsSpecDict))
+        return newSSS
 
     def evalForPlot2D(self, keys, frqBlkIds=None, lims=None, npts=25):
         ndim = 2
@@ -1099,6 +1187,7 @@ class Datum():
     def __init__(self, yT, parent, name='', arrVal=None, crntParsH=None, priors=None):
         self.name = name
         self.parent = parent               # A series object that will contain this Datum
+        self._f = None                     # Subsampled (adaptive) array of frequencies
         self.yT = yT    # The acquired signal in time domain (FID) without any preprocessing
         self.arrVal = arrVal if arrVal is not None else len(self.parent.data)+1     # Value of the arrayed parameter in the serial experiment (e.g., extent of reaction)
         self.parsSpecDict = {}
@@ -1110,8 +1199,15 @@ class Datum():
         self._joint = None            # A joint prior of all parameters
         self.fullReset(crntParsH, priors)
 
+    # @profile
     def __getattr__(self, attr):
         """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+
+        # Return the adaptive frequency range
+        if attr == 'f' and self._f is not None:
+            return self._f
+
+        # All other attributes
         return getattr(self.parent, attr)
 
     def __str__(self):
@@ -1147,13 +1243,32 @@ class Datum():
                 if sum(self.xFph.ravel().real) < 0:
                     self.xFph = -1 * self.xFph
 
-    def resetSignals(self):
+    def resetSignals(self, adaptive=False):
+        self._f = None
         self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
         self.zF = None        # A matrix of component signals
         self.bF = None        # A baseline
         self.zF_corr, self.bF_corr = None, None           # Corrections for the model matrix and the baseline
         self.sF, self.sT = None, None        # A lineshape kernel
         self.Gz = None
+
+        if adaptive or len(self.yF > 2**15):
+            # Sample more densely around the peaks
+            yFabs = np.abs(self.yF)
+
+            n = 128
+            yFconv = scipy.signal.fftconvolve(yFabs, np.ones((n, 1))/n, mode='same')
+            yFnorm = (yFconv - yFconv.min()) / (yFconv.max() - yFconv.min())
+
+            # def score_fun(x):
+            #     """A sigmoid-like function. Takes a number in the range 0<=x<=1 and outputs a score that determines whether this number should be kept in the subsampled array."""
+            #     return np.where(x>0.1, 1.0, x*10.0)
+
+            yFscore = np.where(yFnorm>0.1, 1.0, yFnorm*10.0)     # score_fun(yFnorm)
+
+            indx = np.where(np.random.random((len(yFscore), 1)) < yFscore)[0]       # indx = np.sort(np.random.randint(0, len(yFabs), 2**15))
+            self._f = self.parent.f[indx, :].reshape(-1,1)
+            self.yF = self.yF[indx, :].reshape(-1,1)
 
     def resetCrntPars(self, crntParsH=None, priors=None):
         """Resets ALL current parameters."""
@@ -1165,7 +1280,10 @@ class Datum():
         self.crntParsH = self.getDfltParsH()
         if crntParsH is not None:
             for key, val in crntParsH.items():
-                self.crntParsH[key].update(val)
+                try:
+                    self.crntParsH[key].update(val)
+                except KeyError:
+                    print('Key {} is absent in the list of parameters.'.format(key))
         self.smplDistF.clear()          # A flat dictionary of sampled (or marginalized) parameters
         self.mdldPeaks.clear()
         self.pckdPeaks.clear()
@@ -1173,6 +1291,37 @@ class Datum():
     def fullReset(self, crntParsH=None, priors=None):
         self.resetSignals()
         self.resetCrntPars(crntParsH, priors)
+
+    def alignToSolventPeak(self, chshTo=4.75):
+        """Shifts the entire spectrum to align the highest peak (assumed to be the solvent peak) with a specified chemical shift."""
+        chshFrom = self.f[np.argmax(np.abs(self.yF))]
+        df = (chshTo - chshFrom)*self.c0
+        self.yT *= np.exp(2*np.pi*1j*df*self.t)
+        self.resetSignals()
+
+    def allParsKeys(self, node_name=None):
+        """Returns all parameter keys for a (sub)tree starting from the root node."""
+        if node_name is None:
+            node = self.T.findRoot()
+        else: node = self.T[node_name]
+        return [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
+                if key[1] in ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']]      # List of all parameter keys that affect the subtree
+
+    def getTree(self, node_name=None):
+        """Return a copy of the tree rooted in the node with name node. All default distributions and parameter values are replaced with the current values in this Datum."""
+
+        # Get the copy of the tree
+        T = self.parent.parent.getTree(node_name)
+
+        # Set default tree parameters to the current values from the Datum
+        # allParsKeys = [key for key in flatten(defaultTreePars(T)).keys() \
+        #                if key[1] in ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD'] ]       # All parameters from the subtree
+        for key in self.allParsKeys(node_name):
+            par = copy.deepcopy(self.getPrior(key))       # Prior distribution in the Datum
+            par = par._replace(dval=self.getCrntVal(key))
+            T.setPrior(key, par)
+
+        return T
 
     def getCrntVal(self, key):
         """Returns the relative or absolute value of the parameter key."""
@@ -1186,6 +1335,16 @@ class Datum():
             val = self.getPrior(key).dflt()
         self.crntParsH[key[0]][key[1]][key[2]] = float(val)
         self.smplDistF.clear()
+
+    def getCrntVals(self, node_name=None):
+        """Returns a flat dictionary of all parameters that affect nodes in the tree below and including the given node."""
+        parsF = {key:self.getCrntVal(key) for key in self.allParsKeys(node_name)}
+        return parsF
+
+    def setCrntVals(self, parsF):
+        """Updates maultiple parameters from a flat dictionary parsF."""
+        for key, val in parsF.items():
+            self.setCrntVal(key, val)
 
     def getGlobalChshVal(self):
         """Returns the value of the top-level chemical shift in the parameter tree."""
@@ -1234,6 +1393,7 @@ class Datum():
                     return self.parent.parent.parsSpecDict[key]
                 except KeyError:
                     try:
+                        # Use the prior from the tree
                         return getattr(self.T[key[0]], key[1])[key[2]]
                     except KeyError:
                         print("Something is wrong with {}".format(key))
@@ -1267,19 +1427,47 @@ class Datum():
             return True
         else: return False
 
-    def measured_data(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, useComplex=True):
-        """Returns an array of the measured data, either in time or frequency domain, and an array of the free argument (time or frequency)."""
+    # @profile
+    def _get_indxFreq(self, i, nw2=0):
+        """Returns the indices of the frequency scale covered by the block i; takes into account possible padding by nw2 on both sides of the range."""
 
-        # 1. Update the settings
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0   # Reference chemical shift
+        f = self.f - np.array(dref_chsh)
+
+        return self.freqBlocks[i].indxFreq(f, nw2)
+
+    def _get_signals_in_time(self, evalParsH, wnd=None):
+        # 1. Compute model signals in time domain
+        zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH)            # 1. Compute the model signals
+
+        # 1. Apply custom lineshape correction if defined
+        if self.sT is not None:
+            zT *= self.sT
+
+        # 2. Apply window in the time domain if needed
+        yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
+
+        ## Define modelled and measured signals
+        return zTw[0:,:], yTw[0:, :]
+
+    # @profile
+    def _get_signals_in_freq(self, evalParsH, frqBlkIds=None, freqMask=None, wnd=None, numberField=None, convolve=True):
+        """Returns a matrix of modelled signals and the y vector in frequency domain."""
+
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
-        inTimeDomain = (len(frqBlkIds) == 0)
+        if numberField is None:
+            numberField = config.SAMPL_numberField
 
-        # 2. Compute a matrix of model signals Z, either in time or frequency domain
-        if inTimeDomain:
-            # -------------------------- TIME ----------------------------
-            # 1. Compute model signals in time domain
-            zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH)            # 1. Compute the model signals
+        nw = len(self.sF) if self.sF is not None else 0         # Length of the adaptive lineshape window (in frequency domain)
+        nw2 = int(nw/2)
+
+        # Find indices for each frequency block (including padding)
+        indxFreqByBlock = [ self._get_indxFreq(i, nw2) for i in frqBlkIds ]
+        indxInRange = np.concatenate(indxFreqByBlock)
+
+        if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
+            zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
 
             # 1. Apply custom lineshape correction if defined
             if self.sT is not None:
@@ -1288,194 +1476,51 @@ class Datum():
             # 2. Apply window in the time domain if needed
             yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
 
-            ## Define modelled and measured signals
-            Z, y = zTw[0:,:], yTw[0:, :]
-            useComplex = True
+            # 3. Compute the spectra
+            zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+            yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+
+            # 4. Take only the valid frequency ranges
+            zFinRange = zF[indxInRange, :]
+            yFinRange = yF[indxInRange, :]
         else:
-            # --------------------- FREQUENCY ----------------------------
-            nw = len(self.sF) if self.sF is not None else 0         # Length of the adaptive lineshape window (in frequency domain)
-            nw2 = int(nw/2)
-            indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
-            indxPadding = np.concatenate(tuple(np.concatenate([np.arange(self.freqBlocks[i].indxFreq[0]-nw2, self.freqBlocks[i].indxFreq[0]),
-                                                               np.arange(self.freqBlocks[i].indxFreq[-1]+1, self.freqBlocks[i].indxFreq[-1]+nw2+1)%len(self.f)] ) \
-                                        for i in frqBlkIds)) if nw2>0 else np.array([], dtype='int')   # Extra indices used for padding when convolving the signals with lineshape kernel in frequency domain
+            zFinRange, repRootNames = evalTreeF(self.T, self.f[ indxInRange ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
 
-            if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
-                zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
+            # Apply custom lineshape correction (this reduces the range)
+            if nw2 > 0 and convolve:
+                indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]     # Indices showing how to split the concatenated arrays xF, yF, zF, etc.
+                zFinRange = np.vstack([scipy.signal.fftconvolve(z, self.sF, 'valid') for z in np.split(zFinRange, indxSplit)]) / np.sqrt(len(self.f))
+                indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
 
-                # 1. Apply custom lineshape correction if defined
-                if self.sT is not None:
-                    zT *= self.sT
+            yFinRange = self.yF[indxInRange, :]
 
-                # 2. Apply window in the time domain if needed
-                yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
+        if freqMask is not None:
+            pass
+            # # Control which frequencies should be excluded from optimization
+            # unmaskedIndx = np.array([[f>msk[0] and f<msk[1] for msk in freqMask] for f in self.f[indxInRange]-dref_chsh ]).any(axis=1).ravel()
+            # indxInRange = indxInRange[unmaskedIndx]
 
-                # 3. Compute the spectra
-                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                zFinRange = zF[indxInRange, :]
-                zFPadding = zF[indxPadding, :]
-                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                yFinRange = yF[indxInRange, :]
-            else:
-                zFall, repRootNames = evalTreeF(self.T, self.f.take(np.concatenate([indxInRange, indxPadding])), self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
-                zFinRange, zFPadding = np.split(zFall, [len(indxInRange)] )
-                yFinRange = self.yF[indxInRange, :]
+        # Possibly update the phased signal if the first-order phasing parameter has changed
+        phFinRange = np.exp(-1j*2*np.pi * evalParsH["."]["tau"][0] * (self.f[indxInRange]*self.c0-self.f0) - 1j*0 ).reshape((-1,1))   # The phasing term
+        yFinRange *= phFinRange
 
-                # Apply custom lineshape correction
-                if self.sF is not None:
-                    indxSplit = np.cumsum([self.freqBlocks[i].indxFreq.size for i in frqBlkIds])[:-1]     # Indices showing how to split the concatenated arrays xF, yF, zF, etc.
-                    zFPadded = [np.vstack([y[:nw2, :], x, y[-nw2:, :]]) for x, y in\
-                                        zip(np.split(zFinRange, indxSplit, axis=0),
-                                            np.split(zFPadding, len(frqBlkIds), axis=0) )]
-                    zFinRange = np.vstack([scipy.signal.fftconvolve(z, self.sF, 'valid') for z in zFPadded]) / np.sqrt(len(self.f))
+        # Choose only components that are in the optimization range
+        # TODO!
 
-            # Possibly update the phased signal if the first-order phasing parameter has changed
-            phFinRange = np.exp(-1j*2*np.pi * evalParsH["."]["tau"][0] * (self.f.take(indxInRange)*self.c0-self.f0) - 1j*0 ).reshape((-1,1))   # The phasing term
-            yFinRange *= phFinRange
+        # Include the baseline
+        bslnPoly = block_diag(*[self.freqBlocks[i].bline(len(indx)-2*nw2, numberField) \
+                                for i, indx in zip(frqBlkIds, indxFreqByBlock)])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
+        # if numberField == 'Re':
+        #     bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
+        # #else: bslnPoly *= phFinRange
+        if freqMask is not None:
+            bslnPoly = bslnPoly[unmaskedIndx, :]
+        nb = bslnPoly.shape[1]     # Total number of baseline terms
 
-            # Choose only components that are in the optimization range
-            """indxFreq = np.flatnonzero((self.f<=self.freqBlocks[i].max)*(self.f>=self.freqBlocks[i].min))     # Indices of frequency points in the range
-            nf = indxFreq.size
-            bF = lambda nf : np.hstack(( np.ones((nf, 1)), np.linspace(-1,1, nf).reshape(-1,1), np.linspace(-1,1,nf).reshape(-1,1)**2, 1j*np.ones((nf, 1)), 1j*np.linspace(-1,1, nf).reshape(-1,1), 1j*np.linspace(-1,1,nf).reshape(-1,1)**2 ))         # Define baseline in the frequency domain
-            """
+        return zFinRange, bslnPoly, yFinRange, indxInRange
 
-            # Include the baseline
-            bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
-            if not useComplex:
-                bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
-            #else: bslnPoly *= phFinRange
-            nb = bslnPoly.shape[1]     # Total number of baseline terms
-
-            # Define modelled and measured signals
-            Z, y = np.hstack((zFinRange, bslnPoly)), yFinRange
-        ns, nz = Z.shape     # Number of samples and (model signals + baselines)
-        na = len(repRootNames)    # Number of model signals, and hence the resulting amplitudes
-        if np.isnan(Z).any() or np.isinf(Z).any():             # This can happen if some chemical shifts are set to None
-            return 0.0, {}
-
-        # 3. Collect current values of the amplitudes, phase, and the variance of noise
-        # 3.1. Amplitudes
-        #ampl = np.array([evalParsH[self.repRootNames[i]]['ampl'][0] for i in range(na)]).reshape(-1,1) \
-        #     * np.exp(1j*np.array([evalParsH[self.repRootNames[i]]['phase'][0] for i in range(na)])).reshape(-1,1)
-        ampl = np.array([None]*nz)        # By default, if no amplitudes are set, they will be found as ML estimates
-        # Set the corresponding priors
-        m0 = np.zeros((nz, 1))         # Prior amplitudes
-        S0 = np.where(np.identity(nz)>0, np.inf, 0)           # Prior covariance matrix of amplitudes (vague priors)
-        for i in range(na):
-            key = (self.repRootNames[i], 'ampl', 0)
-            if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
-                # Set a Gaussian prior with supplied mean and variance
-                spec = self.getPrior(key, customPriors=customPriors)
-                m0[i], S0[i,i] = spec.p1, spec.p2
-            else:
-                ampl[i] = evalParsH[self.repRootNames[i]]['ampl'][0]
-                if useComplex: ampl[i] *= np.exp(1j*evalParsH[self.repRootNames[i]]['phase'][0])    # Set possibly different phases for each amplitude
-        iS0 = np.linalg.inv(S0)
-
-        # 3.2. Global phase shift
-        key = ('.', 'theta', 0)
-        if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
-            # Estimate theta using the closed form expression
-            Zy = Z.conj().T.dot(y)
-            ZZ = Z.conj().T.dot(Z)
-            if ZZ.size > 0 and np.linalg.matrix_rank(ZZ.real) < ZZ.shape[0]:
-                ZZ += (1e-09)*np.identity(ZZ.shape[0])          # Make sure ZZ is invertible if it is low rank
-            Sc = np.linalg.inv(ZZ.real)
-            theta = np.asscalar( 0.5*np.angle(Zy.T.dot(np.dot(Sc, Zy))) )
-        else: theta = evalParsH['.']['theta'][0]
-        if not useComplex:
-            Z, y = Z.real, (y*np.exp(-1j*theta)).real
-        else:
-            Z, y = np.vstack([Z.real, Z.imag]), np.vstack([(y*np.exp(-1j*theta)).real, (y*np.exp(-1j*theta)).imag])
-
-        # 3.3. Variance of noise
-        key = ('.', 'sigma2', 0)
-        if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
-            spec = self.getPrior(key, customPriors=customPriors)
-            a_sigma2, b_sigma2 = spec.p1, spec.p2
-            sigma2 = None
-        else:
-            a_sigma2, b_sigma2 = None, None
-            sigma2 = evalParsH['.']['sigma2'][0]
-
-        # 3.4. TLS ratio, gamma
-        key = ('.', 'gamma', 0)
-        if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
-            gamma = None          # Will fit gamma
-        else:
-            gamma = evalParsH['.']['gamma'][0]
-
-        # 4. Compute the log-likelihood function
-        if self.Gz is not None:
-            Gz = self.Gz
-        else:
-            Gz = 0.000001*np.ones((ns, nz))
-            Gz = 1.0*np.abs(Z)
-
-        Gz[:, na:] = 0
-        #self.ZZZ, self.yyy = Z, y
-        result, ampl, sigma2, meta = log_likelihood(Z, y, ampl=ampl, sigma2=sigma2, \
-            Gz=Gz, Gy=None, gamma=gamma, m0=m0, iS0=iS0, a_sigma2=a_sigma2, b_sigma2=b_sigma2, \
-            funcType=funcType, robust=robust)
-        diff_theta = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase
-        theta = (theta + diff_theta + np.pi) % (2 * np.pi) - np.pi
-        m_ampl = ampl*np.exp(-1j*diff_theta)
-        m_ampl[:na] = m_ampl[:na].real
-        if m_ampl[:na].sum() < 0:      # Make sure that all amplitudes are positive
-            m_ampl = - m_ampl
-            theta = (theta + +np.pi + np.pi) % (2 * np.pi) - np.pi
-            if not useComplex: evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
-        gamma = meta['gamma']
-        S_ampl = meta['ampl'][1]
-        a_sigma2, b_sigma2 = meta['sigma2']
-
-        mult = 1   # sum(m_ampl)     # Multiplier (can be used to output normalized amplitudes)
-        for lbl, val in zip(self.repRootNames, np.abs(m_ampl[:na])):
-            evalParsH[lbl]['ampl'][0] = np.asscalar(val) / mult
-        evalParsH['.']['mult'][0] = mult
-        evalParsH['.']['theta'][0] = theta            # Update the phase
-        evalParsH['.']['sigma2'][0] = sigma2
-        if gamma is not None: evalParsH['.']['gamma'][0] = gamma
-
-        # Save and output the resulting signals zF and bF
-        self.zF, self.bF = None, None
-        if returnSignals:
-            # Save the estimated signals
-            if inTimeDomain:
-                self.zF = np.fft.fftshift(np.fft.fft(zT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-            else:
-                try:
-                    # If there is zT variable computed already
-                    zF = np.fft.fftshift(np.fft.fft(zT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                    zFinRange = zF[indxInRange, :]
-                except UnboundLocalError: pass        # If there is no zT variable. Don't do anything; computation has been performed in the frequency domain anyway
-                self.zF = np.zeros((len(self.f),na), dtype=complex)
-                self.zF[indxInRange,:] = zFinRange ### / Znrm[:, 0:na]
-                if nz-na > 0:
-                    self.bF = np.zeros((len(self.f),1), dtype=complex)
-                    self.bF[indxInRange] = np.dot(bslnPoly, m_ampl[-(nz-na):])
-            # Save the characteristics of the marginalized distributions
-            for i in range(na):
-                key=(self.repRootNames[i], 'ampl', 0)
-                if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
-                    self.smplDistF[key] = smplSpec_Gaussian(np.asscalar(np.abs(m_ampl[i])), np.asscalar(np.abs(S_ampl[i,i])))
-
-            key=('.', 'sigma2', 0)
-            if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
-                self.smplDistF[key] = smplSpec_invGamma( a_sigma2, b_sigma2 )
-
-        # Always save the baseline
-        if not inTimeDomain and nz-na>0:
-            self.bF = np.zeros((len(self.f),1), dtype=complex)
-            self.bF[indxInRange] = np.dot(bslnPoly, m_ampl[-(nz-na):])
-
-        meta['sigma2'] = (2.0, sigma2)
-        meta['theta'] = theta       # distr = {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
-        meta['ampl'] = (np.abs(m_ampl[:na]), S_ampl[:na, :na].real)
-        return result, meta         # Output the log value and parameters of the marginalized distributions
-
-    #@profile
-    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None):
+    # @profile
+    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, freqMask=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None):
         """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
         #funcType = 'TLS'
 
@@ -1494,77 +1539,14 @@ class Datum():
         # 2. Compute a matrix of model signals Z, either in time or frequency domain
         inTimeDomain = (len(frqBlkIds) == 0)
         if inTimeDomain:
-            # -------------------------- TIME ----------------------------
-            # 1. Compute model signals in time domain
-            zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH)            # 1. Compute the model signals
-
-            # 1. Apply custom lineshape correction if defined
-            if self.sT is not None:
-                zT *= self.sT
-
-            # 2. Apply window in the time domain if needed
-            yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
-
-            ## Define modelled and measured signals
-            Z, y = zTw[0:,:], yTw[0:, :]
             numberField = 'Cx'
+            Z, y = self._get_signals_in_time(evalParsH, wnd)
         else:
-            # --------------------- FREQUENCY ----------------------------
-            nw = len(self.sF) if self.sF is not None else 0         # Length of the adaptive lineshape window (in frequency domain)
-            nw2 = int(nw/2)
-            indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
-            indxPadding = np.concatenate(tuple(np.concatenate([np.arange(self.freqBlocks[i].indxFreq[0]-nw2, self.freqBlocks[i].indxFreq[0]),
-                                                               np.arange(self.freqBlocks[i].indxFreq[-1]+1, self.freqBlocks[i].indxFreq[-1]+nw2+1)%len(self.f)] ) \
-                                        for i in frqBlkIds)) if nw2>0 else np.array([], dtype='int')   # Extra indices used for padding when convolving the signals with lineshape kernel in frequency domain
-
-            if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
-                zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
-
-                # 1. Apply custom lineshape correction if defined
-                if self.sT is not None:
-                    zT *= self.sT
-
-                # 2. Apply window in the time domain if needed
-                yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
-
-                # 3. Compute the spectra
-                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                zFinRange = zF[indxInRange, :]
-                zFPadding = zF[indxPadding, :]
-                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                yFinRange = yF[indxInRange, :]
-            else:
-                zFall, repRootNames = evalTreeF(self.T, self.f.take(np.concatenate([indxInRange, indxPadding])), self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
-                zFinRange, zFPadding = np.split(zFall, [len(indxInRange)] )
-                yFinRange = self.yF[indxInRange, :]
-
-                # Apply custom lineshape correction
-                if self.sF is not None:
-                    indxSplit = np.cumsum([self.freqBlocks[i].indxFreq.size for i in frqBlkIds])[:-1]     # Indices showing how to split the concatenated arrays xF, yF, zF, etc.
-                    zFPadded = [np.vstack([y[:nw2, :], x, y[-nw2:, :]]) for x, y in\
-                                        zip(np.split(zFinRange, indxSplit, axis=0),
-                                            np.split(zFPadding, len(frqBlkIds), axis=0) )]
-                    zFinRange = np.vstack([scipy.signal.fftconvolve(z, self.sF, 'valid') for z in zFPadded]) / np.sqrt(len(self.f))
-
-            # Possibly update the phased signal if the first-order phasing parameter has changed
-            phFinRange = np.exp(-1j*2*np.pi * evalParsH["."]["tau"][0] * (self.f.take(indxInRange)*self.c0-self.f0) - 1j*0 ).reshape((-1,1))   # The phasing term
-            yFinRange *= phFinRange
-
-            # Choose only components that are in the optimization range
-            # TODO!
-
-            # Include the baseline
-            bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros; use only real-valued baselines if the model is real-valued
-            if numberField == 'Re':
-                bslnPoly = bslnPoly[:, np.isreal(bslnPoly).all(axis=0)]
-            #else: bslnPoly *= phFinRange
-            nb = bslnPoly.shape[1]     # Total number of baseline terms
-
-            # Define modelled and measured signals
-            Z, y = np.hstack((zFinRange, bslnPoly)), yFinRange
+            zFinRange, bFinRange, yFinRange, indxInRange = self._get_signals_in_freq(evalParsH, frqBlkIds, freqMask, wnd, numberField)
+            Z, y = np.hstack((zFinRange, bFinRange)), yFinRange
 
         ns, nz = Z.shape     # Number of samples and (model signals + baselines)
-        na = len(repRootNames)    # Number of model signals, and hence the resulting amplitudes
+        na = len(self.repRootNames)    # Number of model signals, and hence the resulting amplitudes
         if np.isnan(Z).any() or np.isinf(Z).any():             # This can happen if some chemical shifts are set to None
             return 0.0, {}
 
@@ -1579,7 +1561,7 @@ class Datum():
         for i in range(na):
             key = (self.repRootNames[i], 'ampl', 0)
             if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
-                # Set a Gaussian prior with supplied mean and variance
+                # Set a Gaussian prior with the supplied mean and variance
                 spec = self.getPrior(key, customPriors=customPriors)
                 m0[i], S0[i,i] = spec.p1, spec.p2
             else:
@@ -1644,6 +1626,7 @@ class Datum():
         if m_ampl[:na].real.sum() < 0:      # Make sure that all amplitudes are positive
             m_ampl = - m_ampl
             theta = (theta + np.pi + np.pi) % (2 * np.pi) - np.pi
+            # print('Flippping the phase by 180 degrees...')
             if numberField == 'Re': evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
         gamma = meta['gamma']
         S_ampl = meta['ampl'][1]
@@ -1667,16 +1650,9 @@ class Datum():
             if inTimeDomain:
                 self.zF = np.fft.fftshift(np.fft.fft(zT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
             else:
-                try:
-                    # If there is zT variable computed already
-                    zF = np.fft.fftshift(np.fft.fft(zT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                    zFinRange = zF[indxInRange, :]
-                except UnboundLocalError: pass        # If there is no zT variable. Don't do anything; computation has been performed in the frequency domain anyway
                 self.zF = np.zeros((len(self.f),na), dtype=complex)
                 self.zF[indxInRange,:] = zFinRange ### / Znrm[:, 0:na]
-                if nz-na > 0:
-                    self.bF = np.zeros((len(self.f),1), dtype=complex)
-                    self.bF[indxInRange] = np.dot(bslnPoly, m_ampl[-(nz-na):])
+
             # Save the characteristics of the marginalized distributions
             for i in range(na):
                 key=(self.repRootNames[i], 'ampl', 0)
@@ -1687,14 +1663,15 @@ class Datum():
             if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
                 self.smplDistF[key] = smplSpec_invGamma( a_sigma2, b_sigma2 )
 
-        # Always save the baseline
+        # Always save the baseline; it may be needed for the adjustmwnt algorithms
         if not inTimeDomain and nz-na>0:
             self.bF = np.zeros((len(self.f),1), dtype=complex)
-            self.bF[indxInRange] = np.dot(bslnPoly, m_ampl[-(nz-na):])
+            self.bF[indxInRange] = np.dot(bFinRange, m_ampl[-(nz-na):])
 
         meta['sigma2'] = (2.0, sigma2)
         meta['theta'] = theta       # distr = {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
         meta['ampl'] = (np.abs(m_ampl[:na]), S_ampl[:na, :na].real)
+
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
     def _fnc_prior(self, evalParsH, parsKeys=None, customPriors=None):
@@ -1717,7 +1694,8 @@ class Datum():
     def measure_noise(self, lims, lmda=5.0):
         """Measures the standard deviation of noise in the spectrum within the limits lims in ppm."""
 
-        indxFreq = np.flatnonzero((self.f<=max(lims))*(self.f>=min(lims)))     # Indices of frequency points in the range
+        indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), \
+                             np.searchsorted(self.f.ravel(), max(lims)))     # Indices of frequency points in the range
 
         yF = self.yF[indxFreq].ravel()
         yFbsln = whitsm(yF, lmda)
@@ -1729,6 +1707,7 @@ class Datum():
 
     def set_shape(self, frqBlkIds=None, wnd=None):
         """Sets the custom lineshape sF and sT."""
+        # TODO! Chech this function when using an adaptive frequency scale
 
         nt, nf = len(self.t), len(self.f)
         nw = config.MODEL_ShapeKernelSize         # Length of the adaptive lineshape window (in frequency domain)
@@ -1742,78 +1721,45 @@ class Datum():
         # Compute a matrix of model signals Z, either in time or frequency domain
         if len(frqBlkIds) == 0:
             # -------------------------- TIME ----------------------------
-            # 1. Compute model signals in time domain
-            zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH)            # 1. Compute the model signals
-
-            # 2. Apply window in the time domain if needed
-            yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
-
-            # Define modelled and measured signals
-            Z, y = zTw, yTw
+            pass
         else:
-            # --------------------- FREQUENCY ----------------------------
-            indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
-            indxPadding = np.concatenate(tuple(np.concatenate([np.arange(self.freqBlocks[i].indxFreq[0]-nw2, self.freqBlocks[i].indxFreq[0]),
-                                                               np.arange(self.freqBlocks[i].indxFreq[-1]+1, self.freqBlocks[i].indxFreq[-1]+nw2+1)% nf] ) \
-                                        for i in frqBlkIds)) if nw2>0 else np.array([], dtype='int')   # Extra indices used for padding when convolving the signals with lineshape kernel in frequency domain
+            indxFreqByBlock = [ self._get_indxFreq(i, nw2) for i in frqBlkIds ]
+            indxPadded = np.concatenate(indxFreqByBlock)
+            indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
 
             if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
                 zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
+
+                # 1. Apply custom lineshape correction if defined
+                if self.sT is not None:
+                    zT *= self.sT
 
                 # 2. Apply window in the time domain if needed
                 yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
 
                 # 3. Compute the spectra
-                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(nf)
-                zFinRange = zF[indxInRange, :]
-                zFPadding = zF[indxPadding, :]
-                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(nf)
+                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+
+                # 4. Take only the valid frequency ranges
+                zFPadded = zF[indxPadded, :]
                 yFinRange = yF[indxInRange, :]
             else:
-                zFall, repRootNames = evalTreeF(self.T, self.f.take(np.concatenate([indxInRange, indxPadding])), self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
-                zFinRange, zFPadding = np.split(zFall, [len(indxInRange)] )
-                yFinRange = self.yF[indxInRange, :]
+                zFPadded, repRootNames = evalTreeF(self.T, self.f[ indxPadded ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
+                indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]
+                zFPadded = [z for z in np.split(zFPadded, indxSplit)]
 
-            # Possibly update the phased signal if the first-order phasing parameter has changed
-            yFinRange *= np.exp(-1j*2*np.pi * evalParsH["."]["tau"][0] * (self.f.take(indxInRange)*self.c0-self.f0) - 1j*0 ).reshape((-1,1))   # A shorter vector of yF restricted to the optimization range only
+            mc = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames])           # First na results correspond to the actual amplitudes of components, the rest, if any, correspond to the baselines
+            theta = evalParsH['.']['theta'][0]
 
-            # Choose only samples that are in the optimization range
-            """indxFreq = np.flatnonzero((self.f<=self.freqBlocks[i].max)*(self.f>=self.freqBlocks[i].min))     # Indices of frequency points in the range
-            nf = indxFreq.size
-            bF = lambda nf : np.hstack(( np.ones((nf, 1)), np.linspace(-1,1, nf).reshape(-1,1), np.linspace(-1,1,nf).reshape(-1,1)**2, 1j*np.ones((nf, 1)), 1j*np.linspace(-1,1, nf).reshape(-1,1), 1j*np.linspace(-1,1,nf).reshape(-1,1)**2 ))         # Define baseline in the frequency domain
-            """
-
-            # Include the baseline
-            bslnPoly = block_diag(*[self.freqBlocks[i].bF for i in frqBlkIds if self.freqBlocks[i].bF is not None])     # All baseline models padded with zeros
-            nb = bslnPoly.shape[1]     # Total number of baseline terms
-
-            # Define modelled and measured signals
-            Z, y = np.hstack((zFinRange, bslnPoly)), yFinRange
-        ns, nz = Z.shape     # Number of samples and (model signals + baselines)
-        na = len(repRootNames)    # Number of model signals, and hence the resulting amplitudes
-
-        mc = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames])           # First na results correspond to the actual amplitudes of components, the rest, if any, correspond to the baselines
-        theta = evalParsH['.']['theta'][0]
-        m_ampl = mc[:na]
-
-        # 3.a Apply adaptive lineshape correction and reevaluate the amplitudes
-        if len(frqBlkIds) == 0:
-            # TODO: Estimate lineshape in the time domain as the ratio between the mesured and fitted FIDs
-            pass
-        elif nw2 > 0:
-            # Padd the signal arrays on both ends, separately for each frequency range
-            indxSplit = np.cumsum([self.freqBlocks[i].indxFreq.size for i in frqBlkIds])[:-1]     # Indices showing how to split the concatenated arrays xF, yF, zF, etc.
-            zFPadded = [np.vstack([y[:nw2, :], x, y[-nw2:, :]]) for x, y in\
-                                zip(np.split(zFinRange, indxSplit, axis=0),
-                                    np.split(zFPadding, len(frqBlkIds), axis=0) )]
-            xFPadded = [np.dot(z, mc[:na]*np.exp(1j*theta)).reshape(-1,1) for z in zFPadded]
+            xFPadded = [np.dot(z, mc*np.exp(1j*theta)).reshape(-1,1) for z in zFPadded]
+            yFinRange = self.yF[indxInRange, :]
+            bFinRange = self.bF[indxInRange, :]
 
             # Form the Toeplitz matrix of shifted arrays
             S = np.vstack([np.hstack([x[i:i+len(x)-2*nw2] for i in np.arange(2*nw2, -1, -1, dtype='int')]) for x in xFPadded])
 
-            # Subtract the baseline from the measured data
-            bFinRange = self.bF[indxInRange, :]   # np.dot(bslnPoly, mc[-(nz-na):]) if nz-na>0 else 0
-
+            # Solve the system of equations
             SS = np.dot(S.T.conj(), S) + 0.00*np.eye(nw)
             sF = np.linalg.solve(SS, np.dot(S.T.conj(), yFinRange-bFinRange))
             sF /= sum(sF) / np.sqrt(len(self.f))
@@ -1831,7 +1777,7 @@ class Datum():
     def set_bline(self):
         pass
 
-    def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False):
+    def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False):
         """Evaluates the objective function (logLikelihood + sum of logPriors).
            Inputs:
            evalParsH - hierarchical dictionary of parameters (node name -> parameter name -> list of parameters); use crntParsH by default
@@ -1845,7 +1791,7 @@ class Datum():
         if evalParsH is None:
             evalParsH = self.crntParsH
 
-        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, funcType, customPriors=customPriors, returnSignals=returnSignals, robust=robust, wnd=wnd)
+        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, freqMask, funcType, customPriors=customPriors, returnSignals=returnSignals, robust=robust, wnd=wnd)
 
         if evaluatePriors:
             result += self._fnc_prior(evalParsH, parsKeys, customPriors=customPriors)
@@ -1853,7 +1799,7 @@ class Datum():
 
         return result, meta
 
-    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nhop=None, verbose=True):
+    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nhop=None, respectBounds=True, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples)."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=verbose)
@@ -1863,18 +1809,19 @@ class Datum():
             evalParsH = copy.deepcopy(self.crntParsH)
             bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
             initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-            costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, robust=False)[0]
+            costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=False)[0]
 
             # Call the optimization routine
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
 
-            # Update the stored parameters
-            updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
-            if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
-            self.smplDistF.clear()
+            if res is not None:
+                # Update the stored parameters
+                updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
+                if self.refChshKey in parsKeys: self.setCrntVal(key = self.refChshKey, val = res.x[parsKeys.index(self.refChshKey)])
+                self.smplDistF.clear()
 
         # Re-evaluate the posterior
-        result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors, returnSignals=True)
+        result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -1885,7 +1832,70 @@ class Datum():
 
         return result, meta
 
-    def adjust_phase(self, evalParsH=None, frqBlkIds=None, mode='PhA', mw=512, cfun='LS', verbose=True):
+    def goodness_of_fit(self):
+        """Evaluates how well the model is fitted to the data on the scale from 0.0 (bad) to 1.0 (good)."""
+        self.evaluate(autoKeys=[], returnSignals=True)
+        f, yFph, xF, _, bF = self.signals_for_plot()
+
+        n = 128
+        weights = scipy.signal.fftconvolve(np.abs(xF-bF), np.ones((n, 1))/n, mode='same')
+        weights = (weights - weights.min())/(weights.max()-weights.min())
+        weights = np.where(weights > 0.2, 1.0, 0.0)
+
+        score_before = np.abs( (yFph-bF)*weights ).max()
+        score_after = np.abs( (yFph-xF)*weights ).max()
+
+        # print(score_before, score_after)
+
+        return 1.0
+
+    def auto_phase(self):
+        """Run the autophasing algorithm."""
+
+        def deg2tau(dt, nf, p0deg, p1deg):
+            """Converts the phasing parameters from degrees to their tau and theta representations."""
+            fmin, fmax = flims(dt, nf)
+            df = (fmax-fmin)/(nf-1)     # The same as f[1]-f[0]
+
+            theta = np.asscalar( p0deg - p1deg*fmin/df/nf )*np.pi/180.0
+            tau = np.asscalar( p1deg / df / 360. / nf )
+
+            return theta, tau
+
+        def tau2deg(dt, nf, theta, tau):
+            """Converts from theta/tau representation to phase angles in degrees."""
+            _, fmax = flims(dt, nf)
+
+            p0deg = theta * 180.0 / np.pi
+            p1deg = tau*fmax*360.
+
+            return p0deg, p1deg
+
+        # Get the spectrum (or compute it if the signal is too long and adaptive FFT has been used)
+        dt = self.t[1]-self.t[0]
+        if self._f is None or len(self.yF) > 2**14:
+            yF = self.yF
+            nf = len(yF)
+        else:
+            # If an adaptive frequency scale has been used, compute a new (shorter) spectrum and autophase it instead
+            nf = min(len(self.yT), 2**14)
+            yT = self.yT[:nf, :] * np.exp( -5*np.linspace(0, 1, nf) ).reshape(-1,1)
+            yF = np.fft.fftshift(np.fft.fft(yT, nf, axis=0), axes=0) / np.sqrt(nf)
+
+        # Get the initial phasing parameters (in degrees)
+        p0deg, p1deg = tau2deg(dt, nf, self.getCrntVal(key = ('.', 'theta', 0)), \
+                               self.getCrntVal(key = ('.', 'tau', 0)) )
+
+        p0, p1 = nmrglue.process.proc_autophase.automatic_ps(yF.ravel(), 'acme', p0=-p0deg, p1=-p1deg)     # 'peak_minima'
+        p0deg, p1deg = -p0, -p1
+
+        theta, tau = deg2tau(dt, nf, p0deg, p1deg)
+        theta = (theta + np.pi) % np.pi - np.pi    # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
+
+        self.setCrntVal(key = ('.', 'theta', 0), val = theta)
+        self.setCrntVal(key = ('.', 'tau', 0), val = tau)
+
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, freqMask=None, mode='PhA', mw=512, cfun='LS', verbose=True):
         """Phase correction by adjusting the residual.
         Inputs:
         mode - choose which phase parameters to adjust ('PhA', 'Ph0', 'Ph1')
@@ -1899,12 +1909,15 @@ class Datum():
             evalParsH = self.crntParsH
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
-        indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
+
+        indxFreqByBlock = [ self._get_indxFreq(i) for i in frqBlkIds ]
+        indxInRange = np.concatenate(indxFreqByBlock)
+        # indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq(self.f) for i in frqBlkIds))
         dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
 
         # 2. Compute the model spectrum if necessary
         if self.zF is None:
-            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, autoKeys=[], returnSignals=True)
+            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, autoKeys=[], returnSignals=True)
         self.zF_corr, self.bF_corr = None, None           # Reset the corrections for the model matrix and the baseline
 
         # Find the model signal
@@ -1931,7 +1944,7 @@ class Datum():
             bounds, initVals = ((-0.5, 0.5), ), [0.0]
 
         # Call the optimization routine
-        res = self._optimize(costFuncOpti, bounds, initVals, nhop=0, verbose=verbose)
+        res = self._optimize(costFuncOpti, bounds, initVals, nhop=0, respectBounds=False, verbose=verbose)
 
         # Interpret the results
         if mode == 'PhA':
@@ -1949,7 +1962,7 @@ class Datum():
         if verbose:
             print('Found values: ph0 = {:.4f}, ph1 = {:.4f}'.format(ph0, ph1))
 
-    def adjust_residual(self, evalParsH=None, frqBlkIds=None, mw=2048, verbose=True):
+    def adjust_residual(self, evalParsH=None, frqBlkIds=None, freqMask=None, mw=2048, verbose=True):
         """Correction of the model signals and the baseline to make the residual noise-like."""
 
         if verbose:
@@ -1960,12 +1973,15 @@ class Datum():
             evalParsH = self.crntParsH
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
-        indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq for i in frqBlkIds))
+
+        indxFreqByBlock = [ self._get_indxFreq(i) for i in frqBlkIds ]
+        indxInRange = np.concatenate(indxFreqByBlock)
+        # indxInRange = np.concatenate(tuple(self.freqBlocks[i].indxFreq(self.f) for i in frqBlkIds))
         dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
 
         # 2. Compute the model spectrum if necessary
         if self.zF is None or self.bF is None:
-            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, autoKeys=[], returnSignals=True)
+            self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, autoKeys=[], returnSignals=True)
 
         # Find the model signal
         ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames])
@@ -2003,7 +2019,7 @@ class Datum():
         self.zF_corr[np.ix_(indxInRange, ampl_corr.nonzero()[0])] /= ampl_corr[ampl_corr.nonzero()]       # Scale by the amplitudes. Only those where ampl_corr != 0
         self.bF_corr[indxInRange] = bln + np.sum(bF0)                       # Additive correction for the baseline
 
-    def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
+    def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys)
@@ -2013,7 +2029,7 @@ class Datum():
         # If no parameters are set for sampling, just evaluate the marginal posterior
         if len(parsKeys) == 0:
             # Nothing to sample; just evaluate the function
-            value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
+            value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
 
             m_ampl = np.array(meta['ampl'][0]).reshape(-1, 1)
             S_ampl = meta['ampl'][1]
@@ -2036,7 +2052,7 @@ class Datum():
         evalParsH = copy.deepcopy(self.crntParsH)
         bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
         initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-        costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, funcType, evaluatePriors)
+        costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors)
 
         sampler = self._sample(costFuncSmpl, bounds, initVals, nwalkers, nsteps)
 
@@ -2075,7 +2091,7 @@ class Datum():
 
         return(result)
 
-    def sweep(self, key, lims=None, npts=50, reoptimize=False, frqBlkIds=None, evaluatePriors=False):
+    def sweep(self, key, lims=None, npts=50, reoptimize=False, frqBlkIds=None, freqMask=None, evaluatePriors=False):
         # Evaluates the posterior and computes the amplitudes while sweeping the parameter parKey in the range lims
         par = self.getPrior(key)     # Settings for the prior distribution of this parameter key
         if lims is None: lims = (par.min, par.max)
@@ -2085,7 +2101,7 @@ class Datum():
         evalParsH = copy.deepcopy(self.crntParsH)      # Make a copy of the parameter dictionary that will be used for evaluation
         for i, x in enumerate(x_arr):
             evalParsH[key[0]][key[1]][key[2]] = x
-            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, funcType=None, evaluatePriors=True, parsKeys=[key], autoKeys=None, robust=False)
+            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=None, evaluatePriors=True, parsKeys=[key], autoKeys=None, robust=False)
             lpri_arr[i] = par.evalPrior(arg=x)
 
         llkl_arr = lpst_arr - lpri_arr
@@ -2113,7 +2129,8 @@ class Datum():
         #parsKeys = [key for key in parsKeys if not self.isAutofittable(key)]
 
         if verbose:
-            npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
+            print('\n')
+            npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 'all possible'
             npar_fit = len(parsKeys)
             if npar_fit == 0:
                 print("Nothing to fit; {} parameters inferred in closed form...".format(npar_auto))
@@ -2171,6 +2188,14 @@ class Datum():
 
         return xT, xF
 
+    def residual_spectrum(self):
+        """Computes the residual spectrum after model fitting."""
+        # Phase the data
+        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
+        yFph = self.yF * ph
+
+        return yFph - self.modelled_signal(baseline=True)[1]
+
     def remove(self):
         """Removes itself from the Series"""
         self.parent.data.remove(self)
@@ -2216,69 +2241,28 @@ class Datum():
             ax[0].set_ylabel(str(keys[1]))
 
     def plot(self, ax_main, ax_residual=None, showRanges='all', showComponents=False, showLegend=True, returnSignals=False, real=True):
-        """Plots the dataset."""
+        """Plots the dataset using a matplotlib Figure."""
 
-        # Phase the data
-        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
-        yFph = self.yF * ph
-        if self.zF is not None:
-            ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(1, -1)
-            zF = self.zF * ampl if self.zF_corr is None else (self.zF + self.zF_corr)*ampl
-            xF = zF.sum(1).reshape(-1,1)
-            if self.bF is not None:
-                bF = self.bF if self.bF_corr is None else self.bF + self.bF_corr
-                xF += bF
-        else: zF, xF, bF = None, None, None
+        f, yFph, xF, zF, bF = self.signals_for_plot()
 
-        inRange, outRange = splitFreq([self.freqBlocks[blk] for blk in self.steps[0].frqBlkIds], f=self.f)
-        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
-        rmsResidual = 0.0
-        if outRange:
-            supsRatio = ceil(yFph.size / (2**13))   # Subsampling ratio; take no more than 2^13 points
-            allIndx = [np.append(r.indxFreq[:-1:supsRatio], r.indxFreq[-1]) for r in outRange]   # Make sure that the first and the last indices of each group are included
-            gapsPos = np.cumsum([r.size for r in allIndx])        # Positions of gaps
-            allIndx = np.concatenate(allIndx)
-            f_outR = np.insert(self.f[allIndx], gapsPos, None) - dref_chsh
+        # Plot measured data
+        ax_main.plot(f, yFph.real if real else yFph.imag, '-', color=(0,0.58,0.86), linewidth=1.5, label='')
 
-            # Plot measured data
-            yF_outR = np.insert(yFph[allIndx], gapsPos, None)
-            ax_main.plot(f_outR, yF_outR.real if real else yF_outR.imag, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
+        # Plot the model components
+        if showComponents and zF is not None:
+            zF = (zF + 1*bF)
+            for i, node in enumerate(self.repRootNames):
+                ax_main.plot(f, zF[:, i].real if real else zF[:, i].imag, '-', linewidth=0.5, color=config.colrseq[i], label=node)
 
-            # Plot the fitted model
-            if xF is not None:
-                xF_outR = np.insert(xF[allIndx], gapsPos, None)
-                ax_main.plot(f_outR, xF_outR.real if real else xF_outR.imag, '-', color='r', label='Fitted model')
+        # Plot the fitted model
+        if xF is not None:
+            ax_main.plot(f, xF.real if real else xF.imag, '-', color='r', label='')
 
-                # Plot the residuals
-                if ax_residual is not None:
-                    ax_residual.plot(f_outR, (yF_outR - xF_outR).real if real else (yF_outR - xF_outR).imag, '-', color='darkkhaki')
-
-        if inRange:
-            allIndx = np.concatenate([r.indxFreq for r in inRange])
-            gapsPos = np.cumsum([r.indxFreq.size for r in inRange])
-            f_inR = np.insert(self.f[allIndx], gapsPos, None) - dref_chsh
-
-            # Plot measured data
-            yF_inR = np.insert(yFph[allIndx], gapsPos, np.nan)     #  - 1*step.bFph[allIndx]
-            ax_main.plot(f_inR, yF_inR.real if real else yF_inR.imag, '-', color=(0,0.58,0.86), linewidth=1.5, label='')
-
-            # Plot the model components
-            if showComponents and zF is not None:
-                zF = (zF + 1*bF)
-                zF_inR = np.insert(zF[allIndx, :], gapsPos, None, axis=0)
-                for i, node in enumerate(self.repRootNames):
-                    ax_main.plot(f_inR, zF_inR[:, i].real if real else zF_inR[:, i].imag, '-', linewidth=0.5, color=config.colrseq[i], label=node)
-
-            # Plot the fitted model
-            if xF is not None:
-                xF_inR = np.insert(xF[allIndx], gapsPos, None)       #  - 1*step.bFph[allIndx]
-                ax_main.plot(f_inR, xF_inR.real if real else xF_inR.imag, '-', color='r', label='')
-
-                # Plot the residuals
-                if ax_residual is not None:
-                    rF_inR = (yF_inR - xF_inR).real if real else (yF_inR - xF_inR).imag
-                    ax_residual.plot(f_inR, rF_inR, '-', color='darkkhaki')
-                    rmsResidual += np.sqrt(np.nanmean(np.abs(rF_inR)**2))
+            # Plot the residuals
+            if ax_residual is not None:
+                rF = (yF - xF).real if real else (yF - xF).imag
+                ax_residual.plot(f, rF, '-', color='darkkhaki')
+                rmsResidual += np.sqrt(np.nanmean(np.abs(rF)**2))
 
         # Show the residuals plot below the graph
         # Set ticks and labels
@@ -2310,7 +2294,115 @@ class Datum():
         ax_main.autoscale()    # update ax.viewLim using the new dataLim
         if ax_main.get_xlim()[1] > ax_main.get_xlim()[0]: ax_main.invert_xaxis()
 
-        if returnSignals: return self.f - dref_chsh, yFph, xF
+        if returnSignals: return f, yFph, xF, zF
+
+    def signals_for_plot(self, showComponents=False):
+        """Computes the signals for plotting. Applies subsampling to the parts of the signals that are out ouf the fitting ranges."""
+
+        minmaxTuple = namedtuple('minmaxTuple', 'min, max')
+        minmaxTuple.__new__.__defaults__ = (-np.inf, np.inf)
+        minmaxTuple.imin = lambda self, f : np.searchsorted(f.ravel(), self.min)
+        minmaxTuple.imax = lambda self, f : np.searchsorted(f.ravel(), self.max)
+
+        def splitFreq(inRange):
+            """Given a list of freqSpec tuples, divides the frequency range -inf to +inf into lists of disjoint intervals: inRange and outRange by merging overlapping optimization ranges."""
+
+            if inRange:
+                inRange = mergeFreq(inRange)      # Merged and sorted list of freqRanges
+                outRange = []
+                if not np.isinf(inRange[0].min):
+                    lwr = -np.inf
+                    upr = inRange[0].min
+                    outRange.append(minmaxTuple(min=lwr, max=upr))
+                for i in range(len(inRange)-1):
+                    lwr = inRange[i].max
+                    upr = inRange[i+1].min
+                    outRange.append(minmaxTuple(min=lwr, max=upr))
+                if not np.isinf(inRange[-1].max):
+                    lwr = inRange[-1].max
+                    upr = np.inf
+                    outRange.append(minmaxTuple(min=lwr, max=upr))
+            else:
+                outRange = [minmaxTuple(-np.inf, np.inf)]  # Infinite interval
+
+            return inRange, outRange
+
+        def mergeFreq(intervals):
+            """
+            Merge oevrlapping intervals. Based on https://codereview.stackexchange.com/questions/69242/merging-overlapping-intervals.
+            A simple algorithm can be used:
+            1. Sort the intervals in increasing order
+            2. Push the first interval on the stack
+            3. Iterate through intervals and for each one compare current interval
+               with the top of the stack and:
+               A. If current interval does not overlap, push on to stack
+               B. If current interval does overlap, merge both intervals in to one
+                  and push on to stack
+            4. At the end return stack
+            """
+            sorted_by_lower_bound = sorted(intervals, key=lambda tup: tup.min)
+            merged = []
+
+            for higher in sorted_by_lower_bound:
+                if not merged:
+                    merged.append(higher)
+                else:
+                    lower = merged[-1]
+                    # test for intersection between lower and higher:
+                    # we know via sorting that lower[0] <= higher[0]
+                    if higher.min <= lower.max:
+                        upper_bound = max(lower.max, higher.max)
+                        merged[-1] = minmaxTuple(min=lower.min, max=upper_bound)  # replace by merged interval
+                    else:
+                        merged.append(higher)
+            return merged
+
+        # Phase the data
+        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
+        yFph = self.yF * ph
+
+        # Subsample out-of-range parts of the spectrum
+        inRange, outRange = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) \
+                                        for blk in self.steps[0].frqBlkIds ])
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
+        f = self.f - dref_chsh
+        rmsResidual = 0.0
+        allRange = sorted(inRange+outRange, key=lambda x : x[0])
+        supsRatio = ceil(yFph.size / (2**12))   # Subsampling ratio; take no more than 2^12 points
+        allIndx = np.concatenate( [np.arange(r.imin(f), r.imax(f), supsRatio if r in outRange else 1) for r in allRange] )
+
+        f, yFph = f[allIndx, :], yFph[allIndx, :]
+
+        if self.zF is not None:
+            ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(1, -1)
+            zF = self.zF * ampl if self.zF_corr is None else (self.zF + self.zF_corr)*ampl
+            xF = zF.sum(1).reshape(-1,1)
+            if self.bF is not None:
+                bF = self.bF if self.bF_corr is None else self.bF + self.bF_corr
+                xF += bF
+            xF, zF, bF = xF[allIndx, :], zF[allIndx, :], bF[allIndx, :]
+        else: zF, xF, bF = None, None, None
+
+        return f, yFph, xF, zF, bF
+
+    def stems_for_plot(self):
+        """Computes all stem lines to be displayed on a plot. returns a list with each elemnet corresponding to a dictionary for a specific reported node."""
+
+        allStems = []     # Dictionary that stores references to all stem lines
+        mdldPeaks = collectPeaks(self.T, self.c0, self.crntParsH)
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
+
+        # for i, name in enumerate([name for name in self.repRootNames if name not in ['Water', 'Chloroform'] ]):         #
+        for i, name in enumerate(self.repRootNames):
+            stems_i = {}
+            for stemKey, val in mdldPeaks[name].items():   # Loop over the leaves
+                parsKey = peakName2parsKey(stemKey)
+                freq = [pk.chsh - dref_chsh for pk in val]
+                intn = [np.abs(pk.intn) for pk in val]
+                stems_i[parsKey] = (self.getCrntVal(key=parsKey), freq, intn)
+            allStems.append(stems_i)
+
+        return allStems
 
     def evalForPlot(self, key, frqBlkIds=None, lims=None, npts=75):
         """Returns an array of argument values and the values of log likelihood, prior, and posterior."""
@@ -2356,7 +2448,7 @@ class Datum():
             evalParsH[keys[1][0]][keys[1][1]][keys[1][2]] = y
             # Evaluate the function skipping the datasets that are not present in parsKeys
             lpst = self.evaluate(evalParsH, parsKeys=keys, frqBlkIds=frqBlkIds, funcType=None, evaluatePriors=True, robust=False)[0]
-            lpri = pars[0].evalPrior(arg=x) + pars[1].evalPrior(arg=y)
+            lpri = self._fnc_prior(evalParsH, parsKeys=keys) + self._fnc_joint(evalParsH)
             return lpst, lpri
 
         lpst_arr, lpri_arr = np.vectorize(func)(*np.meshgrid(x_arr, y_arr, sparse=True))     # Return a table of f(x, y)
@@ -2367,6 +2459,10 @@ class Datum():
         return (x_arr, y_arr), llkl_arr, lpri_arr, lpst_arr, crntVal
 
 #### Utility functions #####
+
+def arrhash(x):
+    """Very quick and dirty function to hash np arrays."""
+    return x[0] + x[-1] + len(x)
 
 def gmm_pdf(x, m, S, w=None):
     """Returns an analytical fucntion for a mixture of Gaussians (nd<=2)
@@ -2506,6 +2602,15 @@ def load_workspace(filename):
         dataPack, GUIsettings = dill.load(fp)
     wsp = Workspace()       # Define a new Workspace object
     wsp.unpack(dataPack)    # Unpack the loaded data into it
+
+    # set the global config settings
+    if GUIsettings is not None:
+        try:
+            stngConfig = GUIsettings.pop('_config')
+            config.from_dict(config, stngConfig)
+        except KeyError:
+            print('Using default global settings.')
+
     return wsp, GUIsettings
 
 def save_workspace(filename, wsp, GUIsettings=None):
@@ -2859,8 +2964,9 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
     # Remove the baseline with median filter
     res = nmrglue.process.proc_bl.med(den.ravel(), mw).reshape(-1,1)
     bln = (den - res).reshape(-1,1)
+    # print('here')
 
-    # Compute teh cost function
+    # Compute the cost function
     if cfun == 'LS':
         val = np.linalg.norm(bln - np.mean(bln), 2)
     elif cfun == 'TV':
@@ -2868,3 +2974,10 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
 
     return val, yFph, res, bln
     #return np.linalg.norm(res - np.mean(res), 2), yFph, res, bln
+
+def flims(dt, nf):
+    """Computes the values (in Hz) of the first and last sample in the spectrum with nf samples corresponding to a signal with sampling time dt. See https://docs.scipy.org/doc/numpy/reference/generated/numpy.fft.fftfreq.html"""
+    if nf%2 == 0:
+        return (-nf/(2*dt*nf), (nf/2-1)/(dt*nf))
+    else:
+        return (-(nf-1)/(2*dt*nf), (nf-1)/(2*nf*dt))
