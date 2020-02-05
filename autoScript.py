@@ -19,6 +19,7 @@ from optparse import OptionParser
 import sys, os, time
 from io import BytesIO
 import config
+import subprocess
 
 import numpy as np
 from chemTree import loadTree
@@ -26,7 +27,7 @@ from MainLogic import Workspace, next_pow_of_2
 from dataio import read_spinsolve
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, Flowable
 from reportlab.lib.styles import getSampleStyleSheet
 
 from PIL import ImageFile
@@ -36,63 +37,6 @@ rcParams['ps.fonttype'] = 42               # Needed to be able to save figures i
 # SCRIPT_PATH = os.path.dirname(os.path.abspath( __file__ ))       # Where the exe is located
 SCRIPT_PATH = os.path.abspath(os.path.dirname(sys.argv[0]))
 CALLED_PATH = os.getcwd()                                          # Where it has been executed from
-
-def script(dirName, residual=False):
-    # Load the data
-    yT, c0, f0, dt = read_spinsolve(dirName)
-
-    # Define the array of time samples
-    nt = yT.shape[0]
-    t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-
-    # Create a new Workspace and add the data there
-    wsp = Workspace()
-    ser = wsp.addSeries(c0=c0, f0=f0, t=t, nf=1*next_pow_of_2(len(t)) )
-    DDD = ser.addDatum(yT)
-
-    # Define and set the chemical tree
-    T = loadTree(os.path.join(SCRIPT_PATH, 'GluSucFruWater.ctr'))
-    wsp.setTree(T)
-
-    # Align the spectrum based on the frequency of the water peak
-    DDD.alignToSolventPeak(chshTo=4.75)
-
-    # Define regions for optimization
-    DDD.addFreqBlock(lims=(2.5, 6.0))
-
-
-    # --------------------------- Run optimization -----------------------------
-
-    # Optimize global chemical shift
-    DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'chsh', 0), ('Water-SPSY1', 'chshQD', 0)])
-
-    # Optimize the peak width
-    DDD.optimize(frqBlkIds=[1], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
-    DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'alph', 0), ('Water-SPSY1', 'alphQD', 0)])
-
-    # Check if the solution is in H2O
-    val, meta = DDD.evaluate(frqBlkIds=[1], returnSignals=True)
-    ampl = meta['ampl'][0]
-    if ampl[0] / sum(ampl) > 0.95:
-        DDD.addFreqBlock(lims=(3.1, 4.2))      # Add new frequency block
-
-        DDD.optimize(frqBlkIds=[2], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
-        DDD.optimize(frqBlkIds=[2], parsKeys=[('Water-SPSY1', 'chshQD', 0)])
-        DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'chsh', 0)])
-        DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'alph', 0)])
-
-        val, meta = DDD.evaluate(frqBlkIds=[2], returnSignals=True)
-
-    # ------------------------- Output the results -----------------------------
-
-    # val, meta = DDD.evaluate(frqBlkIds=[1], returnSignals=True)
-    data = {'names': DDD.repRootNames,
-            'intns': meta['ampl'][0],
-            'image': get_figure(DDD, residual=residual),
-            'path': os.path.abspath(dirName)}
-    report(data)
-
-    print('\nDONE!')
 
 def main(cmdline=None):
     """Example main function.
@@ -129,7 +73,106 @@ def main(cmdline=None):
 
     # -------------------- Execute the script ----------------------
     # dirName =     # 'C:\\Users\\yma80\\Data\\UWA_Sugars\\Raw Data\\1\\1Pulse-H (1 0% - 1)\\1\\'
-    script(opts.directory, residual=opts.residual)
+
+    # Load the data
+    yT, c0, f0, dt, pars = read_spinsolve(opts.directory)
+
+    try:
+        acquScore = 1.0 if pars['acqDelay'] > 10.0 else 0.0
+    except KeyError:
+        acquScore = 0.5
+
+    # Define the array of time samples
+    nt = yT.shape[0]
+    t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+
+    # Create a new Workspace and add the data there
+    wsp = Workspace()
+    ser = wsp.addSeries(c0=c0, f0=f0, t=t, nf=1*next_pow_of_2(len(t)) )
+    DDD = ser.addDatum(yT)
+
+    # Define and set the chemical tree
+    T = loadTree(os.path.join(SCRIPT_PATH, 'GluSucFruMaCaWater.ctr'))
+    wsp.setTree(T)
+
+    # Align the spectrum based on the frequency of the water peak
+    DDD.alignToSolventPeak(chshTo=4.75)
+
+    # Define regions for optimization
+    DDD.addFreqBlock(lims=(2.5, 6.0))
+
+
+    # --------------------------- Run optimization -----------------------------
+    # Turn off the acid models
+    DDD.setPrior(key=('Malic acid', 'ampl', 0), distr='Constant')
+    DDD.setPrior(key=('Citric acid', 'ampl', 0), distr='Constant')
+    DDD.setCrntVal(key=('Malic acid', 'ampl', 0), val=0.0)
+    DDD.setCrntVal(key=('Citric acid', 'ampl', 0), val=0.0)
+
+    # Optimize global chemical shift
+    DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'chsh', 0), ('Water-SPSY1', 'chshQD', 0)])
+
+    # Optimize the peak width
+    DDD.optimize(frqBlkIds=[1], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
+    # DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'alph', 0), ('Water-SPSY1', 'alphQD', 0)])
+
+    DDD.optimize(frqBlkIds=[1], parsKeys=[('Sugars', 'chsh', 0)], nhop=5)
+    DDD.optimize(frqBlkIds=[1], parsKeys=[('Water-SPSY1', 'chshQD', 0)])
+    DDD.optimize(frqBlkIds=[1], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
+
+    # Correct the phasing
+    DDD.setPrior(key=('.', 'theta', 0), distr='Constant')
+    DDD.adjust_phase(mw=512, mode='PhA')
+
+    DDD.addFreqBlock(lims=(3.1, 4.3), bslnOrder=(1,0))      # Add new frequency block
+    DDD.setPrior(key=('Water', 'ampl', 0), distr='Constant')
+    DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'chsh', 0)])
+    DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'alph', 0)])
+
+    # Optimize the acids
+    DDD.addFreqBlock(lims=(2.4, 3.1), bslnOrder=(0,0))      # Add new frequency block
+    DDD.setPrior(key=('Malic acid', 'ampl', 0), distr='Gaussian')
+    DDD.setPrior(key=('Citric acid', 'ampl', 0), distr='Gaussian')
+    DDD.setPrior(key=('Sucrose', 'ampl', 0), distr='Constant')
+    DDD.setPrior(key=('Fructose', 'ampl', 0), distr='Constant')
+    DDD.setPrior(key=('Glucose', 'ampl', 0), distr='Constant')
+
+    DDD.optimize(frqBlkIds=[3], parsKeys=[('Acids', 'chsh', 0)], nhop=5)
+    DDD.optimize(frqBlkIds=[3], parsKeys=[('Acids', 'alph', 0)])
+    DDD.optimize(frqBlkIds=[3], parsKeys=[('Malic acid', 'chsh', 0), ('Citric acid', 'chsh', 0)], nhop=5)
+    DDD.optimize(frqBlkIds=[3], parsKeys=[('Acids', 'alph', 0)])
+    DDD.setPrior(key=('Malic acid', 'ampl', 0), distr='Constant')
+    DDD.setPrior(key=('Citric acid', 'ampl', 0), distr='Constant')
+
+    val, meta = DDD.evaluate(frqBlkIds=[2, 3], autoKeys=[], returnSignals=True)
+
+    # # Check if the solution is in H2O
+    # val, meta = DDD.evaluate(frqBlkIds=[1], returnSignals=True)
+    # ampl = meta['ampl'][0]
+    # if ampl[0] / sum(ampl) > 0.95:
+    #     DDD.addFreqBlock(lims=(3.1, 4.2))      # Add new frequency block
+    #
+    #     DDD.optimize(frqBlkIds=[2], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
+    #     DDD.optimize(frqBlkIds=[2], parsKeys=[('Water-SPSY1', 'chshQD', 0)])
+    #     DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'chsh', 0)])
+    #     DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'alph', 0)])
+    #
+    #     val, meta = DDD.evaluate(frqBlkIds=[2], returnSignals=True)
+
+
+    # ------------------------- Output the results -----------------------------
+
+    # val, meta = DDD.evaluate(frqBlkIds=[2, 3], returnSignals=True)
+    data = {'names': DDD.repRootNames,
+            'intns': meta['ampl'][0],
+            'image': get_figure(DDD, residual=opts.residual),
+            'path': os.path.abspath(opts.directory),
+            'acqu': acquScore,
+            'timeSaved': pars['timeSaved'],
+            'score': DDD.goodness_of_fit(frqBlkIds=[2])}
+    report(data)
+
+    print('\nDONE!')
 
     # Wait for an input
     # print( CALLED_PATH)
@@ -141,7 +184,7 @@ def main(cmdline=None):
 def get_figure(DDD, residual=False):
     # Plot the signals and save the figure to a temporary fill
     if residual:
-        fig, ax = plt.subplots(2, 1, figsize=(13, 7), sharex=True)
+        fig, ax = plt.subplots(2, 1, figsize=(13, 7), sharex=True, sharey=True)
         f, yFph, xF, _ = DDD.plot(ax_main=ax[0], ax_residual=ax[1], showRanges=None, showComponents=True, returnSignals=True)
 
         # Scale the displayed range to the sugars region
@@ -173,20 +216,66 @@ def get_figure(DDD, residual=False):
 def report(data):
     """Generates a pdf report with the results."""
 
+    class OKCircle(Flowable):
+        """
+        Circle flowable --- draws a circle of a specifci color in a flowable
+        """
+        #----------------------------------------------------------------------
+        def __init__(self, size=4, score=0.5):
+            Flowable.__init__(self)
+            self.size = size
+            if score > 0.9:
+                self.color = (0.0, 0.66, 0.35)
+            elif score < 0.25:
+                self.color = (0.93, 0.195, 0.215)
+            else:
+                self.color = (0.95, 0.52, 0.20)
+        #----------------------------------------------------------------------
+        def __repr__(self):
+            return "Circle"
+        #----------------------------------------------------------------------
+        def draw(self):
+            """
+            draw the circle
+            """
+            self.canv.setFillColorRGB(*self.color)
+            self.canv.circle(0, 5, self.size, stroke=0, fill=1)
+
     Story=[]
 
-    doc = SimpleDocTemplate(os.path.join(CALLED_PATH, "results.pdf"),
+    fileName = os.path.join(CALLED_PATH, "results_{:s}.pdf".format(time.strftime('%d%m%Y_%H%M%S')))
+    doc = SimpleDocTemplate(fileName,
                             rightMargin=72,leftMargin=72,
                             topMargin=72,bottomMargin=18)
     stylesheet=getSampleStyleSheet()
 
-    formatted_time = time.ctime()
-    ptext = '<font size=10>{:s}</font>'.format(formatted_time)
-    Story.append(Paragraph(ptext, stylesheet['Normal']))
+    ptext = '<font size=14>{:s}</font>'.format('qNMR Analysis of a Fruit Juice Sample')
+    Story.append(Paragraph(ptext, stylesheet['Title']))
+    Story.append(Spacer(1, 24))
+
+    tab = []
+    tab.append(['Data directory:', '{:s}'.format(data['path'])])
+    tab.append(['Acquisition time:', '{:s}'.format(data['timeSaved'])])
+    tab.append(['Analysis time:', '{:s}'.format(time.ctime())])
+    tab.append(['Acquisition parameters:', OKCircle(score=data['acqu'])])
+    tab.append(['Residual after fit:', OKCircle(score=data['score'])])
+    tab = Table(tab, style=[('LEFTPADDING', (0,0), (1,4), 0), ('FONTSIZE', (0,0), (1,4), 9)], colWidths=(130, None) )
+    Story.append(tab)
     Story.append(Spacer(1, 12))
 
-    ptext = '<font size=10>{:s}</font>'.format(data['path'])
-    Story.append(Paragraph(ptext, stylesheet['Normal']))
+    # Insert the table
+    Story.append(Spacer(1, 18))
+    names, intns = data['names'], data['intns']
+    tab = [['', 'Intensity, a.u.', 'Mole frac., mol/mol', 'Absolute conc., g/L']]
+    total = sum([np.asscalar(intn) for name, intn in zip(names, intns) if name not in ['Water', 'Chloroform']])
+    mfracs = ['{:.3f}'.format(np.asscalar(intn)/total) if name not in ['Water', 'Chloroform'] else '' for name, intn in zip(names, intns)]
+    Mw = {'Fructose':180.156, 'Sucrose':342.30, 'Glucose':180.156, 'Citric acid':192.123, 'Malic acid':134.087, 'Water':18.01528}
+    I_H2O = np.asscalar(intns[names.index('Water')])
+    aconcs = ['{:.3f}'.format(np.asscalar(intn)*Mw[name]*1000/(I_H2O*Mw['Water'])) if name != 'Water' else '' for name, intn in zip(names, intns)]
+    for name, intn, mfrac, aconc in zip(names, intns, mfracs, aconcs):
+        tab.append([name, '{:.3f}'.format(np.asscalar(intn)), mfrac, aconc])
+    tab = Table(tab, style=[('LINEBELOW', (0,0), (3,0), 1, (0,0,0))], colWidths=None )
+    Story.append(tab)
     Story.append(Spacer(1, 12))
 
     # Insert the figure
@@ -198,22 +287,12 @@ def report(data):
     Story.append(Image(imgdata, width=450, height=height*450/width))
     Story.append(Spacer(1, 12))
 
-    # Insert the table
-    names, intns = data['names'], data['intns']
-    tab = [['', 'Intensity, a.u.', 'Mole frac., mol/mol']]
-    total = sum([np.asscalar(intn) for name, intn in zip(names, intns) if name not in ['Water', 'Chloroform']])
-    mfracs = ['{:.4f}'.format(np.asscalar(intn)/total) if name not in ['Water', 'Chloroform'] else '' for name, intn in zip(names, intns)]
-    for name, intn, mfrac in zip(names, intns, mfracs):
-        tab.append([name, '{:.4f}'.format(np.asscalar(intn)), mfrac])
-    tab = Table(tab, style=[('LINEBELOW', (0,0), (2,0), 1, (0,0,0))] )
-    Story.append(tab)
-    Story.append(Spacer(1, 12))
-
     # ptext = '<font size=12>Thank you very much and we look forward to serving you.</font>'
     # Story.append(Paragraph(ptext, stylesheet['Normal']))
 
-
     doc.build(Story)
+
+    subprocess.Popen(fileName,shell=True)
 
 def make_parser():
     """Construct an option parser"""
@@ -257,7 +336,7 @@ def make_parser():
 
     parser.set_defaults(verbose=False,
                         createRDSIndex=False,
-                        directory=os.path.join( SCRIPT_PATH, 'data\\1'),
+                        directory=os.path.join( SCRIPT_PATH, 'data\\juice'),   #Juices\\S13.35_Orange_small\\001-cold'),
                         residual=False,
                         error=None,
                         make_template=False,

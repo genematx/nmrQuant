@@ -49,7 +49,9 @@ def as_dict():
             'SAMPL_funcType' : SAMPL_funcType,
             'SAMPL_numberField' : SAMPL_numberField,
 
-            'MODEL_ShapeKernelSize' : MODEL_ShapeKernelSize}
+            'MODEL_ShapeKernelSize' : MODEL_ShapeKernelSize,
+
+            'DISPL_ShiftToReference' : DISPL_ShiftToReference}
 
 def from_dict(self, D):
     for key, val in D.items():
@@ -73,6 +75,8 @@ def from_dict(self, D):
             self.SAMPL_numberField = val
         elif key == 'MODEL_ShapeKernelSize':
             self.MODEL_ShapeKernelSize = val
+        elif key == 'DISPL_ShiftToReference':
+            self.DISPL_ShiftToReference = val
 
 def reset():
     pass

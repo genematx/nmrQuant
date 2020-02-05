@@ -525,7 +525,8 @@ class Workspace():
                                                     'sF' : dat.sF,
                                                     'sT' : dat.sT,
                                                     'jointPrior' : dat._joint,
-                                                    'refChshKey' : dat.refChshKey
+                                                    'refChshKey' : dat.refChshKey,
+                                                    'adaptiveFreqFlag' : dat.adaptiveFreqFlag
                                                     })
 
         return result
@@ -586,6 +587,8 @@ class Workspace():
                     newDatum.setReferenceChshKey(dat['refChshKey'])
                 if 'jointPrior' in dat.keys():
                     newDatum.setJointPrior(dat['jointPrior'])
+                if 'adaptiveFreqFlag' in dat.keys():
+                    newDatum.setadaptiveFreqFlag(dat['adaptiveFreqFlag'])
 
         if lshapeOrder is None: self.set_lshapeOrder(2)
 
@@ -1197,6 +1200,7 @@ class Datum():
         self.pckdPeaks = []
         self.refChshKey = None           # A key of the chemical shift that will be used as a reference (will be set to its default value and the rest of the spectrum shifted accordingly)
         self._joint = None            # A joint prior of all parameters
+        self.adaptiveFreqFlag = (len(self.yT) > 2**16)
         self.fullReset(crntParsH, priors)
 
     # @profile
@@ -1243,7 +1247,7 @@ class Datum():
                 if sum(self.xFph.ravel().real) < 0:
                     self.xFph = -1 * self.xFph
 
-    def resetSignals(self, adaptive=False):
+    def resetSignals(self):
         self._f = None
         self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
         self.zF = None        # A matrix of component signals
@@ -1252,7 +1256,7 @@ class Datum():
         self.sF, self.sT = None, None        # A lineshape kernel
         self.Gz = None
 
-        if adaptive or len(self.yF > 2**15):
+        if self.adaptiveFreqFlag:
             # Sample more densely around the peaks
             yFabs = np.abs(self.yF)
 
@@ -1260,6 +1264,7 @@ class Datum():
             yFconv = scipy.signal.fftconvolve(yFabs, np.ones((n, 1))/n, mode='same')
             yFnorm = (yFconv - yFconv.min()) / (yFconv.max() - yFconv.min())
 
+            # Compute a score for each sample 0 <= score <= 1
             # def score_fun(x):
             #     """A sigmoid-like function. Takes a number in the range 0<=x<=1 and outputs a score that determines whether this number should be kept in the subsampled array."""
             #     return np.where(x>0.1, 1.0, x*10.0)
@@ -1269,6 +1274,10 @@ class Datum():
             indx = np.where(np.random.random((len(yFscore), 1)) < yFscore)[0]       # indx = np.sort(np.random.randint(0, len(yFabs), 2**15))
             self._f = self.parent.f[indx, :].reshape(-1,1)
             self.yF = self.yF[indx, :].reshape(-1,1)
+
+    def setadaptiveFreqFlag(self, flag=True):
+        self.adaptiveFreqFlag = flag
+        self.resetSignals()
 
     def resetCrntPars(self, crntParsH=None, priors=None):
         """Resets ALL current parameters."""
@@ -1832,22 +1841,28 @@ class Datum():
 
         return result, meta
 
-    def goodness_of_fit(self):
+    def goodness_of_fit(self, frqBlkIds=None):
         """Evaluates how well the model is fitted to the data on the scale from 0.0 (bad) to 1.0 (good)."""
         self.evaluate(autoKeys=[], returnSignals=True)
-        f, yFph, xF, _, bF = self.signals_for_plot()
+        f, yFph, xF, _, bF = self.signals_for_plot(frqBlkIds=frqBlkIds, onlyInRange=True)
+        rFabs = np.abs(yFph.real - xF.real)
+        yFabs = np.abs(yFph.real)
+        xFabs = np.abs(xF.real)
 
-        n = 128
-        weights = scipy.signal.fftconvolve(np.abs(xF-bF), np.ones((n, 1))/n, mode='same')
-        weights = (weights - weights.min())/(weights.max()-weights.min())
-        weights = np.where(weights > 0.2, 1.0, 0.0)
+        # print(yFabs.sum(), xFabs.sum(), rFabs.sum(), np.median(rFabs), np.max(rFabs))
 
-        score_before = np.abs( (yFph-bF)*weights ).max()
-        score_after = np.abs( (yFph-xF)*weights ).max()
+        score1 = np.abs(yFabs.sum()-xFabs.sum()) / yFabs.sum()
+        score2 = rFabs.sum() / yFabs.sum()
+        score3 = max(np.max(rFabs)-np.median(rFabs), 0.0) / np.median(rFabs)
 
-        # print(score_before, score_after)
+        # print(score1, score2, score3)
 
-        return 1.0
+        if score1 < 0.05 and score3 < 20.0:
+            return 1.0
+        elif 0.05 <= score1 and score1 < 0.2:
+            return 0.5
+        else:
+            return 0.0
 
     def auto_phase(self):
         """Run the autophasing algorithm."""
@@ -1895,7 +1910,7 @@ class Datum():
         self.setCrntVal(key = ('.', 'theta', 0), val = theta)
         self.setCrntVal(key = ('.', 'tau', 0), val = tau)
 
-    def adjust_phase(self, evalParsH=None, frqBlkIds=None, freqMask=None, mode='PhA', mw=512, cfun='LS', verbose=True):
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, freqMask=None, mode='PhA', mw=512, cfun='LS', nhop=0, verbose=True):
         """Phase correction by adjusting the residual.
         Inputs:
         mode - choose which phase parameters to adjust ('PhA', 'Ph0', 'Ph1')
@@ -1944,7 +1959,7 @@ class Datum():
             bounds, initVals = ((-0.5, 0.5), ), [0.0]
 
         # Call the optimization routine
-        res = self._optimize(costFuncOpti, bounds, initVals, nhop=0, respectBounds=False, verbose=verbose)
+        res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=False, verbose=verbose)
 
         # Interpret the results
         if mode == 'PhA':
@@ -2250,7 +2265,7 @@ class Datum():
 
         # Plot the model components
         if showComponents and zF is not None:
-            zF = (zF + 1*bF)
+            zF = (zF + 0*bF)
             for i, node in enumerate(self.repRootNames):
                 ax_main.plot(f, zF[:, i].real if real else zF[:, i].imag, '-', linewidth=0.5, color=config.colrseq[i], label=node)
 
@@ -2260,9 +2275,9 @@ class Datum():
 
             # Plot the residuals
             if ax_residual is not None:
-                rF = (yF - xF).real if real else (yF - xF).imag
+                rF = (yFph - xF).real if real else (yFph - xF).imag
                 ax_residual.plot(f, rF, '-', color='darkkhaki')
-                rmsResidual += np.sqrt(np.nanmean(np.abs(rF)**2))
+                # rmsResidual += np.sqrt(np.nanmean(np.abs(rF)**2))
 
         # Show the residuals plot below the graph
         # Set ticks and labels
@@ -2272,9 +2287,9 @@ class Datum():
         if ax_residual is not None:
             ax_residual.ticklabel_format(scilimits=(-3,3))
             ax_residual.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-            # Show RMS of the residual
-            ax_residual.text(0.01, 0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
-                        horizontalalignment='left', verticalalignment='top', transform = ax_residual.transAxes)
+            # # Show RMS of the residual
+            # ax_residual.text(0.01, 0.92, "RMS = {:.4g}".format(rmsResidual), fontsize=10,
+            #             horizontalalignment='left', verticalalignment='top', transform = ax_residual.transAxes)
         else:
             ax_main.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
 
@@ -2296,13 +2311,16 @@ class Datum():
 
         if returnSignals: return f, yFph, xF, zF
 
-    def signals_for_plot(self, showComponents=False):
+    def signals_for_plot(self, frqBlkIds=None, showComponents=False, onlyInRange=False):
         """Computes the signals for plotting. Applies subsampling to the parts of the signals that are out ouf the fitting ranges."""
 
         minmaxTuple = namedtuple('minmaxTuple', 'min, max')
         minmaxTuple.__new__.__defaults__ = (-np.inf, np.inf)
         minmaxTuple.imin = lambda self, f : np.searchsorted(f.ravel(), self.min)
         minmaxTuple.imax = lambda self, f : np.searchsorted(f.ravel(), self.max)
+
+        if frqBlkIds is None:
+            frqBlkIds = self.steps[0].frqBlkIds
 
         def splitFreq(inRange):
             """Given a list of freqSpec tuples, divides the frequency range -inf to +inf into lists of disjoint intervals: inRange and outRange by merging overlapping optimization ranges."""
@@ -2362,8 +2380,8 @@ class Datum():
         yFph = self.yF * ph
 
         # Subsample out-of-range parts of the spectrum
-        inRange, outRange = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) \
-                                        for blk in self.steps[0].frqBlkIds ])
+        inRange, outRange = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
+        if onlyInRange: outRange.clear()
         dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
         f = self.f - dref_chsh
         rmsResidual = 0.0
@@ -2386,7 +2404,7 @@ class Datum():
         return f, yFph, xF, zF, bF
 
     def stems_for_plot(self):
-        """Computes all stem lines to be displayed on a plot. returns a list with each elemnet corresponding to a dictionary for a specific reported node."""
+        """Computes all stem lines to be displayed on a plot. The result is a list of dictionaries with number of elements == number of reported nodes. In each dictionary: key - (name, chshQD, i), val - a tuple, (chshQD, list of stems chsh for the specific chshQD, list of corresponding stems intensities)."""
 
         allStems = []     # Dictionary that stores references to all stem lines
         mdldPeaks = collectPeaks(self.T, self.c0, self.crntParsH)
@@ -2964,7 +2982,6 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
     # Remove the baseline with median filter
     res = nmrglue.process.proc_bl.med(den.ravel(), mw).reshape(-1,1)
     bln = (den - res).reshape(-1,1)
-    # print('here')
 
     # Compute the cost function
     if cfun == 'LS':

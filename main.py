@@ -7,7 +7,7 @@ from dataio import *
 import config
 
 from PyQt4 import QtGui, QtCore, uic
-from PyQt4.QtGui import QAction, QActionGroup, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QIcon, QInputDialog, QItemSelectionModel, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox, QSplitter, QStatusBar, QTableView, QTabWidget, QTableWidget, QToolButton, QTreeView, QToolBar, QWidget
+from PyQt4.QtGui import QAction, QActionGroup, QApplication, QBrush, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QIcon, QInputDialog, QItemSelectionModel, QItemDelegate, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QMainWindow, QPen, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget, QTableWidget, QToolButton, QTreeView, QToolBar, QWidget
 from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
@@ -38,7 +38,6 @@ pg.setConfigOption('foreground', 'k')
 # Enable antialiasing for prettier plots
 pg.setConfigOptions(antialias=True)
 
-#from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT
 from matplotlib.backend_bases import NavigationToolbar2
 try:
     import matplotlib.backends.qt_editor.figureoptions as figureoptions
@@ -733,11 +732,63 @@ class SpectrumPlotItem(pg.PlotItem):
     def resizeEvent(self, evt):
         super().resizeEvent(evt)
 
+class PlotStemsItem(pg.PlotCurveItem):
+    """Plotting group of stem lines with mouse interaction capabilities."""
+
+    sigStemsDragged = pyqtSignal(object, float)          # Emmited when the chemical shift key changes by the amount delta
+    sigStemsHovered = pyqtSignal(object, bool)                   # Key of the stems that are hovered over
+    sigStemsClicked = pyqtSignal(object)                 # Key of the stems that are clicked
+
+    def __init__(self, key, chsh_0, chsh_stems, intn_stems, color, *args, **kwargs):
+
+        self.key = key
+        self.x_stem = np.repeat(chsh_stems, 2)
+        self.y_stem = np.dstack((np.zeros(len(intn_stems)), intn_stems)).flatten()
+        self.chsh_0 = chsh_0
+        super().__init__(x=self.x_stem, y=self.y_stem,
+                         connect='pairs', pen={'color':color, 'width':1}, *kwargs)
+        self.setAcceptHoverEvents(True)
+
+    def mouseClickEvent(self, ev):
+        if ev.button() != QtCore.Qt.LeftButton:
+            return
+        if self.mouseShape().contains(ev.pos()):
+            ev.accept()
+            self.sigStemsClicked.emit(self.key)
+
+    def mouseDragEvent(self, evt):
+        evt.accept()
+        # print('Dragging in PlotStemsItem')
+
+        # Main movement
+        delta_chsh = evt.pos().x() - evt.buttonDownPos().x()
+        self.setData(x=self.x_stem+delta_chsh, y=self.y_stem)
+
+        # End of the event
+        if evt.isFinish():
+            self.x_stem += delta_chsh
+            self.chsh_0 += delta_chsh
+            self.sigStemsDragged.emit(self.key, delta_chsh)
+
+    def hoverEnterEvent(self, evt):
+        # ev.accept()
+        # print('Hovering into PlotStemsItem', key)
+        self.setPen(color=self.opts['pen'].color(), width=2)
+        self.sigStemsHovered.emit(self.key, True)
+
+    def hoverLeaveEvent(self, evt):
+        # ev.accept()
+        # print('Leaving PlotStemsItem', key)
+        self.setPen(color=self.opts['pen'].color(), width=1)
+        self.sigStemsHovered.emit(self.key, False)
+
 class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
     sigFreqRangeChanged = pyqtSignal(int, object)      # Emmited if ranges of a FreqBlock change (indx, lims)
     sigFreqRangeSelected = pyqtSignal(object)          # Boundaries of the new selection (lims)
     sigMouseClicked = pyqtSignal(object)               # Returns the position where the click has occured in the main view (x value is in ppm)
+    sigStemsClicked = pyqtSignal(object)
+    sigStemsDragged = pyqtSignal(object, float)
 
     def __init__(self, parent=None, title=None):
         super().__init__(parent)
@@ -747,10 +798,11 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self._xF = None
         self._yF = None
         self._zF = []
-        self._stems = []
+        self._stems = {}
         self._freqBlocks = []         # List of linearRegionItems that indicate the frequency blocks
 
         self._selector_flag = False
+        self._stemDragging_flag = False
 
         # Create the main plot for the spectrum
         p0 = SpectrumPlotItem()
@@ -777,6 +829,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         p0.scene().addItem(self.p0r)
         p0.getAxis('right').linkToView(self.p0r)
         self.p0r.setXLink(p0)
+        self.p0r.setMouseEnabled(y=False)
 
         # Handle view resizing
         def updateViews():
@@ -881,6 +934,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         pz.setLimits(xMin=min(f), xMax=max(f))
         pz.setDownsampling(ds=len(f)/250, auto=False, mode='peak')
         self.lr_zoom.setBounds([f.min(), f.max()])
+        self.p0r.setLimits(xMin=min(f), xMax=max(f))
 
         # Plot the experimental spectrum yF
         self._yF = p0.plot(f, yF.ravel().real, pen={'color': colrseq[0], 'width': 2})
@@ -905,13 +959,24 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
         # Plot the stem lines
         if stems is not None:
-            self._stems = [None]*len(stems)
+            self._stems.clear()
             for i, st in enumerate(stems):
-                scale = np.concatenate([np.array(val[2]) for _, val in st.items()]).max()
+                # Loop over the reported nodes
+                scale = np.concatenate([np.array(val[2]) for _, val in st.items()]).max()    # To scale the inensities
                 for key, val in st.items():
+                    chsh_origin = val[0]
                     chsh_stems=np.array(val[1])
                     intn_stems=np.array(val[2])/scale
-                    self._stems[i] = self.p0r.addItem(pg.PlotCurveItem(x=np.repeat(chsh_stems, 2), y=np.dstack((np.zeros(len(intn_stems)), intn_stems)).flatten(), connect='pairs', pen={'color':colrseq[i+2], 'width':1}))
+
+                    # Plot groups of stems as PlotCurveItems
+                    def setStemDraggingFlag(flag):
+                        self._stemDragging_flag = flag
+
+                    self._stems[key] = PlotStemsItem(key, chsh_origin, chsh_stems, intn_stems, colrseq[i+2])
+                    self._stems[key].sigStemsHovered.connect(lambda key, flag : setStemDraggingFlag(flag))
+                    self._stems[key].sigStemsClicked.connect(lambda key : self.sigStemsClicked.emit(key))     # Aggregate all clicekd signals fom various stems into a single signal emitted from the MainSpectrumWidget
+                    self._stems[key].sigStemsDragged.connect(lambda key, delta : self.sigStemsDragged.emit(key, delta))
+                    self.p0r.addItem( self._stems[key] )
 
         self.updatePlot()
 
@@ -1039,11 +1104,12 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
     def _onMouseDragEvent(self, evt, axis=None):
         """To be used instead the mouseDragEvent method in a viewBox. Draws a linear region."""
         global lr_sel           # Selector linear region
+        # print('Dragging in vb')
 
         vb = self.getItem(0,0).vb
 
-        # Select new freq range
         if self._selector_flag and (evt.button() == QtCore.Qt.LeftButton):   # and (ev.modifiers() & QtCore.Qt.ControlModifier):
+            # Adding a new frequency range
             evt.accept()
 
             # Start of the event
@@ -1060,6 +1126,9 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
                 self.sigFreqRangeSelected.emit(lr_sel.getRegion())
                 vb.removeItem(lr_sel)
                 self.setCursor(mode='normal')
+        elif self._stemDragging_flag:
+            # Dragging a group of stems. Will be handled by the corresponding PlotStemsItem
+            pass
         else:
             pg.ViewBox.mouseDragEvent(vb, evt, axis)       # Use the standard method
 
@@ -1804,6 +1873,31 @@ class NavigationTreeView(QTreeView):
         # Show the menu
         popMenu.popup(self.viewport().mapToGlobal(pos))
 
+class NavigationTreeDelegate(QItemDelegate):
+
+    def __init__(self, parent=None, *args):
+        super().__init__(parent, *args)
+
+    def paint(self, painter, option, index):
+        painter.save()
+
+        # set background color
+        painter.setPen(QPen(Qt.NoPen))
+        if option.state & QStyle.State_Selected:
+            painter.setBrush(QBrush(Qt.red))
+        else:
+            painter.setBrush(QBrush(Qt.white))
+        painter.drawRect(option.rect)
+
+        # set text color
+        painter.setPen(QPen(Qt.black))
+        value = index.data(Qt.DisplayRole)
+        if value:
+            text = value
+            painter.drawText(option.rect, Qt.AlignLeft, text)
+
+        painter.restore()
+
 def getParsTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
     """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
     P = viewNode(T.name, nodeType='chemNodeDB' if isinstance(T, chemNodeDB) else 'chemNode')
@@ -1964,8 +2058,12 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.resetLshapeTree(flag=False)
         self.endResetModel()
 
-    def notifyDataChanged(self):
-        self.dataChanged.emit(self._indxRoot, self._indxRoot)     # Update the entire tree
+    def notifyDataChanged(self, index=None):
+        """Update the entire tree (if index is None); otherwise, only update the row at index."""
+        index_start = self.index(index.row(), 0, self.parent(index)) if index is not None else self._indxRoot
+        index_stop = self.index(index.row(), self.columnCount(self.parent(index)), self.parent(index)) if index is not None else self._indxRoot
+
+        self.dataChanged.emit(index_start, index_stop)     # Update the entire tree
 
     def onHeaderSectionPressed(self, clmn):
         """Is called when a user selects a new column. Connected to the slot"""
@@ -3025,9 +3123,23 @@ class ChemTreeView(QTreeView):
 
     def selectPickedParameter(self, stemKey):
         """Selects an active paramter for a picked peak."""
-        key = (stemKey[:stemKey.rfind('-')]+'-SPSY'+stemKey[stemKey.rfind('-')+1:stemKey.rfind('.')], 'chshQD', int(stemKey[stemKey.rfind('.')+1:])-1)
-        index = self.model().indexByKey(key)
+        index = self.model().indexByKey(stemKey)
         self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows)
+
+    def updateValue(self, stemKey, delta=0.0):
+        """Updates the curreent value at key by changing it by the amount delta. Used with the stem dragging functions."""
+        # Highlight the changing chemical shift in the tree
+        self.selectPickedParameter(stemKey)
+
+        # Update the value
+        val = self.model().datum.getCrntVal(stemKey)
+        self.model().datum.setCrntVal(stemKey, val + delta)
+        self.model().notifyDataChanged()
+
+        # Emit the signal to recompute the model
+        self.model().crntChanged.emit()
+
+
 
 class PeakPickingWidget(QWidget):
 
@@ -3521,8 +3633,6 @@ class PeakPickingWidget(QWidget):
 
         self.sliderThresh.blockSignals(False)
 
-#PhasingForm, PhasingFormBC = uic.loadUiType("qtFormPhasingWidget.ui")    # Load the predesigned PhasingWidget Form
-
 class PhasingWidget(QWidget):
     """A widget that contains scrollers/buttons for phasing and that interacts with a matplotlib canvas to plot the results."""
 
@@ -3719,13 +3829,12 @@ class PhasingWidget(QWidget):
     def phasingComplete(self):
         print("Phasing complete:", self.p0deg, self.p1deg)
         theta, tau = self.deg2tau(self.p0deg, self.p1deg)
-        self.phased.emit(theta, tau)
-        # self.phased.emit(self.p0deg, self.p1deg)
+        self.phased.emit(theta, tau) # self.phased.emit(self.p0deg, self.p1deg)
 
 class PreprocessingWidget(QWidget):
     """Handles basic preprocessing operations, e.g. zero-filling and apodization."""
 
-    parsChanged = pyqtSignal(int, float)
+    parsChanged = pyqtSignal(int, float, bool)
 
     class N2SpinBox(QSpinBox):
 
@@ -3741,10 +3850,14 @@ class PreprocessingWidget(QWidget):
         self.editNZF.editingFinished.connect(self.onParsChanged)
         self.editApod = MyDoubleEdit()
         self.editApod.valueChanged.connect(self.onParsChanged)
+        self.chkboxadaptiveFreqFlags = QCheckBox('Adaptive frequency scale')
+        self.chkboxadaptiveFreqFlags.toggled.connect(self.onParsChanged)
+
 
         formLayout = QFormLayout()
         formLayout.addRow("Zero-filling", self.editNZF)
         formLayout.addRow("Line-broadening", self.editApod)
+        formLayout.addRow(self.chkboxadaptiveFreqFlags)
         self.setLayout(formLayout)
 
         self.setMaximumWidth(300)
@@ -3757,10 +3870,10 @@ class PreprocessingWidget(QWidget):
 
         self._resetting = True
         try:
-            self.datum = datum
             self.editNZF.setMinimum(self.datum.t.size)
             self.editNZF.setValue(self.datum.f.size)
             self.editApod.setValue(self.datum.apod)
+            self.chkboxadaptiveFreqFlags.setChecked(self.datum.adaptiveFreqFlags)
         except AttributeError:
             pass
         self._resetting = False
@@ -3768,7 +3881,7 @@ class PreprocessingWidget(QWidget):
     def onParsChanged(self):
         """Updates the settings (linebroadening, zero-filling, etc.)"""
         if not self._resetting:
-            self.parsChanged.emit(self.editNZF.value(), self.editApod.value())
+            self.parsChanged.emit(self.editNZF.value(), self.editApod.value(), self.chkboxadaptiveFreqFlags.isChecked())
 
 class ParameterDisplayWidget(QWidget):
     """A widget to display, modify, and sample parameters"""
@@ -3892,7 +4005,6 @@ class FittingThread(QThread):
                         self.fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
                     elif indx == 'Lor':
                         # Reset the lineshape to the default (Lorentzian)
-                        print('here')
                         self.fileToFit.reset_shape()
                         self.fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
 
@@ -4016,13 +4128,6 @@ class MainView(QMainWindow):
         #             rectprops=dict(alpha=0.15, facecolor='red'))     # set useblit True on gtkagg for enhanced performance
         #self.freqLBoundarySelector.active = False
 
-        # ----------------- Spectrum figure in pyqtgraph -----------------------
-        self.mainFigureWidget = MainSpectrumWidget()
-        self.mainFigureWidget.sigFreqRangeSelected.connect(self.onFreqRangeSelected)
-        self.mainFigureWidget.sigFreqRangeChanged.connect(self.onFreqRangeChanged)
-        self.mainFigureWidget.sigMouseClicked.connect(self.onMouseClicked)
-        self.mainFigureWidget.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
-
         # ------------------- Printout for the console -------------------------
         self.printoutEdit = QPlainTextEdit()
         self.printoutEdit.setReadOnly(True)
@@ -4045,6 +4150,15 @@ class MainView(QMainWindow):
         self.stepsEdit = QPlainTextEdit('Please enter a sequence of steps to fit. All steps will be fitted consecutively by default.')  # , e.g.: 1, A, 5, (3, 4, A, 1), 2
         self.stepsEdit.setMaximumHeight(50)
 
+        # ----------------- Spectrum figure in pyqtgraph -----------------------
+        self.mainFigureWidget = MainSpectrumWidget()
+        self.mainFigureWidget.sigFreqRangeSelected.connect(self.onFreqRangeSelected)
+        self.mainFigureWidget.sigFreqRangeChanged.connect(self.onFreqRangeChanged)
+        self.mainFigureWidget.sigMouseClicked.connect(self.onMouseClicked)
+        self.mainFigureWidget.sigStemsClicked.connect(self.treeView.selectPickedParameter)
+        self.mainFigureWidget.sigStemsDragged.connect(self.treeView.updateValue)
+        self.mainFigureWidget.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+
         # Create the parameters tab
         tabParam = QWidget()
         layParam = QVBoxLayout()
@@ -4062,6 +4176,8 @@ class MainView(QMainWindow):
         self.naviSelection = QItemSelectionModel(self.naviTreeModel)
         self.naviTreeView.setModel(self.naviTreeModel)
         self.naviTreeView.setSelectionModel(self.naviSelection)
+        # self.naviTreeDelegate = NavigationTreeDelegate()
+        # self.naviTreeView.setItemDelegate(self.naviTreeDelegate)
         self.naviSelection.currentChanged.connect(self.onCurrentSelectedChanged)
         self.naviTreeView.requestPasteCrnt.connect(self.treeView.pasteCrntPars)     # Paste copied parameter values to all selected Datums in the naviTreeView
         self.naviTreeView.requestPasteDflt.connect(self.treeView.pasteDfltPars)
@@ -4101,6 +4217,7 @@ class MainView(QMainWindow):
         # --------------- Left --------------------
         widgetLeft = QWidget()
         widgetLeft.setMinimumSize(200, 0)
+        widgetLeft.setMaximumWidth(250)
         # set up the tabs
         tabsLeft = QTabWidget()
         tabsLeft.setTabPosition(QTabWidget.North)
@@ -4124,7 +4241,7 @@ class MainView(QMainWindow):
 
         # --------------- Right -------------------
         widgetRight = QTabWidget()
-        widgetRight.setMinimumSize(300, 0)
+        widgetRight.setMinimumSize(320, 0)
         widgetRight.setTabPosition(QTabWidget.North)
         widgetRight.addTab(tabParam, 'Parameters')
 
@@ -4133,6 +4250,9 @@ class MainView(QMainWindow):
         mainSplitter.addWidget(widgetLeft)
         mainSplitter.addWidget(widgetCenter)
         mainSplitter.addWidget(widgetRight)
+        mainSplitter.setStretchFactor(0, 1)
+        mainSplitter.setStretchFactor(1, 3)
+        mainSplitter.setStretchFactor(2, 1)
         # mainSplitter.setHandleWidth(1)
 
         # Set the result in the center of the form
@@ -4371,9 +4491,6 @@ class MainView(QMainWindow):
 
             self.actnGroupFreqBlocks._previuosAction = None
 
-    def freqBlockChangedInTable(self, indx):
-        print('Frequency block changed in table', indx)
-
     def onFreqRangeControl(self, actn):
         """Called when the action group of freqRange controls is triggered"""
         if self.actnGroupFreqBlocks._previuosAction == actn:
@@ -4570,8 +4687,9 @@ class MainView(QMainWindow):
             config.from_dict(config, stngConfig)
         self.actnToggleTLS.setChecked(config.SAMPL_funcType == 'TLS')
 
-    def resetSignals(self, nf, apod):
+    def resetSignals(self, nf, apod, adaptiveFreqFlag):
         self._crnt.resetFreqs(nf, apod)
+        self._crnt.setadaptiveFreqFlag(adaptiveFreqFlag)
         self.plotCurrent()
 
     def onPhased(self, theta, tau):
@@ -5061,13 +5179,6 @@ class MainView(QMainWindow):
         """Show or hide the residual plot."""
         self.mainFigureWidget.showResidual(flag=self.actnToggleResid.isChecked())
 
-    def onStemPick(self, event):
-        """Called on picking event; selects the corresponding row in chem tree."""
-        for k, v in self.allStems.items():
-            if event.artist in v[1]:
-                self.treeView.selectPickedParameter(k)
-                self.selectStems(k)
-
     def selectStems(self, key):
         """Shows which stems are affected when a new row is selected in the tree."""
         if self.actnToggleStems.isChecked():
@@ -5119,8 +5230,15 @@ class MainView(QMainWindow):
         if sum(cnct) != 0:
             cnct = cnct / sum(cnct)
         labels = [d[1] for d in data]
-        self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
-        self.ax_pie.axis('equal')
+        self.ax_pie.bar(np.arange(len(labels)), cnct, tick_label=labels, align='center',
+            color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm']])
+        self.ax_pie.set_xticklabels(labels, rotation='vertical')
+        # wedges, texts, autotexts = self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
+        # self.ax_pie.legend(wedges, labels,
+        #   loc="bottom",
+        #   bbox_to_anchor=(0, 0.1, 0.5, 1))
+        # self.ax_pie.axis('equal')
+
         self.pieCanvas.draw()
 
 # --------------------- Adding and removing frequency blocks -------------------
