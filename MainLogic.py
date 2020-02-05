@@ -502,7 +502,6 @@ class Workspace():
                                     'f0' : ser.f0,
                                     'nt' : len(ser.t),
                                     'dt' : ser.t[1]-ser.t[0] if len(ser.t) > 1 else 0.0,
-                                    'nf' : len(ser.f),
                                     'steps' : ser.steps,
                                     'freqBlocks' : [blk.pars() for blk in ser.freqBlocks],
                                     'parsSpecDict' : ser.parsSpecDict,
@@ -511,6 +510,7 @@ class Workspace():
                                     'meta_function' : ser._meta,
                                     'jointPrior' : ser._joint,
                                     'apod' : ser.apod,
+                                    'zff' : ser.zff,
                                     'data' : []})
             for dat in ser.data:
                 result['series'][-1]['data'].append({
@@ -526,7 +526,7 @@ class Workspace():
                                                     'sT' : dat.sT,
                                                     'jointPrior' : dat._joint,
                                                     'refChshKey' : dat.refChshKey,
-                                                    'adaptiveFreqFlag' : dat.adaptiveFreqFlag
+                                                    'flagAdapFreq' : dat._flagAdapFreq
                                                     })
 
         return result
@@ -547,10 +547,11 @@ class Workspace():
         #self.repRootNames = [node.name for node in self.T.repRoots()]    # Need to set the repRootNames before to refer to them later in the _updateParameters function
         self.setTree(T, packed['parsSpecDict'])
         for ser in packed['series']:
-            t = np.linspace(0, ser['dt']*(ser['nt']-1), ser['nt']).reshape(-1, 1)
-            newSeries = self.addSeries(name=ser['name'], c0=ser['c0'], f0=ser['f0'],
-                                    t=t, nf=ser['nf'], apod=ser['apod'],
-                                    priors=ser['parsSpecDict'])
+            ser['t'] = np.linspace(0, ser['dt']*(ser['nt']-1), ser['nt']).reshape(-1, 1)
+            newSeries = self.addSeries(**ser)
+            # newSeries = self.addSeries(name=ser['name'], c0=ser['c0'], f0=ser['f0'],
+            #                         t=t, apod=ser['apod'], zff=ser['zff'] if 'zff' in ser.keys() else 0,
+            #                         priors=ser['parsSpecDict'])
             for blk in ser['freqBlocks']:
                 if blk.min == -np.inf and blk.max == np.inf:
                     newSeries.altFreqBlock(indx=0, bslnOrder=blk.bslnOrder)      # Set the order of baseline for the All frequencies block
@@ -575,8 +576,9 @@ class Workspace():
                 except AttributeError: pass
                 newSeries.steps.append(newStep)
             for dat in ser['data']:
-                newDatum= newSeries.addDatum(dat['yT'], name=dat['name'], arrVal=dat['arrVal'],   #/np.linalg.norm(dat['yT'])
-                                    crntParsH=dat['crntParsH'], priors=dat['parsSpecDict'])
+                newDatum = newSeries.addDatum(**dat)
+                # newDatum = newSeries.addDatum(dat['yT'], name=dat['name'], arrVal=dat['arrVal'],   #/np.linalg.norm(dat['yT'])
+                #                     crntParsH=dat['crntParsH'], priors=dat['parsSpecDict'])
                 newDatum.mdldPeaks = dat['mdldPeaks']
                 newDatum.pckdPeaks = dat['pckdPeaks']
                 newDatum.sF = dat['sF'] if 'sF' in dat.keys() else None
@@ -587,8 +589,6 @@ class Workspace():
                     newDatum.setReferenceChshKey(dat['refChshKey'])
                 if 'jointPrior' in dat.keys():
                     newDatum.setJointPrior(dat['jointPrior'])
-                if 'adaptiveFreqFlag' in dat.keys():
-                    newDatum.setadaptiveFreqFlag(dat['adaptiveFreqFlag'])
 
         if lshapeOrder is None: self.set_lshapeOrder(2)
 
@@ -600,7 +600,7 @@ class Workspace():
 class Series():
     """Class for the data series (e.g. in reaction monitoring)."""
 
-    def __init__(self, parent, name = None, c0=None, f0=None, t=None, nf=None, apod=0, priors=None):
+    def __init__(self, parent, name = None, c0=None, f0=None, t=None, zff=0, apod=0, priors=None, **kwargs):
         self.parent = parent     # The workspace that contains the tree
         self.name = name if name is not None else 'Series ' + str(len(self.parent.series)+1)
         self.c0 = c0
@@ -611,12 +611,13 @@ class Series():
         self.steps = [Step(repRootNames=self.repRootNames)]               # Fitting steps; each entry is a set of parsKeys tuples and set of frqBlkIds
         self.freqBlocks = []         # a list of optimization frequency ranges
         self.apod = apod
+        self.zff = zff               # zero-filling factor (exponent of 2)
         self.wT = 1
         self.crntMetaF = dict()       # A dictionary of current values of meta-parameters
         self.smplDistF = dict()
         self._meta = None             # A function that chnages the Series parameters controlled by the meta-parameters
         self._joint = None
-        self.fullReset(nf, apod, priors)           # Setup the frequency range and compute the spectra
+        self.fullReset(zff, apod, priors)           # Setup the frequency range and compute the spectra
 
     def __getattr__(self, attr):
         """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
@@ -821,10 +822,16 @@ class Series():
 
         return DDD
 
-    def resetFreqs(self, nf=None, apod=None):
+    def resetFreqs(self, zff=None, apod=None):
         """Resets the frequency scale for the entire Series and computed spectra."""
-        if nf is None:
-            nf = next_pow_of_2(len(self.t))     # Determine the number of samples in the full signal spectrum (possibly including zero-filling)
+
+        # Reset the zero-filling factor if it has been supplied
+        if zff is None:
+            zff = self.zff
+        else:
+            self.zff = zff
+
+        nf = next_pow_of_2( 2**zff * len(self.t) )     # Determine the number of samples in the full signal spectrum (possibly including zero-filling)
 
         if nf > 0:
             dt = self.t[1]-self.t[0]
@@ -842,8 +849,8 @@ class Series():
             for D in self.data:
                 D.resetSignals()
 
-    def fullReset(self, nf=None, apod=None, priors=None):
-        self.resetFreqs(nf, apod)
+    def fullReset(self, zff=None, apod=None, priors=None):
+        self.resetFreqs(zff, apod)
         self.parsSpecDict = priors if priors is not None else {}
         self.crntMetaF.clear()
         self.remMetaFunction()
@@ -1187,7 +1194,7 @@ class Series():
 class Datum():
     """A single data instance. Contains signals of a single NMR experiment."""
 
-    def __init__(self, yT, parent, name='', arrVal=None, crntParsH=None, priors=None):
+    def __init__(self, yT, parent, name='', arrVal=None, crntParsH=None, flagAdapFreq=None, priors=None, **kwargs):
         self.name = name
         self.parent = parent               # A series object that will contain this Datum
         self._f = None                     # Subsampled (adaptive) array of frequencies
@@ -1200,7 +1207,7 @@ class Datum():
         self.pckdPeaks = []
         self.refChshKey = None           # A key of the chemical shift that will be used as a reference (will be set to its default value and the rest of the spectrum shifted accordingly)
         self._joint = None            # A joint prior of all parameters
-        self.adaptiveFreqFlag = (len(self.yT) > 2**16)
+        self._flagAdapFreq = flagAdapFreq if flagAdapFreq is not None else (len(self.yT) > 2**16)
         self.fullReset(crntParsH, priors)
 
     # @profile
@@ -1226,28 +1233,32 @@ class Datum():
 
     def update(self):
             """Computes the spectral representation of the signal yT and updates the class parameters."""
-            nf = len(self.f)
+            # nf = len(self.f)
+            #
+            # # Compute the spectrum of the input signal if necessary
+            # if self.yF is None:
+            #     self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, nf, axis=0), axes=0) / np.sqrt(nf)
+            #
+            # # Compute (possibly new) phasing terms
+            # ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape((-1,1))
+            #
+            # # Get the data spectrum
+            # self.yFph = self.yF * ph
+            # if np.mean(self.yFph.ravel().real) < np.median(self.yFph.ravel().real):   # If the distribution is skewed to the left; i.e. only a few points are less than the most of them #sum(yFph.ravel().real) < 0:
+            #     self.yFph = -1 * self.yFph
+            #
+            # # Still need the model spectrum if the evaluation was in time domain (xT is known but xFph is not)
+            # if self.xFph is None and self.xT is not None:
+            #     xF = np.fft.fftshift(np.fft.fft(self.xT * self.wT, nf, axis=0), axes=0) / np.sqrt(nf)
+            #     self.xFph = self.xF * ph
+            #     if sum(self.xFph.ravel().real) < 0:
+            #         self.xFph = -1 * self.xFph
+            raise RuntimeError      # This method to be deprecated
 
-            # Compute the spectrum of the input signal if necessary
-            if self.yF is None:
-                self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, nf, axis=0), axes=0) / np.sqrt(nf)
+    def isAdapFreq(self):
+        return self._flagAdapFreq
 
-            # Compute (possibly new) phasing terms
-            ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape((-1,1))
-
-            # Get the data spectrum
-            self.yFph = self.yF * ph
-            if np.mean(self.yFph.ravel().real) < np.median(self.yFph.ravel().real):   # If the distribution is skewed to the left; i.e. only a few points are less than the most of them #sum(yFph.ravel().real) < 0:
-                self.yFph = -1 * self.yFph
-
-            # Still need the model spectrum if the evaluation was in time domain (xT is known but xFph is not)
-            if self.xFph is None and self.xT is not None:
-                xF = np.fft.fftshift(np.fft.fft(self.xT * self.wT, nf, axis=0), axes=0) / np.sqrt(nf)
-                self.xFph = self.xF * ph
-                if sum(self.xFph.ravel().real) < 0:
-                    self.xFph = -1 * self.xFph
-
-    def resetSignals(self):
+    def resetSignals(self, flagAdapFreq=None):
         self._f = None
         self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
         self.zF = None        # A matrix of component signals
@@ -1256,7 +1267,11 @@ class Datum():
         self.sF, self.sT = None, None        # A lineshape kernel
         self.Gz = None
 
-        if self.adaptiveFreqFlag:
+        # Reset the adaptive frequencies flag, if supplied
+        if flagAdapFreq is not None:
+            self._flagAdapFreq = flagAdapFreq
+
+        if self._flagAdapFreq:
             # Sample more densely around the peaks
             yFabs = np.abs(self.yF)
 
@@ -1274,10 +1289,6 @@ class Datum():
             indx = np.where(np.random.random((len(yFscore), 1)) < yFscore)[0]       # indx = np.sort(np.random.randint(0, len(yFabs), 2**15))
             self._f = self.parent.f[indx, :].reshape(-1,1)
             self.yF = self.yF[indx, :].reshape(-1,1)
-
-    def setadaptiveFreqFlag(self, flag=True):
-        self.adaptiveFreqFlag = flag
-        self.resetSignals()
 
     def resetCrntPars(self, crntParsH=None, priors=None):
         """Resets ALL current parameters."""
@@ -1297,8 +1308,8 @@ class Datum():
         self.mdldPeaks.clear()
         self.pckdPeaks.clear()
 
-    def fullReset(self, crntParsH=None, priors=None):
-        self.resetSignals()
+    def fullReset(self, crntParsH=None, priors=None, flagAdapFreq=None):
+        self.resetSignals(flagAdapFreq)
         self.resetCrntPars(crntParsH, priors)
 
     def alignToSolventPeak(self, chshTo=4.75):
@@ -2475,6 +2486,14 @@ class Datum():
                    self.crntParsH[keys[1][0]][keys[1][1]][keys[1][2]])
 
         return (x_arr, y_arr), llkl_arr, lpri_arr, lpst_arr, crntVal
+
+    def stats(self):
+        """Returns a dictionary of statistics about the Datum."""
+
+        return {'nT' : len(self.t),
+                'nF' : len(self.parent.f),
+                'nF_adap' : len(self.f),
+                'nF_opti' : sum( [len(self._get_indxFreq(i)) for i in self.steps[-1].frqBlkIds] )}   # Find the number of points in the active optimization ranges
 
 #### Utility functions #####
 

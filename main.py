@@ -156,324 +156,6 @@ class DraggableVSpan:
         self.vspan.figure.canvas.mpl_disconnect(self.cidrelease)
         self.vspan.figure.canvas.mpl_disconnect(self.cidmotion)
 
-class CustomToolbar(NavigationToolbar2, QToolBar):
-
-    def __init__(self, canvas, parent, coordinates=True):
-        """ coordinates: should we show the coordinates on the right? """
-        self.canvas = canvas
-        self.parent = parent
-        self.coordinates = coordinates
-        self._actions = {}    # A mapping of toolitem method names to their QActions
-
-        self.toolitems = (
-            ('Home', 'Reset original view', 'home', 'home'),
-            ('Pan', 'Pan axes with left mouse, zoom with right', 'move', 'pan'),
-            ('Zoom', 'Zoom to rectangle', 'zoom_to_rect', 'zoom'),
-            (None, None, None, None),
-            #('My action', 'Description of my action', 'icon_import', 'doSomething'),        # text, tooltip_text, image_file, callback
-            ('ReduceRange', 'Reduce the frequency range', 'reduce_range', 'reduceRange'),
-            ('AddRange', 'Add optimization range', 'add_range', 'addRange'),
-            ('RemoveRange', 'Remove optimization range', 'remove_range', 'remRange'),
-            ('ShowStems', 'Show models for all chemical species', 'show_all_chems', 'showStems'),
-            ('showComps', 'Show computed model components', 'show_components', 'showStems'),
-            ('PlotResidual', 'Plot residual', 'plot_residual', 'showStems'),
-            (None, None, None, None),
-            #('Subplots', 'Configure subplots', 'subplots', 'configure_subplots'),
-            ('Save', 'Save the current image', 'icon_saveImage', 'save_figure'),
-            )
-
-        QToolBar.__init__(self, parent)
-        NavigationToolbar2.__init__(self, canvas)
-
-    def _icon(self, name):
-        """Use the _icon function from the main form."""
-        return self.parent._icon(name)
-
-    def _init_toolbar(self):
-        self.basedir = path.join(rcParams['datapath'], 'images')
-
-        for text, tooltip_text, image_file, callback in self.toolitems:
-            if text is None:
-                self.addSeparator()
-            elif text == 'ShowStems':
-                self.addAction(self.parent.actnToggleStems)
-            elif text == 'showComps':
-                self.addAction(self.parent.actnToggleComps)
-            elif text == 'PlotResidual':
-                self.addAction(self.parent.actnToggleResid)
-            else:
-                a = self.addAction(self._icon(image_file + '.png'),
-                                         text, getattr(self, callback))
-                self._actions[callback] = a
-                if callback in ['zoom', 'pan', 'addRange', 'remRange', 'reduceRange']:
-                    a.setCheckable(True)
-                if tooltip_text is not None:
-                    a.setToolTip(tooltip_text)
-
-        if figureoptions is not None:
-            a = self.addAction(self._icon("qt4_editor_options.png"),
-                               'Customize', self.edit_parameters)
-            a.setToolTip('Edit curves line and axes parameters')
-
-        self.buttons = {}
-
-        # Add the x,y location widget at the right side of the toolbar
-        # The stretch factor is 1 which means any resizing of the toolbar
-        # will resize this label instead of the buttons.
-        if self.coordinates:
-            self.locLabel = QLabel("", self)
-            self.locLabel.setAlignment(
-                    Qt.AlignRight | Qt.AlignTop)
-            self.locLabel.setSizePolicy(
-                QSizePolicy(QQSizePolicy.Expanding,
-                                  QSizePolicy.Ignored))
-            labelAction = self.addWidget(self.locLabel)
-            labelAction.setVisible(True)
-
-        # reference holder for subplots_adjust window
-        self.adj_window = None
-
-    if figureoptions is not None:
-        def edit_parameters(self):
-            allaxes = self.canvas.figure.get_axes()
-            if len(allaxes) == 1:
-                axes = allaxes[0]
-            else:
-                titles = []
-                for axes in allaxes:
-                    title = axes.get_title()
-                    ylabel = axes.get_ylabel()
-                    label = axes.get_label()
-                    if title:
-                        fmt = "%(title)s"
-                        if ylabel:
-                            fmt += ": %(ylabel)s"
-                        fmt += " (%(axes_repr)s)"
-                    elif ylabel:
-                        fmt = "%(axes_repr)s (%(ylabel)s)"
-                    elif label:
-                        fmt = "%(axes_repr)s (%(label)s)"
-                    else:
-                        fmt = "%(axes_repr)s"
-                    titles.append(fmt % dict(title=title,
-                                         ylabel=ylabel, label=label,
-                                         axes_repr=repr(axes)))
-                item, ok = QInputDialog.getItem(
-                    self.parent, 'Customize', 'Select axes:', titles, 0, False)
-                if ok:
-                    axes = allaxes[titles.index(six.text_type(item))]
-                else:
-                    return
-
-            figureoptions.figure_edit(axes, self)
-
-    def _update_buttons_checked(self):
-        # sync button checkstates to match active mode
-        self._actions['pan'].setChecked(self._active == 'PAN')
-        self._actions['zoom'].setChecked(self._active == 'ZOOM')
-        self._actions['addRange'].setChecked(self._active == 'ADDRANGE')
-        self._actions['remRange'].setChecked(self._active == 'REMRANGE')
-        self._actions['reduceRange'].setChecked(self._active == 'REDUCERANGE')
-
-    def home(self):
-        """Subclassed home button. Resets the ranges to the best view."""
-        axes = self.canvas.figure.get_axes()   # Get the main axes
-        for ax in axes:
-            if ax.get_visible():
-                ax.relim()    # recompute the ax.dataLim
-                ax.margins(0, 0.05)    # x and y margins in percentages
-                ax.autoscale()    # update ax.viewLim using the new dataLim
-        self.canvas.draw()
-
-    def pan(self, *args):
-        super(CustomToolbar, self).pan(*args)
-        self.parent.freqBlocksSelector.active = False
-        self._update_buttons_checked()
-
-    def zoom(self, *args):
-        super(CustomToolbar, self).zoom(*args)
-        self.parent.freqBlocksSelector.active = False
-        self._update_buttons_checked()
-
-    def dynamic_update(self):
-        self.canvas.draw()
-
-    def _set_cursor(self, event):
-        # from backend_bases.NavigationToolbar2
-        if not event.inaxes or not self._active:
-            if self._lastCursor != cursors.POINTER:
-                self.set_cursor(cursors.POINTER)
-                self._lastCursor = cursors.POINTER
-        else:
-            if self._active == 'ZOOM':
-                if self._lastCursor != cursors.SELECT_REGION:
-                    self.set_cursor(cursors.SELECT_REGION)
-                    self._lastCursor = cursors.SELECT_REGION
-            elif (self._active == 'PAN' and
-                  self._lastCursor != cursors.MOVE):
-                self.set_cursor(cursors.MOVE)
-                self._lastCursor = cursors.MOVE
-            elif (self._active == 'ADDRANGE' and
-                  self._lastCursor != cursors.HAND):
-                self.set_cursor(cursors.HAND)
-                self._lastCursor = cursors.HAND
-            elif (self._active == 'REMRANGE' and
-                  self._lastCursor != cursors.HAND):
-                self.set_cursor(cursors.HAND)
-                self._lastCursor = cursors.HAND
-
-    def set_cursor(self, cursor):
-        self.canvas.setCursor(cursord[cursor])
-
-    def draw_rubberband(self, event, x0, y0, x1, y1):
-        height = self.canvas.figure.bbox.height
-        y1 = height - y1
-        y0 = height - y0
-
-        w = abs(x1 - x0)
-        h = abs(y1 - y0)
-
-        rect = [int(val)for val in (min(x0, x1), min(y0, y1), w, h)]
-        self.canvas.drawRectangle(rect)
-
-    def save_figure(self, *args):
-        filetypes = self.canvas.get_supported_filetypes_grouped()
-        sorted_filetypes = list(six.iteritems(filetypes))
-        sorted_filetypes.sort()
-        default_filetype = self.canvas.get_default_filetype()
-
-        startpath = rcParams.get('savefig.directory', '')
-        startpath = path.expanduser(startpath)
-        start = path.join(startpath, self.canvas.get_default_filename())
-        filters = []
-        for name, exts in sorted_filetypes:
-            exts_list = " ".join(['*.%s' % ext for ext in exts])
-            filter = '%s (%s)' % (name, exts_list)
-            if default_filetype in exts:
-                selectedFilter = filter
-            filters.append(filter)
-        filters = ';;'.join(filters)
-
-        fname = QFileDialog.getSaveFileName(parent=self.parent,
-                                         caption="Choose a filename to save to", directory=start, filter=filters)
-        if fname:
-            if startpath == '':
-                # explicitly missing key or empty str signals to use cwd
-                rcParams['savefig.directory'] = startpath
-            else:
-                # save dir for next time
-                savefig_dir = path.dirname(six.text_type(fname))
-                rcParams['savefig.directory'] = savefig_dir
-            try:
-                #self.canvas.savefig(six.text_type(fname), format='eps', dpi=1200)
-                fontSizeBefore = rcParams['font.size']
-                rcParams['font.size'] = 18
-                self.canvas.print_figure(six.text_type(fname))
-                rcParams['font.size'] = fontSizeBefore
-                self.canvas.draw()
-            except Exception as e:
-                QMessageBox.critical(
-                    self, "Error saving file", str(e),
-                    QMessageBox.Ok, QMessageBox.NoButton)
-
-    def reduceRange(self):
-        """Activate the reduction of the spectrum size mode."""
-        if self._active == 'REDUCERANGE':
-            self._active = None       # Unclick
-        else:
-            self._active = 'REDUCERANGE'
-            # Turn off previous mode (zoom, pan, or add_range)
-            self.canvas.widgetlock.release(self)
-        for a in self.canvas.figure.get_axes():
-            a.set_navigate_mode(None)
-
-        #Deactivate previous mode (zoom/pan/add/remrange)
-        if self._idPress is not None:
-            self._idPress = self.canvas.mpl_disconnect(self._idPress)
-            self.mode = ''
-
-        if self._idRelease is not None:
-            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
-            self.mode = ''
-
-        #Deactivate the frequency range selector
-        self.parent.freqBlocksSelector.active = False
-
-        if self._active:
-            self.mode = 'reduce range'
-            print(self.parent.reduceRange())
-        else:
-            self.mode = ''
-
-        self._update_buttons_checked()
-
-    def addRange(self):
-        """Activate the adding a new range mode."""
-        if self._active == 'ADDRANGE':
-            self._active = None
-        else:
-            self._active = 'ADDRANGE'
-            # Turn off previous mode (zoom or pan)
-            self.canvas.widgetlock.release(self)
-        for a in self.canvas.figure.get_axes():
-            a.set_navigate_mode(None)
-
-        """Deactivate previous mode (zoom/pan)"""
-        if self._idPress is not None:
-            self._idPress = self.canvas.mpl_disconnect(self._idPress)
-            self.mode = ''
-
-        if self._idRelease is not None:
-            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
-            self.mode = ''
-
-        if self._active:
-            #self._idPress = self.canvas.mpl_connect('button_press_event',
-            #                                        self.press_zoom)
-            #self._idRelease = self.canvas.mpl_connect('button_release_event',
-            #                                          self.release_zoom)
-            self.parent.freqBlocksSelector.active = True
-            self.mode = 'add range'
-        else:
-            self.parent.freqBlocksSelector.active = False
-            self.mode = ''
-
-        self._update_buttons_checked()
-
-    def remRange(self):
-        """Removes an optimization range by clicking on it."""
-        if self._active == 'REMRANGE':
-            self._active = None
-        else:
-            self._active = 'REMRANGE'
-            self.canvas.widgetlock.release(self)            # Turn off previous mode (zoom or pan)
-            self.parent.freqBlocksSelector.active = False    # Deactivate the range adding mode
-        for a in self.canvas.figure.get_axes():
-            a.set_navigate_mode(None)
-
-        """Deactivate previous mode (zoom/pan)"""
-        if self._idPress is not None:
-            self._idPress = self.canvas.mpl_disconnect(self._idPress)
-            self.mode = ''
-
-        if self._idRelease is not None:
-            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
-            self.mode = ''
-
-        if self._active:
-            self._idPress = self.canvas.mpl_connect('button_press_event',
-                                                    self.parent.remFreqBlock)
-            #self._idRelease = self.canvas.mpl_connect('button_release_event',
-            #                                          self.release_zoom)
-            self.mode = 'remove range'
-        else:
-            self.mode = ''
-
-        self._update_buttons_checked()
-
-    def showStems(self):
-        print("This is my action in the toolbar.")
-
 class CfunPopup(QWidget):
     """Popup window that shows the objective function"""
     def __init__(self, cfun):
@@ -1041,6 +723,9 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
     def updFreqRange(self, indx, lims=None, active=None):
         """Updates the limits and color of the frequency range indx."""
 
+        if self._freqBlocks[indx][0] is None:
+            return
+
         if lims is not None:
             self._freqBlocks[indx][0].setRegion(lims)      # This will automatically update all three linear ranges
 
@@ -1049,6 +734,10 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
     def fillFreqRange(self, indx, color):
         """Changes the color for frequency range."""
+
+        if self._freqBlocks[indx][0] is None:
+            return
+
         for lr in self._freqBlocks[indx]:
             lr.setBrush(color)
 
@@ -1435,6 +1124,7 @@ class FreqTableModel(QtCore.QAbstractTableModel):
                     for step in self.datum.steps:
                         step.frqBlkIds.add(row-1)
                 self.dataChanged.emit(self.index(0,0), self.index(self.rowCount(), 0))
+                self.freqBlockChanged.emit(row-1)
                 return True
 
         return False
@@ -1778,6 +1468,23 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         #index = self.naviTreeModel.index(ser_indx, 0, None)    # Index corresponding to the Series to which the Datum will be added
         #self.naviSelection.setCurrentIndex(index, QItemSelectionModel.Select)
 
+    def indexByKey(self, key=(None, None)):
+        """Retuens the index of an item (Datum or Series) given its selfID."""
+        if key[1] is not None:
+            # A Datum
+            row = key[1]
+            item = self.wsp.series[key[0]].data[row]
+        elif key[0] is not None:
+            # A Series
+            row = key[0]
+            item = self.wsp.series[row]
+        else:
+            row = 0
+            item = self.wsp
+
+        column = 0
+        return self.createIndex(row, column, item)
+
     def remItems(self, items):
         """Removes a Series or a Datum"""
         for item in items:
@@ -1872,6 +1579,12 @@ class NavigationTreeView(QTreeView):
 
         # Show the menu
         popMenu.popup(self.viewport().mapToGlobal(pos))
+
+    def selectCurrentDatum(self, key=(None, None)):
+        """Highlights the current Datum or Series."""
+        # print('Selecting ', key)
+        index = self.model().indexByKey(key)
+        self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows)
 
 class NavigationTreeDelegate(QItemDelegate):
 
@@ -3139,8 +2852,6 @@ class ChemTreeView(QTreeView):
         # Emit the signal to recompute the model
         self.model().crntChanged.emit()
 
-
-
 class PeakPickingWidget(QWidget):
 
     RANGE_MAX = 64
@@ -3563,27 +3274,6 @@ class PeakPickingWidget(QWidget):
         self.ax[1].set_ylim(settings["ax1Limits"]["ylim"])     # Set the saved limits
         self.ax[1].set_navigate(False)
 
-        """if checked:
-            # Plot stem diagrams
-            self._T.findRoot().propPoles()     # Propagate all poles
-            for i, node in enumerate(self._T.repRoots()):
-                for j, leaf in enumerate(node.leaves()):
-                    if leaf.uPoles.size > 0:
-                        markerline, stemlines, baseline = self.ax[1].stem(leaf.uPoles.imag/(stepClass.c0*np.pi*2), leaf.qPolesIntn*leaf.intn, basefmt=" ")     # , label=node.name if j==0 else ''
-                        plt.setp(stemlines, linewidth=1, color=config.colrseq[i], picker = 2)    # Picking tolerance in px
-                        plt.setp(markerline, markerfacecolor = config.colrseq[i], linestyle='None', color=config.colrseq[i], markersize=2)      # , picker=self.onStemPick
-                        self.allStems[leaf.name] = (markerline, stemlines)
-            self.ax[1].set_xlim(settings['ax1Limits']['xlim'])     # Set the saved limits
-            self.ax[1].set_ylim(settings['ax1Limits']['ylim'])     # Set the saved limits
-            self.ax[1].set_navigate(False)
-            self.ax[1].legend(loc=0)
-            # Connect events
-            self.cidScroll = self.canvas.mpl_connect('scroll_event', self.onSpectrumZoom)
-            self.cidPick = self.canvas.mpl_connect('pick_event', self.onStemPick)
-        elif self.cidScroll and self.cidPick:
-            self.canvas.mpl_disconnect(self.cidScroll)
-            self.canvas.mpl_disconnect(self.cidPick)"""
-
         self.canvas.draw()
 
     def manuPick(self):
@@ -3834,54 +3524,70 @@ class PhasingWidget(QWidget):
 class PreprocessingWidget(QWidget):
     """Handles basic preprocessing operations, e.g. zero-filling and apodization."""
 
-    parsChanged = pyqtSignal(int, float, bool)
+    parsChanged = pyqtSignal(object)          # A dictionary of changed parameters (keys: zff, apod, flagAdapFreq)
 
-    class N2SpinBox(QSpinBox):
-
-        def __init__(self, parent=None):
-            super().__init__(parent)
-            self.setMaximum(2**17)
-
-    def __init__(self, datum, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         # Add widgets for entering parameters
         self._resetting = False
-        self.editNZF = self.N2SpinBox()
-        self.editNZF.editingFinished.connect(self.onParsChanged)
+        self.editNZF = QSpinBox()
+        self.editNZF.setMinimum(0)
+        self.editNZF.editingFinished.connect( lambda : self.onParsChanged( key='zff' ) )
         self.editApod = MyDoubleEdit()
-        self.editApod.valueChanged.connect(self.onParsChanged)
+        self.editApod.valueChanged.connect( lambda : self.onParsChanged( key='apod' ) )
         self.chkboxadaptiveFreqFlags = QCheckBox('Adaptive frequency scale')
-        self.chkboxadaptiveFreqFlags.toggled.connect(self.onParsChanged)
+        self.chkboxadaptiveFreqFlags.toggled.connect( lambda : self.onParsChanged( key='flagAdapFreq' ) )
+        self.lbl_numTimePoints = QLabel('')
+        self.lbl_numFreqPoints = QLabel('')
+        self.lbl_numOptimRange = QLabel('')
 
 
         formLayout = QFormLayout()
-        formLayout.addRow("Zero-filling", self.editNZF)
+        formLayout.addRow("Zero-filling factor", self.editNZF)
         formLayout.addRow("Line-broadening", self.editApod)
         formLayout.addRow(self.chkboxadaptiveFreqFlags)
+        formLayout.addRow(self.lbl_numTimePoints)
+        formLayout.addRow(self.lbl_numFreqPoints)
+        formLayout.addRow(self.lbl_numOptimRange)
         self.setLayout(formLayout)
 
         self.setMaximumWidth(300)
         #self.setLayout(layout)
 
-        # Set the current datum and update the widgets
-        self.setNewDatum(datum)
-
-    def setNewDatum(self, datum):
+    def setNewDatum(self, dat=None):
 
         self._resetting = True
-        try:
-            self.editNZF.setMinimum(self.datum.t.size)
-            self.editNZF.setValue(self.datum.f.size)
-            self.editApod.setValue(self.datum.apod)
-            self.chkboxadaptiveFreqFlags.setChecked(self.datum.adaptiveFreqFlags)
-        except AttributeError:
-            pass
+
+        if isinstance(dat, Datum):
+            stats = dat.stats()
+            self.editNZF.setValue(dat.zff)
+            self.editApod.setValue(dat.apod)
+            self.chkboxadaptiveFreqFlags.setChecked(dat.isAdapFreq())
+            self.lbl_numTimePoints.setText('Original FID size: {:d}'.format(stats['nT']))
+            self.lbl_numFreqPoints.setText('Spectrum size: {:d}'.format(stats['nF']) if stats['nF_adap'] == stats['nF']
+                                            else 'Spectrum size: {:d} ({:d})'.format(stats['nF'], stats['nF_adap']))
+            self.lbl_numOptimRange.setText('Optimization range: {:d} ({:.0f}%)'.format(stats['nF_opti'], 100*stats['nF_opti']/stats['nF']))
+        else:
+            self.editNZF.setValue(0)
+            self.editApod.setValue(0)
+            self.chkboxadaptiveFreqFlags.setChecked(False)
+            self.lbl_numTimePoints.setText('')
+            self.lbl_numFreqPoints.setText('')
+            self.lbl_numOptimRange.setText('')
+
         self._resetting = False
 
-    def onParsChanged(self):
+    def onParsChanged(self, key):
         """Updates the settings (linebroadening, zero-filling, etc.)"""
         if not self._resetting:
-            self.parsChanged.emit(self.editNZF.value(), self.editApod.value(), self.chkboxadaptiveFreqFlags.isChecked())
+            if key == 'zff':
+                val = self.editNZF.value()
+            elif key == 'apod':
+                val = self.editApod.value()
+            elif key == 'flagAdapFreq':
+                val = self.chkboxadaptiveFreqFlags.isChecked()
+
+            self.parsChanged.emit( {key : val} )
 
 class ParameterDisplayWidget(QWidget):
     """A widget to display, modify, and sample parameters"""
@@ -4188,6 +3894,8 @@ class MainView(QMainWindow):
         layNavi = QVBoxLayout()
         tabNavi.setLayout(layNavi)
         layNavi.addWidget(self.naviTreeView)
+        layNavi.addWidget(self.pieCanvas)
+        layNavi.setContentsMargins(1,1,1,1)
 
 
         # ----------------------------------------------------------------------
@@ -4200,8 +3908,8 @@ class MainView(QMainWindow):
         self.freqTableModel.freqBlockChanged.connect(self.updFreqBlock)
 
         # Add the preprocessing parameters tool
-        self.preprocTool = PreprocessingWidget(self._crnt)
-        self.preprocTool.parsChanged.connect(self.resetSignals)
+        self.preprocTool = PreprocessingWidget()
+        self.preprocTool.parsChanged.connect(lambda x : self.resetSignals(**x))
         self.phasingTool = PhasingWidget(self._crnt, self.canvas, orientation='Horizontal') # set to 'Horizontal' if displayed on the right
         self.phasingTool.phased.connect(self.onPhased)
 
@@ -4215,21 +3923,14 @@ class MainView(QMainWindow):
         self.setupActions()
 
         # --------------- Left --------------------
-        widgetLeft = QWidget()
+        widgetLeft = QTabWidget()
         widgetLeft.setMinimumSize(200, 0)
         widgetLeft.setMaximumWidth(250)
         # set up the tabs
-        tabsLeft = QTabWidget()
-        tabsLeft.setTabPosition(QTabWidget.North)
-        tabsLeft.addTab(tabNavi, 'Navigation')
-        tabsLeft.addTab(tabSettings, 'Settings')
-        tabsLeft.setCurrentIndex(0)
-        # Put everything in the layout
-        layLeft = QVBoxLayout()
-        layLeft.addWidget(tabsLeft)
-        layLeft.addWidget(self.pieCanvas)
-        layLeft.setContentsMargins(1,1,1,1)
-        widgetLeft.setLayout(layLeft)
+        widgetLeft.setTabPosition(QTabWidget.North)
+        widgetLeft.addTab(tabNavi, 'Navigation')
+        widgetLeft.addTab(tabSettings, 'Settings')
+        widgetLeft.setCurrentIndex(0)
 
         # -------------- Center -------------------
         # spectrum on top and console on the bottom
@@ -4442,7 +4143,6 @@ class MainView(QMainWindow):
         tbMain.addAction(self.actnAutoPhase)
         tbMain.addAction(self.actnSetLshape)
         tbMain.addAction(self.actnResetLshape)
-        # self.addToolBar(CustomToolbar(self.canvas, self, coordinates=False))    # Figure toolbar
         tbTree = self.addToolBar("Tree")               # Tree toolbar
         tbTree.addAction(actnLoadTree)
         self.cmboxHCSelector = QComboBox()
@@ -4539,8 +4239,7 @@ class MainView(QMainWindow):
                 newCrnt = self.wsp.series[0].data[0]
             except IndexError:
                 newCrnt = self.wsp
-
-
+                return None
 
         # Compute the model signal if there is None
         try:
@@ -4552,21 +4251,14 @@ class MainView(QMainWindow):
             pass
 
         # Update the necessary display widgets
-        # TODO!
         self.treeModel.setNewDatum(newCrnt)
         self.freqTableModel.setNewDatum(newCrnt)
         self.preprocTool.setNewDatum(newCrnt)
         self.phasingTool.setNewDatum(newCrnt)
 
-        # TODO!
         # Highlight the current Datum in the Navigation widget if it was seletected programmatically
-        #ids = self._crnt.selfID()
-        #print(ids)
-        #ser_index = self.naviTreeModel.index(ids[0], 0, None)    # Index corresponding to the Series
-        #dat_index = self.naviTreeModel.index(ids[1], 0, ser_index)    # Index corresponding to the Datum
-        #self.naviSelection.setCurrentIndex(dat_index, QItemSelectionModel.Select)
+        self.naviTreeView.selectCurrentDatum(newCrnt.selfID())
 
-        settings["ax0Limits"] = None
         if isinstance(self._crnt, Datum) and isinstance(newCrnt, Datum) and self._crnt.parent == newCrnt.parent:
             resetView = False
         else: resetView = True
@@ -4687,9 +4379,14 @@ class MainView(QMainWindow):
             config.from_dict(config, stngConfig)
         self.actnToggleTLS.setChecked(config.SAMPL_funcType == 'TLS')
 
-    def resetSignals(self, nf, apod, adaptiveFreqFlag):
-        self._crnt.resetFreqs(nf, apod)
-        self._crnt.setadaptiveFreqFlag(adaptiveFreqFlag)
+    def resetSignals(self, zff=None, apod=None, flagAdapFreq=None):
+        self._crnt.resetFreqs(zff, apod)
+
+        if flagAdapFreq is not None:
+            for dat in self._crnt.parent.data:
+                dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
+
+        self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
         self.plotCurrent()
 
     def onPhased(self, theta, tau):
@@ -4747,7 +4444,7 @@ class MainView(QMainWindow):
         #     #self.pickingTool.assignPeaks()
 
         # Select which steps to fit
-        if stepIdsToFit is None: stepIdsToFit = [self.actvStepIndx]        # Fit the active step by default
+        if stepIdsToFit is None: stepIdsToFit = [self.treeModel.actvStepIndx]        # Fit the active step by default
 
         # Call the fitting thread
         self.fittingThread.setExitFlag(False)
@@ -4800,16 +4497,14 @@ class MainView(QMainWindow):
         self.treeModel.notifyDataChanged()
 
     def tryStep(self, indx=None):
-        if indx is None: indx = self.actvStepIndx        # Fit the active step by default
+        if indx is None: indx = self.treeModel.actvStepIndx        # Fit the active step by default
         step = self._crnt.steps[indx]
-        # if step.fitCustomLshape:
-        #     self._crnt.set_shape(frqBlkIds=step.frqBlkIds)
         self._crnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
         self.plotCurrent(autoRange=False)
         self.treeModel.notifyDataChanged()
 
     def sampleStep(self, indx=None, onlyAutoKeys=False):
-        if indx is None: indx = self.actvStepIndx        # Fit the active step by default
+        if indx is None: indx = self.treeModel.actvStepIndx        # Fit the active step by default
         step = self._crnt.steps[indx]
         samples = self._crnt.sample(frqBlkIds=step.frqBlkIds, parsKeys=None if onlyAutoKeys else step.parsKeys, autoKeys=step.autoKeys, evaluatePriors=True, nwalkers=None, nsteps=250)     # parsKeys=step.parsKeys
         reportMCMC(samples)
@@ -4822,7 +4517,7 @@ class MainView(QMainWindow):
 
         # Call the fitting function
         self.fittingQueue = [self._crnt]
-        self.fitQueue(stepIdsToFit = [indx] if indx is not None else [self.actvStepIndx])       # Fit the active step by default
+        self.fitQueue(stepIdsToFit = [indx] if indx is not None else [self.treeModel.actvStepIndx])       # Fit the active step by default
 
     def fitAllSteps(self, selectedFiles = None):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
@@ -4903,6 +4598,7 @@ class MainView(QMainWindow):
         except PermissionError:
             print('Can not save the results to file.')
         #print(tabulate.tabulate(tab[self._crnt.data.index(self._crnt)], headers=head))    # ... and show on the screen
+        pass
 
 # ------------------------ Parameter list --------------------------------------
     def updateParsList(self, indxStep = None):
@@ -5103,60 +4799,6 @@ class MainView(QMainWindow):
             print("Nothing to plot here.")
             return 0
 
-    def plotCurrent_old(self):
-        """Plots signals corresponding to the currently opened file and current parameters."""
-        # remember the axis settings
-        if settings["ax0Limits"] is not None:
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-        self.ax[0].clear()     # discards the old graph
-        self.ax[2].clear()     # discards the old residuals graph
-
-        if isinstance(self._crnt, Series):
-            pass
-        elif isinstance(self._crnt, Datum):
-            self._crnt.plot(ax_main=self.ax[0], ax_residual=self.ax[2] if self.actnToggleResid.isChecked() else None, \
-                            showRanges='all', showComps=self.actnToggleComps.isChecked(), showLegend=True)
-
-            # Show or hide stems depending on the state of the checkable action self.actnToggleStems
-            if self.actnToggleStems.isChecked():
-                self.showStems(True)
-
-            # Show the residuals plot below the graph and rearrange the canvas (resize the main plot)
-            if self.actnToggleResid.isChecked():
-                self.ax[2].set_visible(True)
-                self.ax[0].set_position(self.figureGrid[0].get_position(self.figure))
-                self.ax[1].set_position(self.figureGrid[0].get_position(self.figure))
-            else:
-                self.ax[2].set_visible(False)
-                self.ax[0].set_position(self.figureGrid[0:2].get_position(self.figure))
-                self.ax[1].set_position(self.figureGrid[0:2].get_position(self.figure))
-
-            self.ax[0].legend(loc=0)
-
-            # First try rescaling the graph
-            self.ax[0].relim()    # recompute the ax.dataLim
-            self.ax[0].margins(0, 0.05)    # x and y margins in percentages
-            self.ax[0].autoscale()    # update ax.viewLim using the new dataLim
-            new_ax0Limits = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-
-            # Set the updated limits
-            if settings["ax0Limits"] is not None:
-                self.ax[0].set_xlim(settings["ax0Limits"]["xlim"])
-                self.ax[0].set_ylim(settings["ax0Limits"]["ylim"])
-            else:
-                settings["ax0Limits"] = new_ax0Limits   # {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-
-            self.figure.suptitle(str(self._crnt))
-
-            # Output the found results
-            self.plotPieChart()
-
-        else:
-            print("Nothing to plot here.")
-            return 0
-
-        self.canvas.draw()    # refresh canvas
-
     def toggleStems(self):
         """Plots stem lines to indicate modeled peaks."""
         try:
@@ -5197,29 +4839,6 @@ class MainView(QMainWindow):
             #     for stemline in v:
             #         plt.setp(stemline, linewidth = 2 if nameStem == k else 1)     # if nameStem is not None and nameStem in k
 
-    def onSpectrumZoom(self,event):
-        #self.canvas.setFocus()    # Need to set focus to be able to process keyboard events
-        # get the current x and y limits
-        cur_ylim = self.ax[1].get_ylim()
-        cur_yrange = (cur_ylim[1] - cur_ylim[0])*.5
-
-        # Set scale factor
-        base_scale = 1.6
-
-        if event.button == 'up':
-            # deal with zoom in
-            scale_factor = 1/base_scale
-        elif event.button == 'down':
-            # deal with zoom out
-            scale_factor = base_scale
-        else:
-            # deal with something that should never happen
-            scale_factor = 1
-
-        # set new limits
-        self.ax[1].set_ylim([0, cur_ylim[1]*scale_factor])
-        self.canvas.draw() # force re-draw
-
     def plotPieChart(self):
         """Plots a pie chart that represents the found component concentrations."""
         self.ax_pie.clear()
@@ -5248,15 +4867,18 @@ class MainView(QMainWindow):
         self.freqTableModel.addFreqBlock(xmin + dref_chsh, xmax + dref_chsh)
         self.mainFigureWidget.addFreqRange((xmin, xmax))
 
+        self.preprocTool.setNewDatum(self._crnt)
+
     def remFreqBlock(self, indx):
         """Removes a frequency block that covers a location xdata in ppm and updates the plot."""
-        # Find which block (if any) covers the passed location and which one to remove if there are multiple blocks. Event is a button_press_event passed from the canvas/CustomToolbar
+        # Find which block (if any) covers the passed location and which one to remove if there are multiple blocks.
         self.mainFigureWidget.remFreqRange(indx)
         self.freqTableModel.remFreqBlock(indx)
 
+        self.preprocTool.setNewDatum(self._crnt)
+
     def updFreqBlock(self, indx, lims=None, active=None):
         """Updates the ranges of a frequency block in the model."""
-        # print('Updating the freqBlok #{:d} with limits {}.'.format(indx, lims))
         if lims is None:
             lims = (self._crnt.freqBlocks[indx].min, self._crnt.freqBlocks[indx].max)
         if active is None:
@@ -5268,15 +4890,11 @@ class MainView(QMainWindow):
         self.freqTableModel.notifyDataChanged(indx)
         self.mainFigureWidget.updFreqRange( indx, lims, active )
 
+        self.preprocTool.setNewDatum(self._crnt)
+
     def reduceRange(self):
         """Selects and cuts a region of interest in the spectrum and adjusts the underlying data accordingly."""
         print('In reduce range')
-
-    def plotFreqRanges(self):
-        """Plots all frequency ranges"""
-
-    def plot(self):
-        self.ax[0].autoscale()
 
 
 
