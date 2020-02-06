@@ -4744,7 +4744,9 @@ class MainView(QMainWindow):
                 # Find which bar contains the event
                 for indx, patch in enumerate(bars.patches):
                     if patch.contains(evt)[0]:
-                        self.statusBar.showMessage('{:s}    {:.3g}%'.format(labels[indx], 100*cnct[indx]))
+                        newMessage = '{:s}    {:.3g}%'.format(labels[indx], 100*cnct[indx])
+                        if self.statusBar.currentMessage() != newMessage:
+                            self.statusBar.showMessage(newMessage)
                         return
 
             self.statusBar.clearMessage()
@@ -4767,7 +4769,10 @@ class MainView(QMainWindow):
         #   bbox_to_anchor=(0, 0.1, 0.5, 1))
         # self.ax_pie.axis('equal')
 
-        self.pieCanvas.mpl_connect("motion_notify_event", hover)
+        try:
+            self.pieCanvas.mpl_disconnect(self._cid_hover)
+        except AttributeError: pass
+        self._cid_hover = self.pieCanvas.mpl_connect("motion_notify_event", hover)
         self.pieCanvas.draw()
 
 
