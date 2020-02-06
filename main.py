@@ -3750,7 +3750,7 @@ class MainView(QMainWindow):
         BIGGER_SIZE = 14
 
         rc('font', size=SMALL_SIZE)          # controls default text sizes
-        #rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+        rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
         #rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
         #rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
         #rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
@@ -4753,7 +4753,6 @@ class MainView(QMainWindow):
 
         self.ax_pie.clear()
 
-        #if '.' in self._crnt.crntParsH.keys() and 'ampl' in self._crnt.crntParsH['.'].keys():
         data = [(self._crnt.crntParsH[lbl]['ampl'][0], str(self.wsp.T[lbl])) for lbl in self.wsp.repRootNames if lbl not in ['Water', 'Chlorophorm']]     # All concentrations expcept water, chlorophorm, etc...
         cnct = np.abs([d[0] for d in data])
         cnct = np.where(np.isnan(cnct), 0.0, cnct)
@@ -4762,7 +4761,9 @@ class MainView(QMainWindow):
         labels = [d[1] for d in data]
         bars = self.ax_pie.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
             color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm']])
-        self.ax_pie.set_xticklabels(labels, rotation='vertical')
+        self.ax_pie.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
+        ttl = self.ax_pie.set_title('Relative concentrations, %', fontsize=12)
+        ttl.set_position((0.5, 1.03))
         # wedges, texts, autotexts = self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
         # self.ax_pie.legend(wedges, labels,
         #   loc="bottom",
@@ -4774,7 +4775,6 @@ class MainView(QMainWindow):
         except AttributeError: pass
         self._cid_hover = self.pieCanvas.mpl_connect("motion_notify_event", hover)
         self.pieCanvas.draw()
-
 
 # --------------------- Adding and removing frequency blocks -------------------
     def addFreqBlock(self, xmin, xmax):
