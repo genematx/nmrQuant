@@ -1207,6 +1207,7 @@ class Datum():
         self.refChshKey = None           # A key of the chemical shift that will be used as a reference (will be set to its default value and the rest of the spectrum shifted accordingly)
         self._joint = None            # A joint prior of all parameters
         self._flagAdapFreq = flagAdapFreq if flagAdapFreq is not None else (len(self.yT) > 2**16)
+        self._gof = None              # Computed goodness of fit
         self.fullReset(crntParsH, priors)
 
     # @profile
@@ -1265,6 +1266,7 @@ class Datum():
         self.zF_corr, self.bF_corr = None, None           # Corrections for the model matrix and the baseline
         self.sF, self.sT = None, None        # A lineshape kernel
         self.Gz = None
+        self._gof = None
 
         # Reset the adaptive frequencies flag, if supplied
         if flagAdapFreq is not None:
@@ -1306,6 +1308,7 @@ class Datum():
         self.smplDistF.clear()          # A flat dictionary of sampled (or marginalized) parameters
         self.mdldPeaks.clear()
         self.pckdPeaks.clear()
+        self._gof = None
 
     def fullReset(self, crntParsH=None, priors=None, flagAdapFreq=None):
         self.resetSignals(flagAdapFreq)
@@ -1354,6 +1357,7 @@ class Datum():
             val = self.getPrior(key).dflt()
         self.crntParsH[key[0]][key[1]][key[2]] = float(val)
         self.smplDistF.clear()
+        self._gof = None           # Need to update the goodness of fit
 
     def getCrntVals(self, node_name=None):
         """Returns a flat dictionary of all parameters that affect nodes in the tree below and including the given node."""
@@ -1667,7 +1671,7 @@ class Datum():
         if returnSignals:
             # Save the estimated signals
             if inTimeDomain:
-                self.zF = np.fft.fftshift(np.fft.fft(zT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+                self.zF = np.fft.fftshift(np.fft.fft(Z, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
             else:
                 self.zF = np.zeros((len(self.f),na), dtype=complex)
                 self.zF[indxInRange,:] = zFinRange ### / Znrm[:, 0:na]
@@ -1726,8 +1730,11 @@ class Datum():
 
     def set_shape(self, frqBlkIds=None, wnd=None):
         """Sets the custom lineshape sF and sT."""
-        # TODO! Chech this function when using an adaptive frequency scale
+        # TODO! Check this function when using an adaptive frequency scale
+        if self.isAdapFreq():
+            raise RuntimeError('ACustom lineshapes are not supported with adaptive frequency scale.')
 
+        self._gof = None
         nt, nf = len(self.t), len(self.f)
         nw = config.MODEL_ShapeKernelSize         # Length of the adaptive lineshape window (in frequency domain)
         nw2 = int(nw/2)
@@ -1792,9 +1799,7 @@ class Datum():
         """Resets the custom lineshape to its default values (None)."""
         self.sT = None
         self.sF = None
-
-    def set_bline(self):
-        pass
+        self._gof = None
 
     def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False):
         """Evaluates the objective function (logLikelihood + sum of logPriors).
@@ -1853,26 +1858,30 @@ class Datum():
 
     def goodness_of_fit(self, frqBlkIds=None):
         """Evaluates how well the model is fitted to the data on the scale from 0.0 (bad) to 1.0 (good)."""
-        self.evaluate(autoKeys=[], returnSignals=True)
-        f, yFph, xF, _, bF = self.signals_for_plot(frqBlkIds=frqBlkIds, onlyInRange=True)
-        rFabs = np.abs(yFph.real - xF.real)
-        yFabs = np.abs(yFph.real)
-        xFabs = np.abs(xF.real)
+        if self._gof is None:
+            # print('Calculating GOF')
+            self.evaluate(autoKeys=[], returnSignals=True)
+            f, yFph, xF, _, bF = self.signals_for_plot(frqBlkIds=frqBlkIds, onlyInRange=True)
+            rFabs = np.abs(yFph.real - xF.real)
+            yFabs = np.abs(yFph.real)
+            xFabs = np.abs(xF.real)
 
-        # print(yFabs.sum(), xFabs.sum(), rFabs.sum(), np.median(rFabs), np.max(rFabs))
+            # print(yFabs.sum(), xFabs.sum(), rFabs.sum(), np.median(rFabs), np.max(rFabs))
 
-        score1 = np.abs(yFabs.sum()-xFabs.sum()) / yFabs.sum()
-        score2 = rFabs.sum() / yFabs.sum()
-        score3 = max(np.max(rFabs)-np.median(rFabs), 0.0) / np.median(rFabs)
+            score1 = np.abs(yFabs.sum()-xFabs.sum()) / yFabs.sum()
+            score2 = rFabs.sum() / yFabs.sum()
+            score3 = max(np.max(rFabs)-np.median(rFabs), 0.0) / np.median(rFabs)
 
-        # print(score1, score2, score3)
+            # print('GOF scores = ', score1, score2, score3)
 
-        if score1 < 0.05 and score3 < 20.0:
-            return 1.0
-        elif 0.05 <= score1 and score1 < 0.2:
-            return 0.5
-        else:
-            return 0.0
+            if score1 < 0.05 and score3 < 20.0:
+                self._gof = 1.0
+            elif 0.05 <= score1 and score1 < 0.2:
+                self._gof = 0.5
+            else:
+                self._gof = 0.0
+
+        return self._gof
 
     def auto_phase(self):
         """Run the autophasing algorithm."""
@@ -2401,16 +2410,16 @@ class Datum():
 
         f, yFph = f[allIndx, :], yFph[allIndx, :]
 
+        zF, xF, bF = None, None, None
         if self.zF is not None:
             ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(1, -1)
             zF = self.zF * ampl if self.zF_corr is None else (self.zF + self.zF_corr)*ampl
             xF = zF.sum(1).reshape(-1,1)
+            xF, zF = xF[allIndx, :], zF[allIndx, :]
             if self.bF is not None:
-                bF = self.bF if self.bF_corr is None else self.bF + self.bF_corr
+                bF = self.bF[allIndx, :] if self.bF_corr is None else self.bF[allIndx, :] + self.bF_corr[allIndx, :]
                 xF += bF
-            xF, zF, bF = xF[allIndx, :], zF[allIndx, :], bF[allIndx, :]
-        else: zF, xF, bF = None, None, None
-
+                
         return f, yFph, xF, zF, bF
 
     def stems_for_plot(self):

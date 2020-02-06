@@ -66,96 +66,6 @@ class EmittingStream(QObject):
     def write(self, text):
         self.textWritten.emit(str(text))
 
-class DraggableVSpan:
-    """Draggable Vertical Span for matplotlib graphs."""
-
-    def __init__(self, axis, xpos=None, direction='left', facecolor='yellow'):
-
-        # Get teh initial boundaries
-        lims = axis.get_xlim()
-        if xpos is not None and len(xpos) == 2:
-            xL, xR = min(xpos), max(xpos)
-        else:
-            if direction == 'right':
-                xL = lims[0]
-                xR = xpos if xpos is not None else lims[0] + np.sum(lims)/3
-            elif direction == 'left':
-                xL = xpos if xpos is not None else lims[1] - np.sum(lims)/3
-                xR = lims[1]
-            elif direction == 'both':
-                xL = lims[0] + np.sum(lims)/3
-                xR = lims[1] - np.sum(lims)/3
-        self.xx = {'L':xL, 'R':xR}
-
-        # Initializa the vspan and the vlines
-        self.vspan = axis.axvspan(self.xx['L'], self.xx['R'], alpha=0.1, facecolor=facecolor)
-        self.vline_R = axis.axvline(self.xx['R'], color='red', linewidth=3)
-        self.vline_L = axis.axvline(self.xx['L'], color='red', linewidth=3)
-
-        if direction == 'left':
-            self.vline_R.set_visible(False)
-        elif direction == 'right':
-            self.vline_L.set_visible(False)
-
-        self.press = None
-        self._lastTS = 0.0          # Last timestamp
-
-    def connect(self):
-        """connect to all the events we need"""
-        self.cidpress = self.vspan.figure.canvas.mpl_connect(
-            'button_press_event', self.on_press)
-        self.cidrelease = self.vspan.figure.canvas.mpl_connect(
-            'button_release_event', self.on_release)
-        self.cidmotion = self.vspan.figure.canvas.mpl_connect(
-            'motion_notify_event', self.on_motion)
-
-    def on_press(self, event):
-        'on button press we will see if the mouse is over us and store some data'
-        if event.inaxes != self.vspan.axes: return
-
-        if self.vline_L.contains(event)[0]:
-            self.press = 'L'
-        elif self.vline_R.contains(event)[0]:
-            self.press = 'R'
-
-        self._lastTS = time.time()
-
-    def on_motion(self, event):
-        'on motion we will move the rect if the mouse is over us'
-        if self.press is None: return
-
-        if time.time() - self._lastTS < 0.001: return      # don't update too often
-
-        if event.inaxes != self.vspan.axes: return
-
-        newx = event.xdata
-        poly = self.vspan.get_xy()
-        # Redraw the vlines and the vspan
-        if self.press == 'L':
-            self.vline_L.set_xdata([newx]*2)
-            poly[[0,1,4],0] = newx
-            self.xx['L'] = newx
-        else:
-            self.vline_R.set_xdata([newx]*2)
-            poly[2:4,0] = newx
-            self.xx['R'] = newx
-        self.vspan.set_xy(poly)
-
-        self.vspan.figure.canvas.draw()
-
-        self._lastTS = time.time()
-
-    def on_release(self, event):
-        'on release we reset the press data'
-        self.press = None
-        self.vspan.figure.canvas.draw()
-
-    def disconnect(self):
-        'disconnect all the stored connection ids'
-        self.vspan.figure.canvas.mpl_disconnect(self.cidpress)
-        self.vspan.figure.canvas.mpl_disconnect(self.cidrelease)
-        self.vspan.figure.canvas.mpl_disconnect(self.cidmotion)
-
 class CfunPopup(QWidget):
     """Popup window that shows the objective function"""
     def __init__(self, cfun):
@@ -1250,6 +1160,20 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
                 if isinstance(node, Series) and len(node.data) == 0: result += ' (empty)'
                 return result
 
+        elif role == QtCore.Qt.DecorationRole:
+            if isinstance(node, Datum):
+                displayIcon = QIcon('icons\icon_gof_none.png')
+                # gof = node.goodness_of_fit()
+                # if gof is None:
+                #     displayIcon = QIcon('icons\icon_gof_none.png')
+                # elif gof > 0.9:
+                #     displayIcon = QIcon("icons\icon_gof_good.png")
+                # elif gof < 0.4:
+                #     displayIcon = QIcon('icons\icon_gof_bad.png')
+                # else:
+                #     displayIcon = QIcon('icons\icon_gof_okay.png')
+                return displayIcon
+
         return None
 
     def flags(self, index):
@@ -1536,6 +1460,7 @@ class NavigationTreeView(QTreeView):
         self.setAlternatingRowColors(True)
         self.setHeaderHidden(True)
         self.setSelectionMode(QTreeView.ExtendedSelection)
+        self.setIndentation(10)
 
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.onCustomContextMenuRequested)
@@ -4444,6 +4369,7 @@ class MainView(QMainWindow):
         self.actnFitAllSteps.setDisabled(True)
         self.actnFitAllFiles.setDisabled(True)
         self.actnFitLastStep.setDisabled(True)
+        self.setCursor(Qt.BusyCursor)
 
         if queueFiles is None: queueFiles = [self._crnt]
 
@@ -4472,13 +4398,12 @@ class MainView(QMainWindow):
             # Fitting only a single (or the last) file; all done now. Reset the widgets
             self.plotCurrent(autoRange=False)
             self.treeModel.notifyDataChanged()
-            self.phasingTool.reset()
-            #self.pickingTool.reset()
 
             # Enable controls that can start fitting again
             self.actnFitAllSteps.setEnabled(True)
             self.actnFitAllFiles.setEnabled(True)
             self.actnFitLastStep.setEnabled(True)
+            self.unsetCursor()
             self.progressBarFiles.setValue(self.progressBarFiles.maximum())
 
     def stopThread(self):
@@ -4813,7 +4738,19 @@ class MainView(QMainWindow):
 
     def plotPieChart(self):
         """Plots a pie chart that represents the found component concentrations."""
+
+        def hover(evt):
+            if evt.inaxes == self.ax_pie:
+                # Find which bar contains the event
+                for indx, patch in enumerate(bars.patches):
+                    if patch.contains(evt)[0]:
+                        self.statusBar.showMessage('{:s}    {:.3g}%'.format(labels[indx], 100*cnct[indx]))
+                        return
+
+            self.statusBar.clearMessage()
+
         self.ax_pie.clear()
+
         #if '.' in self._crnt.crntParsH.keys() and 'ampl' in self._crnt.crntParsH['.'].keys():
         data = [(self._crnt.crntParsH[lbl]['ampl'][0], str(self.wsp.T[lbl])) for lbl in self.wsp.repRootNames if lbl not in ['Water', 'Chlorophorm']]     # All concentrations expcept water, chlorophorm, etc...
         cnct = np.abs([d[0] for d in data])
@@ -4821,7 +4758,7 @@ class MainView(QMainWindow):
         if sum(cnct) != 0:
             cnct = cnct / sum(cnct)
         labels = [d[1] for d in data]
-        self.ax_pie.bar(np.arange(len(labels)), cnct, tick_label=labels, align='center',
+        bars = self.ax_pie.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
             color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm']])
         self.ax_pie.set_xticklabels(labels, rotation='vertical')
         # wedges, texts, autotexts = self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
@@ -4830,7 +4767,9 @@ class MainView(QMainWindow):
         #   bbox_to_anchor=(0, 0.1, 0.5, 1))
         # self.ax_pie.axis('equal')
 
+        self.pieCanvas.mpl_connect("motion_notify_event", hover)
         self.pieCanvas.draw()
+
 
 # --------------------- Adding and removing frequency blocks -------------------
     def addFreqBlock(self, xmin, xmax):
