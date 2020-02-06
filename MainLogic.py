@@ -95,7 +95,6 @@ class freqSpec():
         if self._indxFreq is None or self._fhash != newHash:
             self._indxFreq = np.arange(self.imin(f) - nw2, self.imax(f) + nw2) % len(f)
             self._fhash = newHash
-
         return self._indxFreq
 
     def update(self, lims=None, bslnOrder=None):
@@ -1099,7 +1098,7 @@ class Series():
         parsKeys = sorted(list(parsKeys))
 
         if verbose:
-            print('\n')
+            # print('\n')
             npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
             npar_fit = len(parsKeys)
             if npar_fit == 0:
@@ -2155,7 +2154,7 @@ class Datum():
         #parsKeys = [key for key in parsKeys if not self.isAutofittable(key)]
 
         if verbose:
-            print('\n')
+            # print('\n')
             npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 'all possible'
             npar_fit = len(parsKeys)
             if npar_fit == 0:
