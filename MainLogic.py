@@ -935,10 +935,16 @@ class Series():
            Inputs:
            evalParsH - a list of hierarchical dictionaries one for each Datum
            evalMetaF - flat dictionary of meta-parameters' values"""
+
+        # Prepare keys and starting parameters. Expand parameter keys (if 3-tuples were provided, they will be substituted with 4-tuples for all datasets) and make sure there are no repeats
+        if parsKeys is None or autoKeys is None:
+            parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=verbose)
+
         if evalParsH is None:
             evalParsH = [DDD.crntParsH for DDD in self.data]      # evalParsH=[None]*len(self.data)      # All planes will be evaluated with their current parameters
         if evalMetaF is None:
             evalMetaF = copy.copy(self.crntMetaF)
+
         # Initialize the result and meta data
         result = 0
         m_ampl = np.zeros((len(self.repRootNames), len(self.data)))
@@ -1096,6 +1102,7 @@ class Series():
         """Convert parameter Keys from Datum to Series representations and make sure there are no repetitions."""
         parsKeys = set([]) if parsKeys is None else set(parsKeys)
         if autoKeys is not None: autoKeys = set(autoKeys)
+
         for key in list(parsKeys):
             if len(key) == 3:
                 parsKeys.remove(key)
@@ -1104,7 +1111,7 @@ class Series():
 
         if verbose:
             # print('\n')
-            npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 0
+            npar_auto = len(autoKeys)
             npar_fit = len(parsKeys)
             if npar_fit == 0:
                 print("Nothing to fit; {} parameters inferred in closed form...".format(npar_auto))
@@ -1117,10 +1124,8 @@ class Series():
                 for key in parsKeys:
                     print("     {}".format(str(key)))
                 print("Parameters inferred automatically:")
-                if autoKeys is not None:
-                    for key in autoKeys:
-                        if self.isAutofittable(key):
-                            print("     {}".format(str(key)))
+                for key in autoKeys:
+                    print("     {}".format(str(key)))
 
         return parsKeys, autoKeys
 
@@ -1660,6 +1665,8 @@ class Datum():
         #funcType = 'TLS'
 
         # 1. Update the settings
+        if autoKeys is None:
+            autoKeys = []
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
         if robust is None:
@@ -1695,7 +1702,7 @@ class Datum():
         S0 = np.where(np.identity(nz)>0, np.inf, 0)           # Prior covariance matrix of amplitudes (vague priors)
         for i in range(na):
             key = (self.repRootNames[i], 'ampl', 0)
-            if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
+            if key in autoKeys:
                 # Set a Gaussian prior with the supplied mean and variance
                 spec = self.getPrior(key, customPriors=customPriors)
                 m0[i], S0[i,i] = spec.p1, spec.p2
@@ -1707,7 +1714,7 @@ class Datum():
 
         # 3.2. Global phase shift
         key = ('.', 'theta', 0)
-        if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
+        if key in autoKeys:
             # Estimate theta using the closed form expression
             Zy = Z.conj().T.dot(y)
             ZZ = Z.conj().T.dot(Z)
@@ -1728,7 +1735,7 @@ class Datum():
 
         # 3.3. Variance of noise
         key = ('.', 'sigma2', 0)
-        if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
+        if key in autoKeys:
             spec = self.getPrior(key, customPriors=customPriors)
             a_sigma2, b_sigma2 = spec.p1, spec.p2
             sigma2 = None
@@ -1738,7 +1745,7 @@ class Datum():
 
         # 3.4. TLS ratio, gamma
         key = ('.', 'gamma', 0)
-        if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
+        if key in autoKeys:
             gamma = None          # Will fit gamma
         else:
             gamma = evalParsH['.']['gamma'][0]
@@ -1791,11 +1798,11 @@ class Datum():
             # Save the characteristics of the marginalized distributions
             for i in range(na):
                 key=(self.repRootNames[i], 'ampl', 0)
-                if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
+                if key in autoKeys:
                     self.smplDistF[key] = smplSpec_Gaussian(np.asscalar(np.abs(m_ampl[i])), np.asscalar(np.abs(S_ampl[i,i])))
 
             key=('.', 'sigma2', 0)
-            if self.isAutofittable(key, customPriors=customPriors) and (autoKeys is None or key in autoKeys):
+            if key in autoKeys:
                 self.smplDistF[key] = smplSpec_invGamma( a_sigma2, b_sigma2 )
 
         # Always save the baseline; it may be needed for the adjustmwnt algorithms
@@ -1921,7 +1928,8 @@ class Datum():
            frqBlkIds - list of indices of frequency blocks over which to evaluate the function; evaluate in time domain by default, []
            evaluatePriors - if True, will add values of priors to the likelihood function to compute the posterior. Only those priors specified by parsKeys will be evaluated. """
 
-        parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, customPriors, verbose=verbose)
+        if parsKeys is None or autoKeys is None:
+            parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds, customPriors, verbose=False)
 
         if evalParsH is None:
             evalParsH = self.crntParsH
@@ -1937,7 +1945,7 @@ class Datum():
     def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nhop=None, respectBounds=True, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples)."""
 
-        parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=verbose)
+        parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds, verbose=verbose)
 
         if len(parsKeys) > 0:
             # Define the objective function using a copy of the parameters dictionary
@@ -2167,7 +2175,7 @@ class Datum():
     def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
 
-        parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys)
+        parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds)
         result = {}
         self.smplDistF.clear()             # Clear the characteristics of marginal distributions
 
@@ -2255,14 +2263,19 @@ class Datum():
 
         return x_arr, llkl_arr, lpri_arr, lpst_arr, crntVal
 
-    def _prepareKeys(self, parsKeys, autoKeys=None, verbose=True, print_parameters=False):
+    def _prepareKeys(self, parsKeys, autoKeys=None, frqBlkIds=None, customPriors=None, verbose=True, print_parameters=False):
         """Make sure that all parameter keys are relevant for the current Datum (e.g. no 4-tuple keys)."""
-        # Set up the autoKeys
-        #autoKeys = set([]) if autoKeys is None else set(autoKeys)
-        if autoKeys is None:
-            autoKeys = []
-        if autoKeys is not None: autoKeys = set(autoKeys)
 
+        # --------------------- Set the autoKeys ----------------------
+        if autoKeys is None:
+            # All possible autofittable parameters
+            autoKeys = [('.', 'theta', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] + \
+                       [(name, 'ampl', 0) for name in self.repRootNames]
+
+        # Keep only those parameters than can be autofitted because they have appropriate distributions
+        autoKeys = set([key for key in autoKeys if self.isAutofittable(key, customPriors)])
+
+        # -------------------- Set the parsKeys -----------------------
         parsKeys = set([]) if parsKeys is None else set(parsKeys)
         for key in list(parsKeys):
             if key[-2] == 'meta':
@@ -2272,16 +2285,24 @@ class Datum():
                 parsKeys.remove(key)
                 if key[0] in [self.parent.data.index(self), '.', None]:
                     parsKeys.update([key[1:]])
+
+        # print('before', autoKeys, parsKeys)
+        if len(autoKeys) + len(parsKeys) > 0:
+            good, bad = self.fittableParsKeys(frqBlkIds=frqBlkIds, customPriors=customPriors)
+
+            # Remove non-fittabel parameters
+            parsKeys = parsKeys.difference(bad)           # Set diffetence, elements in 'parsKeys' but not in 'bad'
+            autoKeys = autoKeys.difference(bad)
+
+            # Detremine which parameters can be marginalized and remove them from the list of fitted values
+            parsKeys = parsKeys.difference(autoKeys)
+
+        # print('after', autoKeys, parsKeys)
         parsKeys = sorted(list(parsKeys))
-
-        # Check that
-
-        # Detremine which parameters can be marginalized and remove them from the list of sampled values
-        #parsKeys = [key for key in parsKeys if not self.isAutofittable(key)]
 
         if verbose:
             # print('\n')
-            npar_auto = len([key for key in autoKeys if self.isAutofittable(key)]) if autoKeys is not None else 'all possible'
+            npar_auto = len(autoKeys)
             npar_fit = len(parsKeys)
             if npar_fit == 0:
                 print("Nothing to fit; {} parameters inferred in closed form...".format(npar_auto))
@@ -2294,10 +2315,8 @@ class Datum():
                 for key in parsKeys:
                     print("     {}".format(str(key)))
                 print("Parameters inferred automatically:")
-                if autoKeys is not None:
-                    for key in autoKeys:
-                        if self.isAutofittable(key):
-                            print("     {}".format(str(key)))
+                for key in autoKeys:
+                    print("     {}".format(str(key)))
 
         return parsKeys, autoKeys
 
