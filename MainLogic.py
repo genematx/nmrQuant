@@ -57,6 +57,11 @@ def print_fun(x, f, accepted):
 
 ##### ------------ Main classes for the general program logic ------------ #####
 
+minmaxTuple = namedtuple('minmaxTuple', 'min, max')
+minmaxTuple.__new__.__defaults__ = (-np.inf, np.inf)
+minmaxTuple.imin = lambda self, f : np.searchsorted(f.ravel(), self.min)
+minmaxTuple.imax = lambda self, f : np.searchsorted(f.ravel(), self.max)
+
 class freqSpec():
     """A class to store the specifications of frequency blocks along with their baselines"""
 
@@ -547,7 +552,7 @@ class Workspace():
         self.setTree(T, packed['parsSpecDict'])
         for ser in packed['series']:
             ser['t'] = np.linspace(0, ser['dt']*(ser['nt']-1), ser['nt']).reshape(-1, 1)
-            newSeries = self.addSeries(**ser)
+            newSeries = self.addSeries(priors=ser['parsSpecDict'], **ser)
             # newSeries = self.addSeries(name=ser['name'], c0=ser['c0'], f0=ser['f0'],
             #                         t=t, apod=ser['apod'], zff=ser['zff'] if 'zff' in ser.keys() else 0,
             #                         priors=ser['parsSpecDict'])
@@ -575,7 +580,7 @@ class Workspace():
                 except AttributeError: pass
                 newSeries.steps.append(newStep)
             for dat in ser['data']:
-                newDatum = newSeries.addDatum(**dat)
+                newDatum = newSeries.addDatum(priors=dat['parsSpecDict'], **dat)
                 # newDatum = newSeries.addDatum(dat['yT'], name=dat['name'], arrVal=dat['arrVal'],   #/np.linalg.norm(dat['yT'])
                 #                     crntParsH=dat['crntParsH'], priors=dat['parsSpecDict'])
                 newDatum.mdldPeaks = dat['mdldPeaks']
@@ -915,9 +920,9 @@ class Series():
         # Reset the signals
         self.resetFreqs()
 
-    def _fnc_prior(self, evalParsH, evalMetaF, parsKeys=None, customPriors=None):
+    def _fnc_prior(self, evalParsH, evalMetaF, parsKeys, customPriors=None):
         """Custom prior probability function. Can be used to describe dependencies among parameters in different planes. Use parsKeys to determine if the prior needs to be computed for the specific keys."""
-        if parsKeys == []:
+        if len(parsKeys) == 0:
             return 0
         else:
             # Evaluate for ALL meta parameters
@@ -1321,13 +1326,130 @@ class Datum():
         self.yT *= np.exp(2*np.pi*1j*df*self.t)
         self.resetSignals()
 
-    def allParsKeys(self, node_name=None):
-        """Returns all parameter keys for a (sub)tree starting from the root node."""
+    def allParsKeys(self, node_name=None, parsKind=None):
+        """Returns all parameter keys for a (sub)tree starting from a specific node."""
         if node_name is None:
             node = self.T.findRoot()
         else: node = self.T[node_name]
+
+        if parsKind is None:
+            parsKind = ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']
+
         return [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
-                if key[1] in ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']]      # List of all parameter keys that affect the subtree
+                if key[1] in parsKind]      # List of all parameter keys that affect the subtree
+
+    def fittableParsKeys(self, frqBlkIds=None, inRange=None, customPriors=None, node_name=None):
+        """Returns all _individually_ fittable parameters for a (sub)tree starting from a specific node."""
+        # TODO: Need to check jcplQD
+        if node_name is None:
+            rootNode = self.T.findRoot()
+        else: rootNode = self.T[node_name]
+
+        if frqBlkIds is None:
+            frqBlkIds = self.steps[0].frqBlkIds
+
+        if inRange is None:
+            inRange, _ = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
+
+        # Construct the chemical shift tree
+        P = rootNode.getChshTree()      # A subtree of chemical shifts
+
+        # Set the chsh offset from the root node (if any)
+        P.ancs = sum( [self.getCrntVal((rootNode.name, 'chsh', 0)) for node in rootNode.ancestors()] ) - self.getGlobalChshVal()    # Chemical shift due to all ancestors
+
+        # Set the current values of the chemical shifts
+        for keynode in P.descendants(include_self=True):
+            keynode.crnt = self.getCrntVal(keynode.name)
+
+        # Propagate the limits
+        P.propLims()
+
+        # Loop over all possibly changing chemical shifts
+        good_keys, bad_keys = [], []
+        for keynode in P.descendants(include_self=True):
+            # Find the offset given by the range of the paramneter and its currently set value
+            distr = self.getPrior(keynode.name, customPriors)
+            offset = np.array([distr.min, distr.max]) - self.getCrntVal(keynode.name)
+
+            # Check if the peak is currently in the range
+            if any([leaf.isInRange(inRange) for leaf in keynode.leaves()]):
+                good_keys.extend(keynode.keys)
+                # Try, maybe even changing the chemical shift wouldn't matter
+                if any([leaf.isInRange(inRange, offset) for leaf in keynode.leaves()]):
+                    good_keys.append(keynode.name)        # Add the chemical shift key
+                else: bad_keys.append(keynode.name)
+            else:
+                bad_keys.extend(keynode.keys)
+                bad_keys.append(keynode.name)
+
+        return set(good_keys), set(bad_keys)
+
+    def isAutofittable(self, key, customPriors=None):
+        """Checks if a parameter can be fitted algebraically/marginalized based on the definition of its prior distribution."""
+        prior = self.getPrior(key, customPriors)
+        if (key[1]=='sigma2' and prior.distr=='Inverse-Gamma') \
+            or (key[1]=='theta' and prior.distr=='Uniform' and prior.min==-np.pi and prior.max==np.pi) \
+            or (key[1]=='ampl' and key[0] in self.repRootNames and prior.distr=='Gaussian') \
+            or (key[1]=='gamma' and prior.distr != 'Constant'):
+            return True
+        else: return False
+
+    def isFittable(self, key, frqBlkIds=None, inRange=None, customPriors=None):
+        """Checks if the parameter key can be fitted with the current settings of distributions/ranges."""
+        # TODO: can be made much faster by not checking all nodes
+        return key in self.fittableParsKeys(frqBlkIds, inRange, customPriors)
+
+    def pickFittable(self, keys, frqBlkIds=None, inRange=None, customPriors=None):
+        """Selects only (jointly) fittable parameters from the list of keys."""
+
+        # Allways fit jcpl and general parameters
+        # TODO: Need to check them as well
+        good_keys = [key for key in keys if key[1]=='jcplQD' or key[0]=='.']
+        keys = [key for key in keys if not ( key[1]=='jcplQD' or key[0]=='.' ) ]
+
+        def equiv_chshKey(key):
+            # Define a key that corresponds to a chemical shift (or chshQD) instead of alph or ampl
+            if key[1] == 'ampl' and isinstance(self.T[key[0]], chemNodeT):
+                rootName = self.T[key[0]].parent().name
+                sfx = 'QD'
+                indx = int(key[0].split('.')[-1])-1
+            else:
+                rootName, sfx, indx = key[0], key[1][4:], key[2]
+
+            return (rootName, 'chsh'+sfx, indx)
+
+        if frqBlkIds is None:
+            frqBlkIds = self.steps[0].frqBlkIds
+
+        if inRange is None:
+            inRange, _ = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
+
+        # Sort the nodes of the tree in the depth-first order
+        nodes_in_tree = [node.name for node in self.T.iterDepth(method='in-order') if not isinstance(node, chemNodeT)]                           # Tree nodes' names sorted depth first
+        keys = sorted(keys, key = lambda x : (nodes_in_tree.index(equiv_chshKey(x)[0]), equiv_chshKey(x)[1] ) )                              # Sort the keys such that all 'chsh' parameters come before 'chshQD'
+
+        for key in keys:
+            key_chsh = equiv_chshKey(key)
+            # Build a chemical shift tree
+            try: P[key_chsh]       # Check if this parameter is alreadty in the tree
+            except (KeyError, UnboundLocalError):         # If no tree has been defined, or this parameter is not in the tree
+                P = self.T[ key_chsh[0] ].getChshTree( key_chsh[1][4:], key_chsh[2] )      # A subtree of chemical shifts
+                P.ancs = sum( [self.getCrntVal((node.name, 'chsh', 0)) for node in self.T[ key_chsh[0] ].ancestors()] ) - self.getGlobalChshVal()    # Chemical shift due to all ancestors
+
+                # For chemical shifts that are in the list of keys, use ranges of parameters; for all other chemcial shifts, use their current values
+                for keynode in P.descendants(include_self=True):
+                    if keynode.name in keys:
+                        distr = self.getPrior(keynode.name)
+                        keynode.crnt = np.array([distr.min, distr.max])
+                    else: keynode.crnt = self.getCrntVal(keynode.name)
+
+                P.propLims()     # Propagate the limits
+
+            # Check if the corresponding chsh parameter would fall into the optimization range
+            if any( [any([node.lims[0] > range.min and node.lims[1] < range.max for range in inRange]) for node in P[key_chsh].leaves()] ):
+                good_keys.append(key)
+
+        return set(good_keys)
 
     def getTree(self, node_name=None):
         """Return a copy of the tree rooted in the node with name node. All default distributions and parameter values are replaced with the current values in this Datum."""
@@ -1439,16 +1561,6 @@ class Datum():
     def remJointPrior(self):
         """Removes the jointPrior from the Datum."""
         self._joint = None
-
-    def isAutofittable(self, key, customPriors=None):
-        """Checks if a parameter can be fitted algebraically/marginalized based on the definition of its prior distribution."""
-        prior = self.getPrior(key, customPriors)
-        if (key[1]=='sigma2' and prior.distr=='Inverse-Gamma') \
-            or (key[1]=='theta' and prior.distr=='Uniform' and prior.min==-np.pi and prior.max==np.pi) \
-            or (key[1]=='ampl' and key[0] in self.repRootNames and prior.distr=='Gaussian') \
-            or (key[1]=='gamma' and prior.distr != 'Constant'):
-            return True
-        else: return False
 
     # @profile
     def _get_indxFreq(self, i, nw2=0):
@@ -1697,13 +1809,13 @@ class Datum():
 
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
-    def _fnc_prior(self, evalParsH, parsKeys=None, customPriors=None):
+    def _fnc_prior(self, evalParsH, parsKeys, customPriors=None):
         """Computes the prior functions. Priors will be computed only for parameters in the list parsKeys (if parsKeys is None -- all parameters will be included). Assumes that parameters that can be marginalized are not included in parsKeys."""
-        if parsKeys == []:
+        if len(parsKeys) == 0:
             return 0
         else:
-            if parsKeys is None:    # All parameters
-                parsKeys = flatten(self.crntParsH).keys()
+            # if parsKeys is None:    # All parameters
+            #     parsKeys = flatten(self.crntParsH).keys()
             return sum([self.getPrior(key, customPriors).evalPrior(arg=evalParsH[key[0]][key[1]][key[2]]) for key in set(parsKeys) if key[1] not in ['ampl', 'theta', 'sigma2']])
 
     def _fnc_joint(self, evalParsH):
@@ -1809,13 +1921,12 @@ class Datum():
            frqBlkIds - list of indices of frequency blocks over which to evaluate the function; evaluate in time domain by default, []
            evaluatePriors - if True, will add values of priors to the likelihood function to compute the posterior. Only those priors specified by parsKeys will be evaluated. """
 
-        #wnd = scipy.signal.cosine(self.t.size).reshape(-1,1)   # np.ones(self.yT.shape) #
-        wnd = None
+        parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, customPriors, verbose=verbose)
 
         if evalParsH is None:
             evalParsH = self.crntParsH
 
-        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, freqMask, funcType, customPriors=customPriors, returnSignals=returnSignals, robust=robust, wnd=wnd)
+        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, freqMask, funcType, customPriors=customPriors, returnSignals=returnSignals, robust=robust)
 
         if evaluatePriors:
             result += self._fnc_prior(evalParsH, parsKeys, customPriors=customPriors)
@@ -2146,9 +2257,13 @@ class Datum():
 
     def _prepareKeys(self, parsKeys, autoKeys=None, verbose=True, print_parameters=False):
         """Make sure that all parameter keys are relevant for the current Datum (e.g. no 4-tuple keys)."""
-        parsKeys = set([]) if parsKeys is None else set(parsKeys)
+        # Set up the autoKeys
         #autoKeys = set([]) if autoKeys is None else set(autoKeys)
+        if autoKeys is None:
+            autoKeys = []
         if autoKeys is not None: autoKeys = set(autoKeys)
+
+        parsKeys = set([]) if parsKeys is None else set(parsKeys)
         for key in list(parsKeys):
             if key[-2] == 'meta':
                 parsKeys.remove(key)
@@ -2158,6 +2273,8 @@ class Datum():
                 if key[0] in [self.parent.data.index(self), '.', None]:
                     parsKeys.update([key[1:]])
         parsKeys = sorted(list(parsKeys))
+
+        # Check that
 
         # Detremine which parameters can be marginalized and remove them from the list of sampled values
         #parsKeys = [key for key in parsKeys if not self.isAutofittable(key)]
@@ -2333,66 +2450,8 @@ class Datum():
     def signals_for_plot(self, frqBlkIds=None, showComponents=False, onlyInRange=False):
         """Computes the signals for plotting. Applies subsampling to the parts of the signals that are out ouf the fitting ranges."""
 
-        minmaxTuple = namedtuple('minmaxTuple', 'min, max')
-        minmaxTuple.__new__.__defaults__ = (-np.inf, np.inf)
-        minmaxTuple.imin = lambda self, f : np.searchsorted(f.ravel(), self.min)
-        minmaxTuple.imax = lambda self, f : np.searchsorted(f.ravel(), self.max)
-
         if frqBlkIds is None:
             frqBlkIds = self.steps[0].frqBlkIds
-
-        def splitFreq(inRange):
-            """Given a list of freqSpec tuples, divides the frequency range -inf to +inf into lists of disjoint intervals: inRange and outRange by merging overlapping optimization ranges."""
-
-            if inRange:
-                inRange = mergeFreq(inRange)      # Merged and sorted list of freqRanges
-                outRange = []
-                if not np.isinf(inRange[0].min):
-                    lwr = -np.inf
-                    upr = inRange[0].min
-                    outRange.append(minmaxTuple(min=lwr, max=upr))
-                for i in range(len(inRange)-1):
-                    lwr = inRange[i].max
-                    upr = inRange[i+1].min
-                    outRange.append(minmaxTuple(min=lwr, max=upr))
-                if not np.isinf(inRange[-1].max):
-                    lwr = inRange[-1].max
-                    upr = np.inf
-                    outRange.append(minmaxTuple(min=lwr, max=upr))
-            else:
-                outRange = [minmaxTuple(-np.inf, np.inf)]  # Infinite interval
-
-            return inRange, outRange
-
-        def mergeFreq(intervals):
-            """
-            Merge oevrlapping intervals. Based on https://codereview.stackexchange.com/questions/69242/merging-overlapping-intervals.
-            A simple algorithm can be used:
-            1. Sort the intervals in increasing order
-            2. Push the first interval on the stack
-            3. Iterate through intervals and for each one compare current interval
-               with the top of the stack and:
-               A. If current interval does not overlap, push on to stack
-               B. If current interval does overlap, merge both intervals in to one
-                  and push on to stack
-            4. At the end return stack
-            """
-            sorted_by_lower_bound = sorted(intervals, key=lambda tup: tup.min)
-            merged = []
-
-            for higher in sorted_by_lower_bound:
-                if not merged:
-                    merged.append(higher)
-                else:
-                    lower = merged[-1]
-                    # test for intersection between lower and higher:
-                    # we know via sorting that lower[0] <= higher[0]
-                    if higher.min <= lower.max:
-                        upper_bound = max(lower.max, higher.max)
-                        merged[-1] = minmaxTuple(min=lower.min, max=upper_bound)  # replace by merged interval
-                    else:
-                        merged.append(higher)
-            return merged
 
         # Phase the data
         ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
@@ -2419,7 +2478,7 @@ class Datum():
             if self.bF is not None:
                 bF = self.bF[allIndx, :] if self.bF_corr is None else self.bF[allIndx, :] + self.bF_corr[allIndx, :]
                 xF += bF
-                
+
         return f, yFph, xF, zF, bF
 
     def stems_for_plot(self):
@@ -2753,6 +2812,59 @@ def cut_roi(xT, lims, c0, f0, dt, subsample=True):
     yT = scipy.signal.resample_poly(yT, up_factor, down_factor).reshape(-1,1)
 
     return yT, f0_new, dt_new
+
+def splitFreq(inRange):
+    """Given a list of freqSpec tuples, divides the frequency range -inf to +inf into lists of disjoint intervals: inRange and outRange by merging overlapping optimization ranges."""
+
+    if inRange:
+        inRange = mergeFreq(inRange)      # Merged and sorted list of freqRanges
+        outRange = []
+        if not np.isinf(inRange[0].min):
+            lwr = -np.inf
+            upr = inRange[0].min
+            outRange.append(minmaxTuple(min=lwr, max=upr))
+        for i in range(len(inRange)-1):
+            lwr = inRange[i].max
+            upr = inRange[i+1].min
+            outRange.append(minmaxTuple(min=lwr, max=upr))
+        if not np.isinf(inRange[-1].max):
+            lwr = inRange[-1].max
+            upr = np.inf
+            outRange.append(minmaxTuple(min=lwr, max=upr))
+    else:
+        outRange = [minmaxTuple(-np.inf, np.inf)]  # Infinite interval
+
+    return inRange, outRange
+
+def mergeFreq(intervals):
+    """
+    Merge oevrlapping intervals. Based on https://codereview.stackexchange.com/questions/69242/merging-overlapping-intervals.
+    A simple algorithm can be used:
+    1. Sort the intervals in increasing order
+    2. Push the first interval on the stack
+    3. Iterate through intervals and for each one compare current interval
+       with the top of the stack and:
+       A. If current interval does not overlap, push on to stack
+       B. If current interval does overlap, merge both intervals in to one
+          and push on to stack
+    4. At the end return stack
+    """
+    sorted_by_lower_bound = sorted(intervals, key=lambda tup: tup.min)
+    merged = []
+
+    for higher in sorted_by_lower_bound:
+        if not merged:
+            merged.append(higher)
+        else:
+            lower = merged[-1]
+            # test for intersection between lower and higher:
+            # we know via sorting that lower[0] <= higher[0]
+            if higher.min <= lower.max:
+                upper_bound = max(lower.max, higher.max)
+                merged[-1] = minmaxTuple(min=lower.min, max=upper_bound)  # replace by merged interval
+            else:
+                merged.append(higher)
+    return merged
 
 #@profile
 def whitsm(y, lmda=5.0):

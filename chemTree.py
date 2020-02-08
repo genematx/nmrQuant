@@ -1141,7 +1141,7 @@ class treeNode:
 
     def __str__(self):
         if self.alias is None or self.alias == '':
-            return self.name
+            return str(self.name)
         else: return self.alias
 
     def __getitem__(self, key):
@@ -1355,6 +1355,51 @@ class viewNode(treeNode):
         self.hidden = hidden
         self.meta = meta             # Any metadata
 
+class parsNode(treeNode):
+    """A class for nodes in the tree of parameters (e.g. chemical shifts)."""
+    def __init__(self, name, alias='', crnt=0.0, ancs=0.0):
+        super().__init__(name, alias)
+        self.crnt = crnt
+        self.lims = np.zeros(2)
+        self.ancs = ancs      # The value of the parameter pulled from the ancestors (e.g. sum of all chemical shifts above)
+
+        name = self.name[0]
+        indx = self.name[2]
+        sfx = self.name[1][4:]    # the 'QD' suffix
+        self.keys = [(name, 'alph'+sfx, indx),
+                     (name.replace('SPSY', '')+'.'+str(indx+1) if sfx else name, 'ampl', 0)]  # A list of keys related to this chemical shift (chsh, alph, ampl, etc.)    (name, 'chsh'+sfx, indx)
+
+    def propLims(self, limsPrnt=None):
+        """Propagates the limits of the parameter through the tree."""
+
+        # Initialize the lims to the ancestral value
+        if limsPrnt is None:
+            limsPrnt = self.ancs*np.ones(2) if self.isRoot() else self._parent.lims
+
+        self.lims = self.crnt + limsPrnt
+        for chld in self.children():
+            chld.propLims(self.lims)
+
+    def isInRange(self, range, offset=0.0):
+        """Checks whether the self.lims fall into any of the subintervals in the range. Range is a list of tuples, e.g. minmaxTuple."""
+        try:
+            minl = min(self.lims) + min(offset)
+            maxl = max(self.lims) + max(offset)
+        except TypeError:
+            minl, maxl = min(self.lims)+offset, max(self.lims)+offset
+        return any([minl > min(r) and maxl < max(r) for r in range])
+
+    def propCrnt(self, crntPrnt=None):
+        """Propagates the current values of the parameter through the tree."""
+
+        # Initialize the lims to the ancestral value
+        if crntPrnt is None:
+            crntPrnt = self.ancs if self.isRoot() else self._parent.crnt
+
+        self.crnt = self.crnt + crntPrnt
+        for chld in self.children():
+            chld.propLims(self.crnt)
+
 class chemNode(treeNode):
     "Main class to store the chemical parameters in the tree"
     def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias=''):
@@ -1468,6 +1513,13 @@ class chemNode(treeNode):
         for chld in self.children():
             chld.propPoles(self.uPoles)
 
+    def getChshTree(self, sfx='', indx=0):
+        """Creates a tree by arranging chemical shift for all descendants of the node."""
+        P = parsNode(name = (self.name, 'chsh', 0) )                 # e.g. ('Mixture', 'chsh', 0)
+        for chld in self.children():
+            P.addChild(chld.getChshTree())
+        return P
+
     #@profile
     def evalTime(self, t, c0, chsh=[], alph=[], **kwargs):
         "Computes the node's response u=sPoleIntn*exp(-alph*t+i*omega*t)"
@@ -1488,7 +1540,6 @@ class chemNode(treeNode):
 
 class chemNodeQD(chemNode):
 
-    #@profile
     def __init__(self, name, spsy, chsh = None, alph = None, alphQD = None, ampl = None, phase = None, intn = 1., alias=''):
         chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
         self.chshQD = spsy.chsh
@@ -1709,6 +1760,16 @@ class chemNodeQD(chemNode):
 
         self.oldTime = t
 
+    def getChshTree(self, sfx='', indx=0):
+        """Creates a parameters tree. Takes into account the parsKind parameter of itself and also all QD parameters, but omits any attached chemNodeT children. sfx = '' or 'QD'. """
+        P = parsNode( name = (self.name, 'chsh'+sfx, indx) )       # Works for QD parameters as well
+
+        if not sfx:
+            for i in range( len( self.chshQD ) ):
+                P.addChild( parsNode( name = (self.name, 'chshQD', i) ) )
+
+        return P
+
 class chemNodeT(chemNode):
     "Terminal nodes that emit signals. Can only be used as leaves."
     def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias=''):
@@ -1766,7 +1827,6 @@ class chemNodeT(chemNode):
             self.uF = ne.evaluate('sum(conj( x ) * y, axis=1)', local_dict={'x':self.uF, 'y':self.qPolesIntn}).ravel()
             # self.uF = np.inner(np.conj(self.uF), self.qPolesIntn).ravel()
             self.uF *= self.intn * np.sqrt((f[1]-f[0])*c0*dt)
-            # print(self.uF.shape)
 
 class chemNodeDB(chemNode):
     """Class for a node describing a chemical from the database, inherited from chemNode. The node can be specified either by passing a name of a species in the database or the QDpars structure (an instance of chemSpec class.)"""

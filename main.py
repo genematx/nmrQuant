@@ -1536,7 +1536,7 @@ class NavigationTreeDelegate(QItemDelegate):
 
         painter.restore()
 
-def getParsTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
+def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
     """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
     P = viewNode(T.name, nodeType='chemNodeDB' if isinstance(T, chemNodeDB) else 'chemNode')
     #P.addChild(viewNode(name = tuple([T.name] + ['intn'] + [None]), nodeType='intn', alias='intn' ))
@@ -1565,7 +1565,7 @@ def getParsTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
         P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
         P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
         for node in T.children():
-            P.addChild(getParsTree(node))
+            P.addChild(getDisplayTree(node))
     elif T.childCount() == 1 and T.child(0).childCount() == 1:
         # A singlet (one QD node with one T node as a child)
         P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))      #
@@ -1604,7 +1604,7 @@ def getParsTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
             P.addChild(treeNode(name = tuple([T.name] + [par] + [i]) ))
     # add the children nodes
     for node in T.children():
-        P.addChild(getParsTree(node))
+        P.addChild(getDisplayTree(node))
     return P
     """
 
@@ -1640,7 +1640,8 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if flag: self.beginResetModel()
 
         # The tree of parameters to be displayed
-        self.TP = getParsTree(self.datum.T) if self.datum.T is not None else viewNode('')
+        self.TP = getDisplayTree(self.datum.T) if self.datum.T is not None else viewNode('')
+        self._unfittableParsKeys = None       # A list (or set) of keys that can not be fitted
 
         if flag: self.endResetModel()
 
@@ -1700,6 +1701,8 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         """Update the entire tree (if index is None); otherwise, only update the row at index."""
         index_start = self.index(index.row(), 0, self.parent(index)) if index is not None else self._indxRoot
         index_stop = self.index(index.row(), self.columnCount(self.parent(index)), self.parent(index)) if index is not None else self._indxRoot
+
+        self._unfittableParsKeys = None              # Will reset the list of fittable parameters
 
         self.dataChanged.emit(index_start, index_stop)     # Update the entire tree
 
@@ -1797,6 +1800,15 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         return self.createIndex(row, column, item)
 
     def data(self, index, role):
+        # Check if the list of fittable parameters needs to be computed again
+        if self._unfittableParsKeys is None:
+            try:
+                # print('Recomputing the list of fittable parameters')
+                _, self._unfittableParsKeys = self.datum.fittableParsKeys()
+            except AttributeError:
+                # If Worksapce or Series do not do anything
+                self._unfittableParsKeys = []
+
         if not index.isValid() or self.datum.T is None:
             return None
 
@@ -1832,6 +1844,10 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     font.setStyle(QtGui.QFont.StyleItalic)
                 elif node.name in self.datum.repRootNames:
                     font.setBold(True)
+
+            if node.nodeType == 'param':
+                if node.name in self._unfittableParsKeys:
+                    font.setStrikeOut(True)
 
             return font
 
@@ -2174,7 +2190,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if success:                 # self.datum.T has been updated
             self.beginInsertRows(index, 0, 0) # Parent node, first and last position
 
-            newTP = getParsTree(self.datum.T)   # New parameter tree
+            newTP = getDisplayTree(self.datum.T)   # New parameter tree
 
             # Swap children between the old and new parameter trees
             for chld in prnt.children():
