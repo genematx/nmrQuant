@@ -44,7 +44,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '0.18.6'
+version = '1.0.0'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -582,6 +582,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             lr_p1 = pg.LinearRegionItem(values=lims, bounds=bounds, movable=False, brush=config.colr_freqBlocks if active else config.colr_freqBlocks_inactive)
             lr_p0.setZValue(-100)
             lr_p1.setZValue(-100)
+            lr_p0.active = active
 
             # Add linear regions in each subplot
             self.getItem(0, 0).addItem(lr_p0)    # Add to the main plot
@@ -787,11 +788,32 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self.getItem(0, 0).vb.autoRange()
 
         # Adjust the view to the data (frequency blocks)
-        boundaries = np.ravel([frqBlk[0].getRegion() for frqBlk in self._freqBlocks if frqBlk[0] is not None])
-        if len(boundaries) > 1:
-            b_min = boundaries.min()
-            b_max = boundaries.max()
-            self.getItem(0, 0).vb.setRange(xRange=(b_min-(b_max-b_min)*0.04, b_max+(b_max-b_min)*0.04))
+        # boundaries = np.ravel([frqBlk[0].getRegion() for frqBlk in self._freqBlocks if frqBlk[0] is not None])
+        # if len(boundaries) > 1:
+        #     b_min = boundaries.min()
+        #     b_max = boundaries.max()
+        #     self.getItem(0, 0).vb.setRange(xRange=(b_min-(b_max-b_min)*0.04, b_max+(b_max-b_min)*0.04),
+        #                                    yRange=None)
+        xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
+        setx, sety = False, False
+        for frqBlk in self._freqBlocks:
+            # Check if there is a freq block and if it is active
+            if frqBlk[0] is not None and frqBlk[0].active:
+                xreg = frqBlk[0].getRegion()
+                xmin = min(xmin, min(xreg))
+                xmax = max(xmax, max(xreg))
+                setx = True
+
+                yreg = self._yF.yData[np.logical_and(self._f<max(xreg), self._f>min(xreg))]
+                ymin = min(ymin, min(yreg))
+                ymax = max(ymax, max(yreg))
+                sety = True
+
+        # self.getItem(0, 0).vb.setRange(xRange=(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04) if setx else None,
+        #                                yRange=(ymin-(ymax-ymin)*0.02, ymax+(ymax-ymin)*0.04) if sety else None)
+        if setx is not None:
+            self.getItem(0, 0).vb.setXRange(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04)
+            self.getItem(0, 0).vb.setYRange(ymin-(ymax-ymin)*0.02, ymax+(ymax-ymin)*0.04, padding=0)
 
     def saveImage(self):
         """Saves the spectrum as an image file."""
@@ -1845,6 +1867,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 elif node.name in self.datum.repRootNames:
                     font.setBold(True)
 
+                if self.datum.isXclRootName(node.name):
+                    font.setStrikeOut(True)
+
             if node.nodeType == 'param':
                 if node.name in self._unfittableParsKeys:
                     font.setStrikeOut(True)
@@ -2244,7 +2269,7 @@ class ChemTreeView(QTreeView):
 
     changedParsList = pyqtSignal(int)              # Signalizes to update the parameters list widget and carries the index of the active step
     changedSelected = pyqtSignal(object)           # Supports signals with any data types
-    requestAdjustment = pyqtSignal(object)    # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhA'
+    requestAdjustment = pyqtSignal(object)         # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhA'
 
     class ParsSpecDialog(QDialog):
         """A dialog to set specification for a parameter."""
@@ -2508,6 +2533,11 @@ class ChemTreeView(QTreeView):
                 actnToggleReported.setCheckable(True)
                 actnToggleReported.setChecked( self.model().datum.T[key].isReported() )
                 actnToggleReported.toggled.connect(lambda : self.toggleReported(key) )
+                actnToggleExcluded = QAction(QIcon('icons\icon_blank.png'), 'Exclude from fit', self)
+                actnToggleExcluded.setStatusTip('Excludes the signature model from the the fit')
+                actnToggleExcluded.setCheckable(True)
+                actnToggleExcluded.setChecked( self.model().datum.isXclRootName(key) )
+                actnToggleExcluded.toggled.connect(lambda : self.toggleExcluded(key) )
                 actnNewGroup = QAction(QIcon('icons\icon_blank.png'), 'Add new group', self)
                 actnNewGroup.setStatusTip('Add new group')
                 actnNewGroup.triggered.connect(lambda : self.model().addChemical(index, source='new'))
@@ -2531,6 +2561,8 @@ class ChemTreeView(QTreeView):
                 actnShowRows.triggered.connect(lambda : self.showRows(key))
 
                 popMenu.addAction(actnToggleReported)
+                if actnToggleReported.isChecked():
+                    popMenu.addAction(actnToggleExcluded)
                 popMenu.addSeparator()
                 popMenu.addAction(actnSaveSubtree)
                 popMenu.addAction(actnAddSubtree)
@@ -2689,20 +2721,31 @@ class ChemTreeView(QTreeView):
         self.model().datum.toggleRepRoot(key)
         self.hideExcessiveRows()
 
+    def toggleExcluded(self, key):
+        """Sets the key to ignored/not ignored."""
+        if not isinstance(self.model().datum, Workspace):
+            self.model().datum.toggleXclRootName(key)
+            self.model().notifyDataChanged()
+            self.hideExcessiveRows()
+
     def hideExcessiveRows(self):
         """Traverse the tree and hide some rows"""
         def traverse(index):
-            yield index
             for row in range(self.model().rowCount(index)):
                 chld = self.model().index(row=row, column=0, prnt=index)     # Child of the index
                 yield from traverse(chld)
+            yield index
 
         root = self.rootIndex()
 
         for index in traverse(root):
             if index.isValid():
                 node = index.internalPointer()
-                if node.name[1] == 'ampl':
+                if self.model().datum.isXclRootName(node.name):
+                    # Hide all children of excluded nodes
+                    for row in range(self.model().rowCount(index)):
+                        self.setRowHidden(row, index, True)
+                elif node.name[1] == 'ampl':
                     self.setRowHidden(index.row(), index.parent(), node.name[0] not in self.model().datum.repRootNames)
                 else:
                     self.setRowHidden(index.row(), index.parent(), node.hidden)
@@ -3807,6 +3850,7 @@ class MainView(QMainWindow):
         # ----------------- set up the pie chart figure
         self.pieFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
         self.pieCanvas = FigureCanvas(self.pieFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
+        self.pieCanvas.setMaximumHeight(275)
         self.ax_pie = self.pieFigure.add_subplot(111)    # create axes
 
         # ------------------ 2. Set up the chemical tree ----------------------
@@ -4103,7 +4147,7 @@ class MainView(QMainWindow):
         tbMain.addAction(self.actnToggleComps)
         tbMain.addAction(self.actnToggleResid)
         tbMain.addAction(self.actnAutoRange)
-        tbMain.addAction(self.actnSaveImage)
+        # tbMain.addAction(self.actnSaveImage)
         tbMain.addSeparator()
         tbMain.addAction(self.actnAutoPhase)
         tbMain.addAction(self.actnSetLshape)
@@ -4123,7 +4167,7 @@ class MainView(QMainWindow):
         tbTree.addAction(self.actnFitAllSteps)
         tbTree.addAction(self.actnFitAllFiles)
         tbTree.addAction(actnstopThread)
-        tbTree.addAction(self.actnSample)
+        # tbTree.addAction(self.actnSample)
         tbTree.addAction(self.actnReport)
         tbTree.addSeparator()
         tbTree.addAction(actnSaveResults)
@@ -4479,19 +4523,20 @@ class MainView(QMainWindow):
             for ddd in sss.data:
                 row = [sss.name, ddd.name, '{:.6f}'.format(np.linalg.norm(ddd.yT))]
                 ampl, vars, names = [], [], []
-                for name in self.repRootNames:
-                    try:
-                        row += ['{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].mean), '{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].var)]
-                        if name != 'Water':
-                            ampl.append(ddd.smplDistF[(name, 'ampl', 0)].mean)
-                            vars.append(ddd.smplDistF[(name, 'ampl', 0)].var)
-                            names.append(name)
-                    except KeyError:
-                        row += ['{:.6f}'.format(ddd.crntParsH[name]['ampl'][0]), '---']
-                        if name != 'Water':
-                            ampl.append(ddd.crntParsH[name]['ampl'][0])
-                            vars.append(0.0)
-                            names.append(name)
+                for name in ddd.repRootNames:
+                    if name not in ddd.xclRootNames:
+                        try:
+                            row += ['{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].mean), '{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].var)]
+                            if name != 'Water':
+                                ampl.append(ddd.smplDistF[(name, 'ampl', 0)].mean)
+                                vars.append(ddd.smplDistF[(name, 'ampl', 0)].var)
+                                names.append(name)
+                        except KeyError:
+                            row += ['{:.6f}'.format(ddd.crntParsH[name]['ampl'][0]), '---']
+                            if name != 'Water':
+                                ampl.append(ddd.crntParsH[name]['ampl'][0])
+                                vars.append(0.0)
+                                names.append(name)
 
                 # Compute mole fractions
                 ampl = np.array(ampl).ravel()
@@ -4769,14 +4814,14 @@ class MainView(QMainWindow):
 
         self.ax_pie.clear()
 
-        data = [(self._crnt.crntParsH[lbl]['ampl'][0], str(self.wsp.T[lbl])) for lbl in self.wsp.repRootNames if lbl not in ['Water', 'Chlorophorm']]     # All concentrations expcept water, chlorophorm, etc...
+        data = [(self._crnt.crntParsH[lbl]['ampl'][0], str(self.wsp.T[lbl])) for lbl in self.wsp.repRootNames if lbl not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(lbl)]     # All concentrations expcept water, chlorophorm, etc...
         cnct = np.abs([d[0] for d in data])
         cnct = np.where(np.isnan(cnct), 0.0, cnct)
         if sum(cnct) != 0:
             cnct = cnct / sum(cnct)
         labels = [d[1] for d in data]
         bars = self.ax_pie.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
-            color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm']])
+            color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(name)])
         self.ax_pie.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
         ttl = self.ax_pie.set_title('Relative concentrations, %', fontsize=12)
         ttl.set_position((0.5, 1.03))

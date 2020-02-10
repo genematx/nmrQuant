@@ -1918,15 +1918,19 @@ def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, lshapeOrder=2, gamma=0
     return pars
 
 #@profile
-def evalTreeT(tree, t, c0, pars=None):
+def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
     """Evaluate the entire tree of chemNodes. Returns the time-domain response for the specified (reported) nodes in the tree. tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
+    # A set of excluded RootNames
+    if xclRootNames is None:
+        xclRootNames = set([])
+
     # 1. Evaluate all nodes (computes self-responses s(t))
     for node in tree.items():
         node.evalTime(t, c0, **pars[node.name])
         #print(node.sT)
 
     # 2. Determine the root reported nodes (determine the reported subtrees)
-    repRoots = [v for v in tree.repRoots()]
+    repRoots = [v for v in tree.repRoots() if v.name not in xclRootNames]
 
     # 3. Collect the childrens' responses, starting from the bottom, and multiply them with your own
     for rep in repRoots:
@@ -1955,10 +1959,12 @@ def evalTreeT(tree, t, c0, pars=None):
     return Z, [i.name for i in repRoots]
 
 # @profile
-def evalTreeF(tree, f, dt, c0, f0=0, pars=None):
+def evalTreeF(tree, f, dt, c0, f0=0, pars=None, xclRootNames=None):
     """Evaluates the entire tree of chemNodes and returns a model spectrum directly in the frequency domain. Tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
     tau = 0     #    or use
     #tau = -pars['.']['tau'][0]
+    if xclRootNames is None:
+        xclRootNames = set([])
 
     # 1. Update all poles of each node in the tree and propagate them to find uPoles of the leaves
     for node in tree.items():
@@ -1966,7 +1972,7 @@ def evalTreeF(tree, f, dt, c0, f0=0, pars=None):
     tree.findRoot().propPoles()     # Propagate all poles
 
     # 2. Determine the root reported nodes (determine the reported subtrees)
-    repRoots = [v for v in tree.repRoots()]
+    repRoots = [v for v in tree.repRoots() if v.name not in xclRootNames]
 
     # 3. Collect the childrens' responses, starting from the bottom
     for rep in repRoots:
@@ -2006,13 +2012,13 @@ def peakName2parsKey(name, pars='chshQD'):
     return (name[0]+'-SPSY'+indx[0] if int(indx[0])>0 else name[0], pars, int(indx[1])-1)
 
 #@profile
-def getFID(T, t, c0, f0=0, pars=None, tau=None):
+def getFID(T, t, c0, f0=0, pars=None, tau=None, xclRootNames=None):
     """Returns modeled signals in the time domain in the form of FID."""
     if pars is None:
         pars = defaultTreePars(T)
     if tau is None:
         tau = pars["."]["tau"][0]
-    Z, repRootNames = evalTreeT(T, np.array(t)+tau, c0, pars=pars)
+    Z, repRootNames = evalTreeT(T, np.array(t)+tau, c0, pars=pars, xclRootNames=xclRootNames)
     # Shift the signal by f0
     Z = Z * np.exp(-1j*2*np.pi*f0*(np.array(t)+tau)).reshape(-1,1)
     # Apply lineshape correction

@@ -382,12 +382,19 @@ class Workspace():
             self.repRootNames[self.repRootNames.index(oldName)] = newName
         except ValueError: pass
 
+        # TODO: Update the list of Ignored roots
+
         return True
 
     def toggleRepRoot(self, key):
         """Toggles the reportability of a certain root node and updates the parameters accordingly."""
         self.T[key].toggleReported()
         self._updateParameters()
+
+    def isXclRootName(self, name):
+        """Checks whether the node with the a certain name is ignored in the analysis."""
+        flags = [DDD.isXclRootName(name) for SSS in self.series for DDD in SSS.data]
+        return len(flags)>0 and all(flags)
 
     def addSeries(self, **kwargs):
 
@@ -530,7 +537,8 @@ class Workspace():
                                                     'sT' : dat.sT,
                                                     'jointPrior' : dat._joint,
                                                     'refChshKey' : dat.refChshKey,
-                                                    'flagAdapFreq' : dat._flagAdapFreq
+                                                    'flagAdapFreq' : dat._flagAdapFreq,
+                                                    'xclRootNames' : dat.xclRootNames
                                                     })
 
         return result
@@ -751,6 +759,22 @@ class Series():
         """Removes the jointPrior from the Series."""
         self._joint = None
 
+    def isXclRootName(self, name):
+        """Checks whether the node with the a certain name is ignored in the analysis."""
+        flags = [DDD.isXclRootName(name) for DDD in self.data]
+        return all(flags) and len(flags)>0
+
+    def toggleXclRootName(self, name):
+        """Sets the node to the igonred state."""
+        if len(self.data) > 0:
+            flag = data[0].isXclRootName(name)      # The current state in the first Datum
+            for DDD in self.data:
+                if flag:
+                    DDD.xclRootNames.discard(name)
+                else:
+                    DDD.xclRootNames.add(name)
+                DDD.resetSignals()
+
     def addDatum(self, yT, **kwargs):
         """Adds a Datum to the Series."""
         # Create new Datum structure and add it to the Series
@@ -815,7 +839,7 @@ class Series():
             sT = 1.0
 
         # Generate the signal
-        zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau)
+        zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau)
         xT = np.dot(zT, np.array(ampl).reshape(-1,1)) * np.exp(1j*theta)
         xT *= sT
         yT = xT + np.sqrt(sigma2/2)*(np.random.randn(*xT.shape) + 1j*np.random.randn(*xT.shape)) if sigma2 > 0 else xT
@@ -1203,7 +1227,7 @@ class Series():
 class Datum():
     """A single data instance. Contains signals of a single NMR experiment."""
 
-    def __init__(self, yT, parent, name='', arrVal=None, crntParsH=None, flagAdapFreq=None, priors=None, **kwargs):
+    def __init__(self, yT, parent, name='', arrVal=None, crntParsH=None, flagAdapFreq=None, priors=None, xclRootNames=None, **kwargs):
         self.name = name
         self.parent = parent               # A series object that will contain this Datum
         self._f = None                     # Subsampled (adaptive) array of frequencies
@@ -1215,6 +1239,7 @@ class Datum():
         self.mdldPeaks = {}
         self.pckdPeaks = []
         self.refChshKey = None           # A key of the chemical shift that will be used as a reference (will be set to its default value and the rest of the spectrum shifted accordingly)
+        self.xclRootNames = set(xclRootNames) if xclRootNames is not None else set([])       # Excluded RootNames
         self._joint = None            # A joint prior of all parameters
         self._flagAdapFreq = flagAdapFreq if flagAdapFreq is not None else (len(self.yT) > 2**16)
         self._gof = None              # Computed goodness of fit
@@ -1343,7 +1368,7 @@ class Datum():
         return [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
                 if key[1] in parsKind]      # List of all parameter keys that affect the subtree
 
-    def fittableParsKeys(self, frqBlkIds=None, inRange=None, customPriors=None, node_name=None):
+    def fittableParsKeys(self, frqBlkIds=None, inRange=None, customPriors=None, node_name=None, considerRange=False):
         """Returns all _individually_ fittable parameters for a (sub)tree starting from a specific node."""
         # TODO: Need to check jcplQD
         if node_name is None:
@@ -1362,9 +1387,12 @@ class Datum():
         # Set the chsh offset from the root node (if any)
         P.ancs = sum( [self.getCrntVal((rootNode.name, 'chsh', 0)) for node in rootNode.ancestors()] ) - self.getGlobalChshVal()    # Chemical shift due to all ancestors
 
-        # Set the current values of the chemical shifts
+        # Set the current values of the chemical shifts; remove ignored nodes
         for keynode in P.descendants(include_self=True):
-            keynode.crnt = self.getCrntVal(keynode.name)
+            if keynode.name[0] in self.xclRootNames.intersection(self.repRootNames):
+                # This will mark all parameters of the descending nodes as 'bad'
+                keynode.crnt = np.inf
+            else: keynode.crnt = self.getCrntVal(keynode.name)     # Set the current value
 
         # Propagate the limits
         P.propLims()
@@ -1372,17 +1400,23 @@ class Datum():
         # Loop over all possibly changing chemical shifts
         good_keys, bad_keys = [], []
         for keynode in P.descendants(include_self=True):
-            # Find the offset given by the range of the paramneter and its currently set value
-            distr = self.getPrior(keynode.name, customPriors)
-            offset = np.array([distr.min, distr.max]) - self.getCrntVal(keynode.name)
-
+            # Find the offset given by the currently set value of a parameter, its descendants and possibly its range
             # Check if the peak is currently in the range
             if any([leaf.isInRange(inRange) for leaf in keynode.leaves()]):
                 good_keys.extend(keynode.keys)
-                # Try, maybe even changing the chemical shift wouldn't matter
-                if any([leaf.isInRange(inRange, offset) for leaf in keynode.leaves()]):
-                    good_keys.append(keynode.name)        # Add the chemical shift key
-                else: bad_keys.append(keynode.name)
+
+                # Decide what to do with the chemical shift parameter
+                if not considerRange:
+                    # The range doesn't matter; include the chemical shift as well
+                    good_keys.append(keynode.name)
+                else:
+                    # Take into account not only the current value of a parameter but also its range, which may possibly be out of optimization bounds
+                    distr = self.getPrior(keynode.name, customPriors)
+                    offset = np.array([distr.min, distr.max]) - self.getCrntVal(keynode.name)
+                    # Try, maybe even changing the chemical shift wouldn't matter
+                    if any([leaf.isInRange(inRange, offset) for leaf in keynode.leaves()]):
+                        good_keys.append(keynode.name)        # Add the chemical shift key
+                    else: bad_keys.append(keynode.name)
             else:
                 bad_keys.extend(keynode.keys)
                 bad_keys.append(keynode.name)
@@ -1441,9 +1475,16 @@ class Datum():
                 P = self.T[ key_chsh[0] ].getChshTree( key_chsh[1][4:], key_chsh[2] )      # A subtree of chemical shifts
                 P.ancs = sum( [self.getCrntVal((node.name, 'chsh', 0)) for node in self.T[ key_chsh[0] ].ancestors()] ) - self.getGlobalChshVal()    # Chemical shift due to all ancestors
 
+                # Remove all ignored roots
+                for name in self.xclRootNames.intersection(self.repRootNames):
+                    P[(name, 'chsh', 0)].cut()
+
                 # For chemical shifts that are in the list of keys, use ranges of parameters; for all other chemcial shifts, use their current values
                 for keynode in P.descendants(include_self=True):
-                    if keynode.name in keys:
+                    if keynode.name[0] not in self.xclRootNames.intersection(self.repRootNames):
+                        # This will mark all parameters of the descending nodes as 'bad'
+                        keynode.crnt = np.inf
+                    elif keynode.name in keys:
                         distr = self.getPrior(keynode.name)
                         keynode.crnt = np.array([distr.min, distr.max])
                     else: keynode.crnt = self.getCrntVal(keynode.name)
@@ -1455,6 +1496,18 @@ class Datum():
                 good_keys.append(key)
 
         return set(good_keys)
+
+    def isXclRootName(self, name):
+        """Checks whether the node with the a certain name is ignored in the analysis."""
+        return name in self.xclRootNames.intersection(self.repRootNames)
+
+    def toggleXclRootName(self, name):
+        """Sets the node to the igonred state."""
+        try:
+            self.xclRootNames.remove(name)
+        except KeyError:
+            self.xclRootNames.add(name)
+        self.resetSignals()
 
     def getTree(self, node_name=None):
         """Return a copy of the tree rooted in the node with name node. All default distributions and parameter values are replaced with the current values in this Datum."""
@@ -1578,7 +1631,7 @@ class Datum():
 
     def _get_signals_in_time(self, evalParsH, wnd=None):
         # 1. Compute model signals in time domain
-        zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH)            # 1. Compute the model signals
+        zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, self.xclRootNames)            # 1. Compute the model signals
 
         # 1. Apply custom lineshape correction if defined
         if self.sT is not None:
@@ -1607,7 +1660,7 @@ class Datum():
         indxInRange = np.concatenate(indxFreqByBlock)
 
         if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
-            zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
+            zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)            # 1. Compute the model signals
 
             # 1. Apply custom lineshape correction if defined
             if self.sT is not None:
@@ -1624,7 +1677,7 @@ class Datum():
             zFinRange = zF[indxInRange, :]
             yFinRange = yF[indxInRange, :]
         else:
-            zFinRange, repRootNames = evalTreeF(self.T, self.f[ indxInRange ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
+            zFinRange, _ = evalTreeF(self.T, self.f[ indxInRange ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
 
             # Apply custom lineshape correction (this reduces the range)
             if nw2 > 0 and convolve:
@@ -1688,7 +1741,8 @@ class Datum():
             Z, y = np.hstack((zFinRange, bFinRange)), yFinRange
 
         ns, nz = Z.shape     # Number of samples and (model signals + baselines)
-        na = len(self.repRootNames)    # Number of model signals, and hence the resulting amplitudes
+        reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
+        na = len( reportedNames )    # Number of model signals, and hence the resulting amplitudes
         if np.isnan(Z).any() or np.isinf(Z).any():             # This can happen if some chemical shifts are set to None
             return 0.0, {}
 
@@ -1701,15 +1755,15 @@ class Datum():
         m0 = np.zeros((nz, 1))         # Prior amplitudes
         S0 = np.where(np.identity(nz)>0, np.inf, 0)           # Prior covariance matrix of amplitudes (vague priors)
         for i in range(na):
-            key = (self.repRootNames[i], 'ampl', 0)
+            key = (reportedNames[i], 'ampl', 0)
             if key in autoKeys:
                 # Set a Gaussian prior with the supplied mean and variance
                 spec = self.getPrior(key, customPriors=customPriors)
                 m0[i], S0[i,i] = spec.p1, spec.p2
             else:
-                ampl[i] = evalParsH[self.repRootNames[i]]['ampl'][0]
+                ampl[i] = evalParsH[reportedNames[i]]['ampl'][0]
                 if numberField == 'Cx':
-                    ampl[i] *= np.exp(1j*evalParsH[self.repRootNames[i]]['phase'][0])    # Set possibly different phases for each amplitude
+                    ampl[i] *= np.exp(1j*evalParsH[reportedNames[i]]['phase'][0])    # Set possibly different phases for each amplitude
         iS0 = np.linalg.inv(S0)
 
         # 3.2. Global phase shift
@@ -1776,7 +1830,7 @@ class Datum():
         #print(m_ampl)
 
         mult = 1   # sum(m_ampl)     # Multiplier (can be used to output normalized amplitudes)
-        for lbl, val in zip(self.repRootNames, m_ampl[:na]):
+        for lbl, val in zip(reportedNames, m_ampl[:na]):
             evalParsH[lbl]['ampl'][0] = np.asscalar(np.abs(val)) / mult
             evalParsH[lbl]['phase'][0] = np.asscalar(np.angle(val)) if numberField == 'Cx' else 0.0
         evalParsH['.']['mult'][0] = mult
@@ -1797,7 +1851,7 @@ class Datum():
 
             # Save the characteristics of the marginalized distributions
             for i in range(na):
-                key=(self.repRootNames[i], 'ampl', 0)
+                key=(reportedNames[i], 'ampl', 0)
                 if key in autoKeys:
                     self.smplDistF[key] = smplSpec_Gaussian(np.asscalar(np.abs(m_ampl[i])), np.asscalar(np.abs(S_ampl[i,i])))
 
@@ -1873,7 +1927,7 @@ class Datum():
             indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
 
             if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
-                zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
+                zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
 
                 # 1. Apply custom lineshape correction if defined
                 if self.sT is not None:
@@ -1890,11 +1944,11 @@ class Datum():
                 zFPadded = zF[indxPadded, :]
                 yFinRange = yF[indxInRange, :]
             else:
-                zFPadded, repRootNames = evalTreeF(self.T, self.f[ indxPadded ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
+                zFPadded, _ = evalTreeF(self.T, self.f[ indxPadded ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
                 indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]
                 zFPadded = [z for z in np.split(zFPadded, indxSplit)]
 
-            mc = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames])           # First na results correspond to the actual amplitudes of components, the rest, if any, correspond to the baselines
+            mc = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames if name not in self.xclRootNames])           # First na results correspond to the actual amplitudes of components, the rest, if any, correspond to the baselines
             theta = evalParsH['.']['theta'][0]
 
             xFPadded = [np.dot(z, mc*np.exp(1j*theta)).reshape(-1,1) for z in zFPadded]
@@ -2074,7 +2128,7 @@ class Datum():
         self.zF_corr, self.bF_corr = None, None           # Reset the corrections for the model matrix and the baseline
 
         # Find the model signal
-        ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames])
+        ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames if name not in self.xclRootNames])
         xF = self.zF[indxInRange, :].dot(ampl).reshape(-1,1) + self.bF[indxInRange]
 
         # Phase the measured data according to the values in the parameters
@@ -2137,7 +2191,7 @@ class Datum():
             self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, autoKeys=[], returnSignals=True)
 
         # Find the model signal
-        ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames])
+        ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames if name not in self.xclRootNames])
         xF = self.zF[indxInRange, :].dot(ampl).reshape(-1,1) + self.bF[indxInRange]
 
         # Phase the measured data according to the values in the parameters
@@ -2165,7 +2219,8 @@ class Datum():
         Za_corr = self.zF[indxInRange, :] * ampl_corr.reshape(1,-1)
 
         # Save the corrections and amplitudes
-        for name, val in zip(self.repRootNames, ampl_corr):
+        reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
+        for name, val in zip(reportedNames, ampl_corr):
             self.setCrntVal(key=(name, 'ampl', 0), val=val)
         self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)
         self.zF_corr[indxInRange, :] = (posZa_corr - Za_corr)               # Additive correction for the model signals
@@ -2178,6 +2233,7 @@ class Datum():
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds)
         result = {}
         self.smplDistF.clear()             # Clear the characteristics of marginal distributions
+        reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
 
         # If no parameters are set for sampling, just evaluate the marginal posterior
         if len(parsKeys) == 0:
@@ -2187,10 +2243,10 @@ class Datum():
             m_ampl = np.array(meta['ampl'][0]).reshape(-1, 1)
             S_ampl = meta['ampl'][1]
             nrep = len(m_ampl)*250     # Number of repeats for each case to sample the amplitudes from the Gaussian distributions
-            indx = [i for i, name in enumerate(self.repRootNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled
+            indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled
             smpl = np.linalg.cholesky(S_ampl[np.ix_(indx, indx)]).dot(np.random.randn(len(indx), nrep)) + m_ampl[indx].reshape(-1,1)                  # Multivariate Gaussian random samples
             for i, id in enumerate(indx):
-                key = (self.repRootNames[id], 'ampl', 0)
+                key = (reportedNames[id], 'ampl', 0)
                 result[key] = smpl[i,:]
                 self.smplDistF[key] = smplSpec_from_data(result[key])
             sigma2 = np.array([[x] for x in meta['sigma2']])
@@ -2222,12 +2278,12 @@ class Datum():
         S_ampl = np.array([blbWlkr['ampl'][1] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T             # Covariance matrices of the amplitudes
         # Generate random samples of amplitudes
         nrep = 3     # Number of repeats for each case to sample the amplitudes from the Gaussian distributions
-        indx = [i for i, name in enumerate(self.repRootNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled
+        indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled
         if len(indx) > 0:
             smpl = np.hstack([np.linalg.cholesky(np.squeeze(S_ampl[np.ix_(indx, indx, [i])])).dot(np.random.randn(len(indx), nrep)) \
                              + m_ampl[indx,i].reshape(-1,1) for i in range(S_ampl.shape[-1])])              # Multivariate Gaussian random samples
             for i, id in enumerate(indx):
-                key = (self.repRootNames[id], 'ampl', 0)
+                key = (reportedNames[id], 'ampl', 0)
                 if key not in parsKeys:
                     result[key] = smpl[i,:]
                     self.smplDistF[key] = smplSpec_from_data(result[key])
@@ -2270,7 +2326,7 @@ class Datum():
         if autoKeys is None:
             # All possible autofittable parameters
             autoKeys = [('.', 'theta', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] + \
-                       [(name, 'ampl', 0) for name in self.repRootNames]
+                       [(name, 'ampl', 0) for name in self.repRootNames if name not in self.xclRootNames]
 
         # Keep only those parameters than can be autofitted because they have appropriate distributions
         autoKeys = set([key for key in autoKeys if self.isAutofittable(key, customPriors)])
@@ -2325,13 +2381,13 @@ class Datum():
         nt, nf = len(self.t), len(self.f)
         evalParsH = self.crntParsH
         tau, theta = 0.0, 0.0
-        ampl = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames])
+        ampl = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames if name not in self.xclRootNames])
         if not phased:
             tau = evalParsH['.']['tau'][0]
             theta = evalParsH['.']['theta'][0]
 
         # Generate the signal
-        zT, repRootNames = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau)
+        zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau)
         zT *= np.exp(1j*theta)
 
         # 1. Apply custom lineshape correction if defined
@@ -2419,9 +2475,10 @@ class Datum():
         ax_main.plot(f, yFph.real if real else yFph.imag, '-', color=(0,0.58,0.86), linewidth=1.5, label='')
 
         # Plot the model components
+        reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
         if showComponents and zF is not None:
             zF = (zF + 0*bF)
-            for i, node in enumerate(self.repRootNames):
+            for i, node in enumerate(reportedNames):
                 ax_main.plot(f, zF[:, i].real if real else zF[:, i].imag, '-', linewidth=0.5, color=config.colrseq[i], label=node)
 
         # Plot the fitted model
@@ -2490,7 +2547,7 @@ class Datum():
 
         zF, xF, bF = None, None, None
         if self.zF is not None:
-            ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames]).reshape(1, -1)
+            ampl = np.array([self.crntParsH[name]['ampl'][0] for name in self.repRootNames if name not in self.xclRootNames]).reshape(1, -1)
             zF = self.zF * ampl if self.zF_corr is None else (self.zF + self.zF_corr)*ampl
             xF = zF.sum(1).reshape(-1,1)
             xF, zF = xF[allIndx, :], zF[allIndx, :]
@@ -2509,26 +2566,29 @@ class Datum():
 
         # for i, name in enumerate([name for name in self.repRootNames if name not in ['Water', 'Chloroform'] ]):         #
         for i, name in enumerate(self.repRootNames):
-            stems_i = {}
-            for stemKey, val in mdldPeaks[name].items():   # Loop over the leaves
-                parsKey = peakName2parsKey(stemKey)
-                freq = [pk.chsh - dref_chsh for pk in val]
-                intn = [np.abs(pk.intn) for pk in val]
-                stems_i[parsKey] = (self.getCrntVal(key=parsKey), freq, intn)
-            allStems.append(stems_i)
+            if name not in self.xclRootNames:
+                stems_i = {}
+                for stemKey, val in mdldPeaks[name].items():   # Loop over the leaves
+                    parsKey = peakName2parsKey(stemKey)
+                    freq = [pk.chsh - dref_chsh for pk in val]
+                    intn = [np.abs(pk.intn) for pk in val]
+                    stems_i[parsKey] = (self.getCrntVal(key=parsKey), freq, intn)
+                allStems.append(stems_i)
 
         return allStems
 
     def evalForPlot(self, key, frqBlkIds=None, lims=None, npts=75):
         """Returns an array of argument values and the values of log likelihood, prior, and posterior."""
         result = {}
+        reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
+        na = len(reportedNames)
         par = self.getPrior(key)     # Settings for the prior distribution of this parameter key
         if lims is None: lims = (par.min, par.max)
         x_arr = np.linspace(min(lims), max(lims), npts)
         lpst_arr = np.zeros(x_arr.shape)
         lpri_arr = np.zeros(x_arr.shape)
-        m_ampl_arr = np.zeros((len(self.repRootNames), npts))
-        S_ampl_arr = np.zeros((len(self.repRootNames), len(self.repRootNames), npts))
+        m_ampl_arr = np.zeros((na, npts))
+        S_ampl_arr = np.zeros((na, na, npts))
         evalParsH = copy.deepcopy(self.crntParsH)      # Make a copy of the parameter dictionary that will be used for evaluation
         for i, x in enumerate(x_arr):
             evalParsH[key[0]][key[1]][key[2]] = x
