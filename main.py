@@ -348,6 +348,9 @@ class PlotStemsItem(pg.PlotCurveItem):
             ev.accept()
             self.sigStemsClicked.emit(self.key)
 
+    def highlight(self, flag=True):
+        self.setPen(color=self.opts['pen'].color(), width=2 if flag else 1)
+
     def mouseDragEvent(self, evt):
         evt.accept()
         # print('Dragging in PlotStemsItem')
@@ -365,13 +368,13 @@ class PlotStemsItem(pg.PlotCurveItem):
     def hoverEnterEvent(self, evt):
         # ev.accept()
         # print('Hovering into PlotStemsItem', key)
-        self.setPen(color=self.opts['pen'].color(), width=2)
+        self.highlight(True)
         self.sigStemsHovered.emit(self.key, True)
 
     def hoverLeaveEvent(self, evt):
         # ev.accept()
         # print('Leaving PlotStemsItem', key)
-        self.setPen(color=self.opts['pen'].color(), width=1)
+        self.highlight(False)
         self.sigStemsHovered.emit(self.key, False)
 
 class MainSpectrumWidget(pg.GraphicsLayoutWidget):
@@ -782,6 +785,10 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
                 x.show()
             else:
                 x.hide()
+
+    def highlightStems(self, key, flag=True):
+        """Highlights/dehighlits stem with a certain key."""
+        self._stems[key].highlight(flag)
 
     def autoRange(self):
         # Autoscale both x and y
@@ -1708,7 +1715,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             else: self.notifyDataChanged()
 
         else:
-            # The list of steps is the same (teh new Datum is in the same Series)
+            # The list of steps is the same (the new Datum is in the same Series)
             self.datum = datum
             self.notifyDataChanged()
 
@@ -2268,7 +2275,7 @@ class ChemTreeView(QTreeView):
     """Model/View based class to display chemical trees."""
 
     changedParsList = pyqtSignal(int)              # Signalizes to update the parameters list widget and carries the index of the active step
-    changedSelected = pyqtSignal(object)           # Supports signals with any data types
+    changedSelected = pyqtSignal(object, object)           # Emits names of the current and previously selected nodes
     requestAdjustment = pyqtSignal(object)         # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhA'
 
     class ParsSpecDialog(QDialog):
@@ -2465,9 +2472,9 @@ class ChemTreeView(QTreeView):
     def currentChanged(self, current, previous):
         """Is called when the current item changes."""
         super().currentChanged(current, previous)
-        if current.isValid():
-            node = current.internalPointer()
-            self.changedSelected.emit(node.name)
+        key_crnt = current.internalPointer().name if current.isValid() else None
+        key_prev = previous.internalPointer().name if previous.isValid() else None
+        self.changedSelected.emit(key_crnt, key_prev)
 
     def rowsInserted(self, parent, start, end):
         """Is called to update the view when rows have been inserted."""
@@ -2726,7 +2733,11 @@ class ChemTreeView(QTreeView):
         if not isinstance(self.model().datum, Workspace):
             self.model().datum.toggleXclRootName(key)
             self.model().notifyDataChanged()
-            self.hideExcessiveRows()
+
+    def dataChanged(self, topLeft, btmRight):
+        """Reimplemented dataChanged slot."""
+        super().dataChanged(topLeft, btmRight)
+        self.hideExcessiveRows()
 
     def hideExcessiveRows(self):
         """Traverse the tree and hide some rows"""
@@ -3823,31 +3834,13 @@ class MainView(QMainWindow):
         #rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
         #rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
-#        ----------------- set up the spectrum figure
-        self.figure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on    # figsize=(1, 1), dpi=80,
-        self.canvas = FigureCanvas(self.figure) # this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
-        self.figureGrid  = gridspec.GridSpec(2, 1, hspace = 0.03, left = 0.05, right = 0.95, height_ratios=[3, 1])
-        self.ax = [None, None, None]
-        self.ax[0] = self.figure.add_subplot(111)
-        self.ax[0].invert_xaxis()
-        # Set the second axis on the first subplot
-        self.ax[1] = self.ax[0].twinx()    # Separate vertical axis for a histogram plot
-        self.ax[1].set_ylim((0, 5))
-        #self.ax[1].set_visible(False)
-        # Set the second subplot for the residues
-        self.ax[2] = self.figure.add_subplot(self.figureGrid[1], sharex = self.ax[0])    # create axes
-        self.ax[2].set_visible(False)
-        # Make the main plot span the entire figure when the residuals are not shown
-        self.ax[0].set_position(self.figureGrid[0:2].get_position(self.figure))
-        self.ax[1].set_position(self.figureGrid[0:2].get_position(self.figure))
-        # Set span selector
-        self.freqBlocksSelector = SpanSelector(self.ax[1], self.addFreqBlock, 'horizontal', useblit=True, minspan=0.01,
-                     rectprops=dict(alpha=0.15, facecolor='yellow'))     # set useblit True on gtkagg for enhanced performance
-        self.freqBlocksSelector.active = False
-        ## Set Range Boundaries Selector
-        #self.freqLBoundarySelector = SpanSelector(self.ax[1], self.addFreqBlock, 'horizontal', useblit=True, minspan=0.01,
-        #             rectprops=dict(alpha=0.15, facecolor='red'))     # set useblit True on gtkagg for enhanced performance
-        #self.freqLBoundarySelector.active = False
+        # ------------------------- Set up the toolbars ------------------------
+        menubar = self.menuBar()
+        tbMain = self.addToolBar("File")               # Main toolbar
+        tbTree = QToolBar("Tree")                      # Tree toolbar
+        tbTree.setIconSize(QtCore.QSize(18,18))
+        tbTree.setFloatable(False)
+        tbTree.setMovable(False)
 
         # ------------------- Printout for the console -------------------------
         self.printoutEdit = QPlainTextEdit()
@@ -3886,6 +3879,7 @@ class MainView(QMainWindow):
         layParam = QVBoxLayout()
         tabParam.setLayout(layParam)
         layParam.addWidget(self.treeView)
+        layParam.addWidget(tbTree)
         layParam.addWidget(self.stepsEdit)
 
 
@@ -3926,8 +3920,8 @@ class MainView(QMainWindow):
         # Add the preprocessing parameters tool
         self.preprocTool = PreprocessingWidget()
         self.preprocTool.parsChanged.connect(lambda x : self.resetSignals(**x))
-        self.phasingTool = PhasingWidget(self._crnt, self.canvas, orientation='Horizontal') # set to 'Horizontal' if displayed on the right
-        self.phasingTool.phased.connect(self.onPhased)
+        # self.phasingTool = PhasingWidget(self._crnt, self.canvas, orientation='Horizontal') # set to 'Horizontal' if displayed on the right
+        # self.phasingTool.phased.connect(self.onPhased)
 
         # Set up the tab
         tabSettings = QWidget()
@@ -3936,7 +3930,7 @@ class MainView(QMainWindow):
         laySettings.addWidget(self.freqTableView)
         laySettings.addWidget(self.preprocTool)
 
-        self.setupActions()
+        self.setupActions(menubar, tbMain, tbTree)
 
         # --------------- Left --------------------
         widgetLeft = QTabWidget()
@@ -3984,7 +3978,7 @@ class MainView(QMainWindow):
         self.progressBarFiles.setMaximumWidth(400)
         self.statusBar.addPermanentWidget(self.progressBarFiles)
 
-    def setupActions(self):
+    def setupActions(self, menubar, tbMain, tbTree):
         # Add clear action
         clearAction = QAction(QIcon('icons\icon_new.png'), 'Clear workspace', self)
         clearAction.setStatusTip('Clear the workspace')
@@ -4000,8 +3994,8 @@ class MainView(QMainWindow):
         showSettingsAction.setStatusTip('Show settings dialog')
         showSettingsAction.triggered.connect(self.showSettingsDialog)
         # Add load Tree action
-        actnLoadTree = QAction(self._icon('icon_hierarchy.png'), 'Load tree', self)
-        actnLoadTree.setStatusTip('Load a chemical tree')
+        actnLoadTree = QAction(self._icon('icon_hierarchy.png'), 'Load new tree', self)
+        actnLoadTree.setStatusTip('Load a new chemical tree')
         actnLoadTree.triggered.connect(self.loadChemTree)
         # Add load action
         loadAction = QAction(self._icon('icon_load.png'), 'Load workspace', self)
@@ -4104,8 +4098,8 @@ class MainView(QMainWindow):
         self.actnSample.setStatusTip('Sample parameters checked on the last step with the MCMC algorithm')
         self.actnSample.triggered.connect( self.sampleStep )
         # Report without sampling action
-        self.actnReport = QAction(self._icon('icon_report.png'), 'Report results without sampling', self)
-        self.actnReport.setStatusTip('Report results without sampling')
+        self.actnReport = QAction(self._icon('icon_report.png'), 'Report results', self)
+        self.actnReport.setStatusTip('Report results without MCMC sampling')
         self.actnReport.triggered.connect(lambda:self.sampleStep(onlyAutoKeys=True))
         # Fit all steps action
         self.actnFitAllSteps = QAction(self._icon('icon_fitAllSteps.png'), 'Fit all steps', self)
@@ -4129,7 +4123,6 @@ class MainView(QMainWindow):
         actnSaveResults.triggered.connect(self.saveResults)
 
         # ------------------------- set the menubar ----------------------------
-        menubar = self.menuBar()
         fileMenu = menubar.addMenu('&File')
         fileMenu.addAction(actnImportData)
         fileMenu.addAction(actnRemoveCurrent)
@@ -4138,7 +4131,6 @@ class MainView(QMainWindow):
         fileMenu.addAction(exitAction)
 
         # ------------------------- Set the toolbar ----------------------------
-        tbMain = self.addToolBar("File")
         tbMain.addAction(clearAction)
         tbMain.addAction(actnImportData)
         tbMain.addAction(actnRemoveCurrent)
@@ -4159,7 +4151,16 @@ class MainView(QMainWindow):
         tbMain.addAction(self.actnAutoPhase)
         tbMain.addAction(self.actnSetLshape)
         tbMain.addAction(self.actnResetLshape)
-        tbTree = self.addToolBar("Tree")               # Tree toolbar
+        tbMain.addSeparator()
+        tbMain.addAction(self.actnFitLastStep)
+        tbMain.addAction(self.actnFitAllSteps)
+        tbMain.addAction(self.actnFitAllFiles)
+        tbMain.addSeparator()
+        # tbMain.addAction(self.actnSample)
+        tbMain.addAction(self.actnReport)
+        tbMain.addAction(actnSaveResults)
+
+        # ---------------------- Toolbar for the tree --------------------------
         tbTree.addAction(actnLoadTree)
         self.cmboxHCSelector = QComboBox()
         self.cmboxHCSelector.addItem("1H")
@@ -4175,9 +4176,6 @@ class MainView(QMainWindow):
         tbTree.addAction(self.actnFitAllFiles)
         tbTree.addAction(actnstopThread)
         # tbTree.addAction(self.actnSample)
-        tbTree.addAction(self.actnReport)
-        tbTree.addSeparator()
-        tbTree.addAction(actnSaveResults)
 
     # ----------------- Signals from the main Spectrum Widget ------------------
 
@@ -4270,7 +4268,7 @@ class MainView(QMainWindow):
         self.treeModel.setNewDatum(newCrnt)
         self.freqTableModel.setNewDatum(newCrnt)
         self.preprocTool.setNewDatum(newCrnt)
-        self.phasingTool.setNewDatum(newCrnt)
+        # self.phasingTool.setNewDatum(newCrnt)
 
         # Highlight the current Datum in the Navigation widget if it was seletected programmatically
         self.naviTreeView.selectCurrentDatum(newCrnt.selfID())
@@ -4455,8 +4453,6 @@ class MainView(QMainWindow):
     def onThreadFinished(self):
         """Called when the fittingThread finishes processing each step. Depending if there are files/steps in queue, may call the startThread/fitqueueActns function again or just display the results."""
 
-        self.saveResults()    # Writes results to the file and shows them on screen
-
         if not self.fittingThread.isExiting():
             # Fitting several files
             self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
@@ -4523,7 +4519,12 @@ class MainView(QMainWindow):
         self.fitAllSteps(selectedFiles)
 
     def saveResults(self):
-        """Saves the current results of computation into the file and prints them on screen."""
+        """Saves the current results of computation into a file."""
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.txt)')
+        if filename:
+            if filename == '' : filename = 'results.txt'
+            if filename[-4:] != '.txt': filename += '.txt'
+
         # Write the results to a file
         tab = []
         for sss in self._crnt.series:
@@ -4557,12 +4558,10 @@ class MainView(QMainWindow):
                 tab.append(row)
         head = ['Series', 'Filename', 'Signal norm'] + [f for name in self.repRootNames for f in (name, 'var')] + [f for name in names for f in ('x_'+name, '95% cred.i.')]
         try:
-            with open('_results.txt', 'w') as fout:
+            with open(filename, 'w') as fout:
                 print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
         except PermissionError:
             print('Can not save the results to file.')
-        #print(tabulate.tabulate(tab[self._crnt.data.index(self._crnt)], headers=head))    # ... and show on the screen
-        pass
 
 # ------------------------ Parameter list --------------------------------------
     def updateParsList(self, indxStep = None):
@@ -4697,12 +4696,6 @@ class MainView(QMainWindow):
 # ------------------------ Functions for plotting ------------------------------
     def plotCurrent(self, autoRange=True):
         """Plots signals corresponding to the currently opened file and current parameters."""
-        # remember the axis settings
-        if settings["ax0Limits"] is not None:
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-        self.ax[0].clear()     # discards the old graph
-        self.ax[2].clear()     # discards the old residuals graph
-
         if isinstance(self._crnt, Series):
             pass
         elif isinstance(self._crnt, Datum):
@@ -4724,41 +4717,6 @@ class MainView(QMainWindow):
 
             # Output the found results
             self.plotPieChart()
-
-            # # Show or hide stems depending on the state of the checkable action self.actnToggleStems
-            # if self.actnToggleStems.isChecked():
-            #     self.showStems(True)
-            #
-            # # Show the residuals plot below the graph and rearrange the canvas (resize the main plot)
-            # if self.actnToggleResid.isChecked():
-            #     self.ax[2].set_visible(True)
-            #     self.ax[0].set_position(self.figureGrid[0].get_position(self.figure))
-            #     self.ax[1].set_position(self.figureGrid[0].get_position(self.figure))
-            # else:
-            #     self.ax[2].set_visible(False)
-            #     self.ax[0].set_position(self.figureGrid[0:2].get_position(self.figure))
-            #     self.ax[1].set_position(self.figureGrid[0:2].get_position(self.figure))
-            #
-            # self.ax[0].legend(loc=0)
-            #
-            # # First try rescaling the graph
-            # self.ax[0].relim()    # recompute the ax.dataLim
-            # self.ax[0].margins(0, 0.05)    # x and y margins in percentages
-            # self.ax[0].autoscale()    # update ax.viewLim using the new dataLim
-            # new_ax0Limits = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-            #
-            # # Set the updated limits
-            # if settings["ax0Limits"] is not None:
-            #     self.ax[0].set_xlim(settings["ax0Limits"]["xlim"])
-            #     self.ax[0].set_ylim(settings["ax0Limits"]["ylim"])
-            # else:
-            #     settings["ax0Limits"] = new_ax0Limits   # {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-            #
-            # self.figure.suptitle(str(self._crnt))
-            #
-            # # Output the found results
-            # self.plotPieChart()
-
         else:
             print("Nothing to plot here.")
             return 0
@@ -4785,24 +4743,13 @@ class MainView(QMainWindow):
         """Show or hide the residual plot."""
         self.mainFigureWidget.showResidual(flag=self.actnToggleResid.isChecked())
 
-    def selectStems(self, key):
+    def selectStems(self, key_crnt, key_prev=None):
         """Shows which stems are affected when a row is selected in the tree."""
         if self.actnToggleStems.isChecked():
-            pass
-            # TODO!
-            # if isinstance(key, tuple):
-            #     # Convert the item name to teh name of stems
-            #     if 'SPSY' in key[0]:
-            #         nameStem = key[0].rsplit('-', 1)[0] + '-' + key[0][key[0].rfind('SPSY')+4:] + '.' + str(key[2]+1)
-            #     else:
-            #         nameStem = key[0]
-            # else:
-            #     nameStem = key
-            #
-            # for k, v in self.allStems.items():
-            #     for stemline in v:
-            #         plt.setp(stemline, linewidth = 2 if nameStem == k else 1)     # if nameStem is not None and nameStem in k
-            pass
+            if key_prev is not None and key_prev[1] in ['chsh', 'chshQD', 'alph', 'alphQD']:
+                self.mainFigureWidget.highlightStems(key_prev, False)
+            if key_crnt[1] in ['chsh', 'chshQD', 'alph', 'alphQD']:
+                self.mainFigureWidget.highlightStems(key_crnt, True)
 
     def plotPieChart(self):
         """Plots a pie chart that represents the found component concentrations."""
