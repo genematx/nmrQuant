@@ -2820,8 +2820,15 @@ class ChemTreeView(QTreeView):
 
     def selectPickedParameter(self, stemKey):
         """Selects an active paramter for a picked peak."""
+        self.selectionModel().clear()
+
         index = self.model().indexByKey(stemKey)
         self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows)
+
+        # Select alpha as well
+        QD = stemKey[1][4:]      # Either 'QD' or ''
+        index = self.model().indexByKey((stemKey[0], 'alph'+QD, stemKey[2]))
+        self.selectionModel().select(index, QItemSelectionModel.Select | QItemSelectionModel.Rows)
 
     def updateValue(self, stemKey, delta=0.0):
         """Updates the curreent value at key by changing it by the amount delta. Used with the stem dragging functions."""
