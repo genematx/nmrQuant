@@ -802,23 +802,22 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         #     self.getItem(0, 0).vb.setRange(xRange=(b_min-(b_max-b_min)*0.04, b_max+(b_max-b_min)*0.04),
         #                                    yRange=None)
         xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
-        setx, sety = False, False
+        set_flag = False
         for frqBlk in self._freqBlocks:
             # Check if there is a freq block and if it is active
             if frqBlk[0] is not None and frqBlk[0].active:
                 xreg = frqBlk[0].getRegion()
                 xmin = min(xmin, min(xreg))
                 xmax = max(xmax, max(xreg))
-                setx = True
 
                 yreg = self._yF.yData[np.logical_and(self._f<max(xreg), self._f>min(xreg))]
                 ymin = min(ymin, min(yreg))
                 ymax = max(ymax, max(yreg))
-                sety = True
+                set_flag = True
 
         # self.getItem(0, 0).vb.setRange(xRange=(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04) if setx else None,
         #                                yRange=(ymin-(ymax-ymin)*0.02, ymax+(ymax-ymin)*0.04) if sety else None)
-        if setx is not None:
+        if set_flag:
             self.getItem(0, 0).vb.setXRange(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04)
             self.getItem(0, 0).vb.setYRange(ymin-(ymax-ymin)*0.02, ymax+(ymax-ymin)*0.04, padding=0)
 
@@ -1240,9 +1239,6 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
     def addDatumFromFile(self, crnt_series, path):
         """Adds new Datum entries specified by the path to the series object."""
 
-        ser_id = self.wsp.series.index(crnt_series) # Position of the Series in the Workspace
-        index = self.index(ser_id, 0, None)    # Index corresponding to the Series to which the Datum will be added
-
         if path[-6:] == '.pyfid':
             with open(path, 'rb') as fp:
                 data = [float(x.strip()) if i != 5 else x.strip() for i, x in enumerate(fp.readlines())]
@@ -1334,6 +1330,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             # #yT = yT[::k, :]
             #
             # name = os.path.split(os.path.dirname(path))[1]
+            pass
 
         # Read a Spinsolve data.1d file
         elif path[-3:] in ['.1d', '.2d']:
@@ -1381,12 +1378,23 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             crnt_series.f0 = f0
             crnt_series.t = t
             crnt_series.fullReset()
+        elif np.abs(crnt_series.c0 - c0) > 1e-3:
+            # Create a new series and put the data into it
             # TODO: Check if new c0/f0 are the same as the old ones when loading the rest of the data
+            self.addSeries()
+            crnt_series = self.wsp.series[-1]
+            crnt_series.c0 = c0
+            crnt_series.f0 = f0
+            crnt_series.t = t
+            crnt_series.fullReset()
+
+        ser_id = self.wsp.series.index(crnt_series) # Position of the Series in the Workspace
+        index = self.index(ser_id, 0, None)    # Index corresponding to the Series to which the Datum will be added
 
         self.layoutAboutToBeChanged.emit()
 
         if len(crnt_series.data) == 0 and yT.shape[1] == 1:   # Adding only a single first Datum; no rows will be added, but need to replace the existing Series row with this new Datum
-            crnt_series.addDatum(yT, name = name)
+            dat = crnt_series.addDatum(yT, name = name)
         else:
             # Start adding rows
             if len(crnt_series.data) == 1:   # Already one node in the series
@@ -1395,31 +1403,30 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
                 self.beginInsertRows(index, len(crnt_series.data), len(crnt_series.data)+yT.shape[1]-1)        # Parent node, first and last position
             # Add the rows
             for i in range(yT.shape[1]):
-                crnt_series.addDatum(yT[:,i].reshape(-1,1), name = name+str(i+1) if yT.shape[1]>1 else name)
+                dat = crnt_series.addDatum(yT[:,i].reshape(-1,1), name = name+str(i+1) if yT.shape[1]>1 else name)
             # Finish adding rows
             self.endInsertRows()
 
         self.layoutChanged.emit()    # Tell the view that we need to recompute persistent indices
 
-    def importData(self, parent=None):
+        return dat
+
+    def importData(self, crnt_series=None):
         """Opens a dialog to select a new data file to be added to the parent series."""
         # Create new series if working from the workspace itself
-        if parent is None or parent == self.wsp:
+        if crnt_series is None or crnt_series == self.wsp:
             self.addSeries()
-            parent = self.wsp.series[-1]
-        elif isinstance(parent, Datum):
-            parent = parent.parent    # Go one level up to the Series level
+            crnt_series = self.wsp.series[-1]
+        elif isinstance(crnt_series, Datum):
+            crnt_series = crnt_series.parent    # Go one level up to the Series level
 
         for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.jdx; *.1d; *.2d; *.txt; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx; *.jdx);;Mnova FID (*.txt);;Bruker FID (fid)"):   # ;;JEOL FID (*.jdf)
             #try:
-            self.addDatumFromFile(parent, newFilePath)
+            dat = self.addDatumFromFile(crnt_series, newFilePath)
             #except:
             #    print("Could not add the file ", newFilePath)
 
-        # Set current index to the newly updated Series
-        #ser_indx = self.wsp.series.index(self._crnt) # Position of the Series in the Workspace
-        #index = self.naviTreeModel.index(ser_indx, 0, None)    # Index corresponding to the Series to which the Datum will be added
-        #self.naviSelection.setCurrentIndex(index, QItemSelectionModel.Select)
+        return dat
 
     def indexByKey(self, key=(None, None)):
         """Retuens the index of an item (Datum or Series) given its selfID."""
@@ -1481,7 +1488,7 @@ class NavigationTreeView(QTreeView):
 
     requestPasteCrnt = pyqtSignal(list)
     requestPasteDflt = pyqtSignal(list)
-    requestfitSelected = pyqtSignal(list)
+    requestFitSelected = pyqtSignal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)    # Initialize a QTreeWidget
@@ -1505,7 +1512,7 @@ class NavigationTreeView(QTreeView):
         actnAddSeries.triggered.connect(self.model().addSeries)
         actnImportData = QAction(QIcon('icons\icon_addFile.png'), 'Import files', self)
         actnImportData.setStatusTip('Import new data and add them to the current series')
-        actnImportData.triggered.connect(lambda : self.model().importData(parent=index.internalPointer() if index.isValid() else None))
+        actnImportData.triggered.connect(lambda : self.onImportData(crnt_series=index.internalPointer() if index.isValid() else None))
         actnPasteCrnt = QAction(QIcon('icons\icon_pasteCrnt.png'), 'Paste as current', self)
         actnPasteCrnt.setStatusTip('Paste as current values')
         actnPasteCrnt.triggered.connect(lambda : self.requestPasteCrnt.emit(selected))     # Emit a list of selected datums to paste the currently copied parameters to them
@@ -1514,7 +1521,7 @@ class NavigationTreeView(QTreeView):
         actnPasteDflt.triggered.connect(lambda : self.requestPasteDflt.emit(selected))     # Emit a list of selected datums to paste the currently copied parameters to them
         actnfitSelected = QAction(QIcon('icons\icon_fitSelected.png'), 'Fit selected', self)
         actnfitSelected.setStatusTip('Fit selected datasets')
-        actnfitSelected.triggered.connect(lambda : self.requestfitSelected.emit(selected))     # Emit a list of selected datums to fit
+        actnfitSelected.triggered.connect(lambda : self.requestFitSelected.emit(selected))     # Emit a list of selected datums to fit
 
         popMenu.addAction(actnfitSelected)
         popMenu.addSeparator()
@@ -1533,6 +1540,10 @@ class NavigationTreeView(QTreeView):
 
         # Show the menu
         popMenu.popup(self.viewport().mapToGlobal(pos))
+
+    def onImportData(self, crnt_series):
+        dat = self.model().importData(crnt_series)
+        self.selectCurrentDatum(dat.selfID())
 
     def selectCurrentDatum(self, key=(None, None)):
         """Highlights the current Datum or Series."""
@@ -2183,7 +2194,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if source == 'new':
             X = chemNode('New group')
         elif source == 'file':
-            filename = QFileDialog.getOpenFileName(None, 'Import file', '.', filter = "Chemical trees (*.ctr)")
+            filename = QFileDialog.getOpenFileName(None, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")
             X = loadTree(filename)
             # if filename:
             #     with open(filename, 'rb') as fp:
@@ -3897,7 +3908,7 @@ class MainView(QMainWindow):
         self.naviSelection.currentChanged.connect(self.onCurrentSelectedChanged)
         self.naviTreeView.requestPasteCrnt.connect(self.treeView.pasteCrntPars)     # Paste copied parameter values to all selected Datums in the naviTreeView
         self.naviTreeView.requestPasteDflt.connect(self.treeView.pasteDfltPars)
-        self.naviTreeView.requestfitSelected.connect(self.fitAllSteps)
+        self.naviTreeView.requestFitSelected.connect(self.fitAllSteps)
 
         # Set up the tab
         tabNavi = QWidget()
@@ -3986,7 +3997,7 @@ class MainView(QMainWindow):
         # Add import datafile action
         actnImportData = QAction(self._icon('icon_addFile.png'), 'Import files', self)
         actnImportData.setStatusTip('Import new data and add them to the current series')
-        actnImportData.triggered.connect(lambda : self.naviTreeModel.importData(parent=None))
+        actnImportData.triggered.connect(lambda : self.naviTreeView.onImportData(crnt_series=self._crnt))
         actnRemoveCurrent = QAction(self._icon('icon_removeFile.png'), 'Remove file', self)
         actnRemoveCurrent.setStatusTip('Remove file from the workspace')
         actnRemoveCurrent.triggered.connect(self.removeCurrent)
@@ -4286,7 +4297,7 @@ class MainView(QMainWindow):
 
     def loadChemTree(self):
         """Calls a dialog and loads a new chemical tree from file."""
-        filename = QFileDialog.getOpenFileName(self, 'Import file', '.', filter = "Chemical trees (*.ctr)")
+        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")
 
         T = loadTree(filename)
 
@@ -4331,7 +4342,7 @@ class MainView(QMainWindow):
 
     def onLoadWspAction(self):
         """Loads the workspace including the stepClass class and the steps array."""
-        filename = QFileDialog.getOpenFileName(self, 'Import file', '.', filter = "NMR worksapce (*.wsp)")
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")
         if filename:
             with open(filename, 'rb') as fp:
                 dataUnPack = dill.load(fp)
@@ -4747,9 +4758,9 @@ class MainView(QMainWindow):
         """Shows which stems are affected when a row is selected in the tree."""
         if self.actnToggleStems.isChecked():
             if key_prev is not None and key_prev[1] in ['chsh', 'chshQD', 'alph', 'alphQD']:
-                self.mainFigureWidget.highlightStems(key_prev, False)
-            if key_crnt[1] in ['chsh', 'chshQD', 'alph', 'alphQD']:
-                self.mainFigureWidget.highlightStems(key_crnt, True)
+                self.mainFigureWidget.highlightStems((key_prev[0], 'chsh'+key_prev[1][4:], key_prev[2]), False)
+            if key_crnt is not None and key_crnt[1] in ['chsh', 'chshQD', 'alph', 'alphQD']:
+                self.mainFigureWidget.highlightStems((key_crnt[0], 'chsh'+key_crnt[1][4:], key_crnt[2]), True)
 
     def plotPieChart(self):
         """Plots a pie chart that represents the found component concentrations."""

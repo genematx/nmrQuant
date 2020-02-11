@@ -123,7 +123,7 @@ class Step():
     def __init__(self, frqBlkIds = None, parsKeys = None, autoKeys=None, repRootNames=None, fitCustomLshape = False):
         self.frqBlkIds = frqBlkIds if frqBlkIds is not None else set()
         self.parsKeys = set(parsKeys) if parsKeys is not None else set()      # Parameters to fit on this step
-        self.autoKeys = set(autoKeys) if autoKeys is not None else set( [('.', 'theta', 0), ('.', 'sigma2', 0)] )                      # Potentially autofittable parameters that will be excluded from fitting on this step (may contain, theta, gamma, sigma2, and any amplitudes)
+        self.autoKeys = set(autoKeys) if autoKeys is not None else set( [('.', 'sigma2', 0)] )      # ('.', 'theta', 0),                 # Potentially autofittable parameters that will be excluded from fitting on this step (may contain, theta, gamma, sigma2, and any amplitudes)
         if repRootNames is not None:
             self.autoKeys.update([(name, 'ampl', 0) for name in repRootNames])
         self.fitCustomLshape = fitCustomLshape
