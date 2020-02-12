@@ -520,6 +520,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
     def plot(self, f, yF, xF=None, zF=None, stems=None, freqBlocks=None):
         """Plots the data.
         freBlocks is a list of tuples (min, max, bool), where the last position indicates whether the range is active (fitted) or not."""
+
         self.reset()
 
         p0, p1, pz, p0r = self.getItem(0,0), self.getItem(1, 0), self.FullViewPlotItem, self.p0r
@@ -590,7 +591,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
             # Add linear regions in each subplot
             self.getItem(0, 0).addItem(lr_p0)    # Add to the main plot
-            self.getItem(1, 0).addItem(lr_p1)    # Add to the resiaduals plot
+            # self.getItem(1, 0).addItem(lr_p1)    # Add to the residuals plot
 
             # Connect the frequency ranges in different plots
             def link_lr(master, slave=lr_p1):
