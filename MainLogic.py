@@ -160,7 +160,8 @@ class Workspace():
                             ('.', 'theta', 0): parsSpec(distr='Uniform', min=-np.pi, max=np.pi), \
                             ('.', 'gamma', 0): parsSpec(distr='Uniform', min=0.0, max=1.0-1e-09, dval=0.0)}
         if lshapeOrder is not None: self.set_lshapeOrder(lshapeOrder)
-        self.setTree(chemNode('Mixture'))
+        self.setTree(chemNode('Mixture', chsh = [parsSpec(min=-0.1, max=0.1)], \
+                              alph=[parsSpec(min=-5., max=25., dval=2.0)]))
 
     def getPrior(self, key):
         """Returns the specification of a parameter in the current tree or tau. Start by looking for the specification in the current datum structure, then proceed to the series level andthe tree if the parameter is not found."""
@@ -767,7 +768,7 @@ class Series():
     def toggleXclRootName(self, name):
         """Sets the node to the igonred state."""
         if len(self.data) > 0:
-            flag = data[0].isXclRootName(name)      # The current state in the first Datum
+            flag = self.data[0].isXclRootName(name)      # The current state in the first Datum
             for DDD in self.data:
                 if flag:
                     DDD.xclRootNames.discard(name)
@@ -1371,17 +1372,21 @@ class Datum():
     def fittableParsKeys(self, frqBlkIds=None, inRange=None, customPriors=None, node_name=None, considerRange=False):
         """Returns all _individually_ fittable parameters for a (sub)tree starting from a specific node."""
         # TODO: Need to check jcplQD
-        if node_name is None:
-            rootNode = self.T.findRoot()
-        else: rootNode = self.T[node_name]
-
         if frqBlkIds is None:
             frqBlkIds = self.steps[0].frqBlkIds
+
+        # If in time domain, all parameters are good
+        if len(frqBlkIds) == 0:
+            return set(self.allParsKeys(node_name)), set([])
 
         if inRange is None:
             inRange, _ = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
 
         # Construct the chemical shift tree
+        if node_name is None:
+            rootNode = self.T.findRoot()
+        else: rootNode = self.T[node_name]
+
         P = rootNode.getChshTree()      # A subtree of chemical shifts
 
         # Set the chsh offset from the root node (if any)
@@ -1631,7 +1636,7 @@ class Datum():
 
     def _get_signals_in_time(self, evalParsH, wnd=None):
         # 1. Compute model signals in time domain
-        zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, self.xclRootNames)            # 1. Compute the model signals
+        zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)            # 1. Compute the model signals
 
         # 1. Apply custom lineshape correction if defined
         if self.sT is not None:
@@ -1927,7 +1932,7 @@ class Datum():
             indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
 
             if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
-                zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0)            # 1. Compute the model signals
+                zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)            # 1. Compute the model signals
 
                 # 1. Apply custom lineshape correction if defined
                 if self.sT is not None:
@@ -1944,7 +1949,7 @@ class Datum():
                 zFPadded = zF[indxPadded, :]
                 yFinRange = yF[indxInRange, :]
             else:
-                zFPadded, _ = evalTreeF(self.T, self.f[ indxPadded ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
+                zFPadded, _ = evalTreeF(self.T, self.f[ indxPadded ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
                 indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]
                 zFPadded = [z for z in np.split(zFPadded, indxSplit)]
 
@@ -2204,7 +2209,7 @@ class Datum():
         result, yFph, res, bln = ph_cost(yFph, xF, mw=mw)
 
         # Find the corrected amplitudes
-        zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0)           # Values of the first time-domain points for each model signal
+        zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)           # Values of the first time-domain points for each model signal
         zF0 = np.sum(self.zF[indxInRange, :] - zT0.ravel()/(2*np.sqrt(len(self.f))), axis=0).real / np.sqrt(len(self.f))     # What the (restricted) models sum to; should be 1/2*zT0 if the entire frequency range
 
         bF0 = ampl.reshape(1,-1)*zT0.reshape(1,-1)/(2*np.sqrt(len(self.f)))             # Zero-order baselines
@@ -2343,7 +2348,7 @@ class Datum():
                     parsKeys.update([key[1:]])
 
         # print('before', autoKeys, parsKeys)
-        if len(autoKeys) + len(parsKeys) > 0:
+        if len(autoKeys) + len(parsKeys) > 0 and len(frqBlkIds) > 0:
             good, bad = self.fittableParsKeys(frqBlkIds=frqBlkIds, customPriors=customPriors)
 
             # Remove non-fittabel parameters

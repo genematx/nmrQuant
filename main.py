@@ -339,6 +339,7 @@ class PlotStemsItem(pg.PlotCurveItem):
         self.chsh_0 = chsh_0
         super().__init__(x=self.x_stem, y=self.y_stem,
                          connect='pairs', pen={'color':color, 'width':1}, *kwargs)
+        # self.opts['mouseWidth'] = 2
         self.setAcceptHoverEvents(True)
 
     def mouseClickEvent(self, ev):
@@ -815,8 +816,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
                 ymax = max(ymax, max(yreg))
                 set_flag = True
 
-        # self.getItem(0, 0).vb.setRange(xRange=(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04) if setx else None,
-        #                                yRange=(ymin-(ymax-ymin)*0.02, ymax+(ymax-ymin)*0.04) if sety else None)
+        # self.getItem(0, 0).vb.setRange(xRange=(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04) if set_flag else None)
         if set_flag:
             self.getItem(0, 0).vb.setXRange(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04)
             self.getItem(0, 0).vb.setYRange(ymin-(ymax-ymin)*0.02, ymax+(ymax-ymin)*0.04, padding=0)
@@ -1414,6 +1414,8 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
     def importData(self, crnt_series=None):
         """Opens a dialog to select a new data file to be added to the parent series."""
         # Create new series if working from the workspace itself
+        dat = self.wsp
+
         if crnt_series is None or crnt_series == self.wsp:
             self.addSeries()
             crnt_series = self.wsp.series[-1]
@@ -4263,7 +4265,7 @@ class MainView(QMainWindow):
             try:
                 newCrnt = self.wsp.series[0].data[0]
             except IndexError:
-                newCrnt = self.wsp
+                self._crnt = self.wsp
                 return None
 
         # Compute the model signal if there is None
@@ -4389,9 +4391,6 @@ class MainView(QMainWindow):
 
         self.setCurrent()          # Sets the current display to the first Datum or the entire workspace if there is no Datum
 
-        # Update the plots
-        self.plotCurrent()
-
         # Update the views (e.g. shown/hidden rows, etc.)
         if stngView is not None:
             self.stepsEdit.setPlainText(stngView['stepsEditText'])
@@ -4412,7 +4411,7 @@ class MainView(QMainWindow):
                 dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
 
         self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
-        self.plotCurrent()
+        self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
 
     def onPhased(self, theta, tau):
         """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
@@ -4708,7 +4707,9 @@ class MainView(QMainWindow):
     def plotCurrent(self, autoRange=True):
         """Plots signals corresponding to the currently opened file and current parameters."""
         if isinstance(self._crnt, Series):
-            pass
+            self.mainFigureWidget.reset()
+            self.plotPieChart(reset=True)
+
         elif isinstance(self._crnt, Datum):
             f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
 
@@ -4728,9 +4729,10 @@ class MainView(QMainWindow):
 
             # Output the found results
             self.plotPieChart()
+
         else:
-            print("Nothing to plot here.")
-            return 0
+            self.mainFigureWidget.reset()
+            self.plotPieChart(reset=True)
 
     def toggleStems(self):
         """Plots stem lines to indicate modeled peaks."""
@@ -4757,12 +4759,12 @@ class MainView(QMainWindow):
     def selectStems(self, key_crnt, key_prev=None):
         """Shows which stems are affected when a row is selected in the tree."""
         if self.actnToggleStems.isChecked():
-            if key_prev is not None and key_prev[1] in ['chsh', 'chshQD', 'alph', 'alphQD']:
-                self.mainFigureWidget.highlightStems((key_prev[0], 'chsh'+key_prev[1][4:], key_prev[2]), False)
-            if key_crnt is not None and key_crnt[1] in ['chsh', 'chshQD', 'alph', 'alphQD']:
-                self.mainFigureWidget.highlightStems((key_crnt[0], 'chsh'+key_crnt[1][4:], key_crnt[2]), True)
+            if key_prev is not None and key_prev[1] in ['chshQD', 'alphQD']:
+                self.mainFigureWidget.highlightStems((key_prev[0], 'chshQD', key_prev[2]), False)
+            if key_crnt is not None and key_crnt[1] in ['chshQD', 'alphQD']:
+                self.mainFigureWidget.highlightStems((key_crnt[0], 'chshQD', key_crnt[2]), True)
 
-    def plotPieChart(self):
+    def plotPieChart(self, reset=False):
         """Plots a pie chart that represents the found component concentrations."""
 
         def hover(evt):
@@ -4779,27 +4781,31 @@ class MainView(QMainWindow):
 
         self.ax_pie.clear()
 
-        data = [(self._crnt.crntParsH[lbl]['ampl'][0], str(self.wsp.T[lbl])) for lbl in self.wsp.repRootNames if lbl not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(lbl)]     # All concentrations expcept water, chlorophorm, etc...
-        cnct = np.abs([d[0] for d in data])
-        cnct = np.where(np.isnan(cnct), 0.0, cnct)
-        if sum(cnct) != 0:
-            cnct = cnct / sum(cnct)
-        labels = [d[1] for d in data]
-        bars = self.ax_pie.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
-            color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(name)])
-        self.ax_pie.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
-        ttl = self.ax_pie.set_title('Relative concentrations, %', fontsize=12)
-        ttl.set_position((0.5, 1.03))
-        # wedges, texts, autotexts = self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
-        # self.ax_pie.legend(wedges, labels,
-        #   loc="bottom",
-        #   bbox_to_anchor=(0, 0.1, 0.5, 1))
-        # self.ax_pie.axis('equal')
-
+        # Remove the reference to the hovering event
         try:
             self.pieCanvas.mpl_disconnect(self._cid_hover)
         except AttributeError: pass
-        self._cid_hover = self.pieCanvas.mpl_connect("motion_notify_event", hover)
+
+        if not reset:
+            data = [(self._crnt.crntParsH[lbl]['ampl'][0], str(self.wsp.T[lbl])) for lbl in self.wsp.repRootNames if lbl not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(lbl)]     # All concentrations expcept water, chlorophorm, etc...
+            cnct = np.abs([d[0] for d in data])
+            cnct = np.where(np.isnan(cnct), 0.0, cnct)
+            if sum(cnct) != 0:
+                cnct = cnct / sum(cnct)
+            labels = [d[1] for d in data]
+            bars = self.ax_pie.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
+                color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(name)])
+            self.ax_pie.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
+            ttl = self.ax_pie.set_title('Relative concentrations, %', fontsize=12)
+            ttl.set_position((0.5, 1.03))
+            # wedges, texts, autotexts = self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
+            # self.ax_pie.legend(wedges, labels,
+            #   loc="bottom",
+            #   bbox_to_anchor=(0, 0.1, 0.5, 1))
+            # self.ax_pie.axis('equal')
+
+            self._cid_hover = self.pieCanvas.mpl_connect("motion_notify_event", hover)
+
         self.pieCanvas.draw()
 
 # --------------------- Adding and removing frequency blocks -------------------
