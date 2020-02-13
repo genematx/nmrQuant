@@ -23,7 +23,7 @@ import subprocess
 
 import numpy as np
 from chemTree import loadTree
-from MainLogic import Workspace, next_pow_of_2
+from MainLogic import Workspace, next_pow_of_2, save_workspace
 from dataio import read_spinsolve
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
@@ -172,6 +172,11 @@ def main(cmdline=None):
             'score': DDD.goodness_of_fit(frqBlkIds=[2])}
     report(data)
 
+    # ------------------------- Save the workspace -----------------------------
+    if opts.save:
+        fileName = os.path.join(CALLED_PATH, "workspace_{:s}.wsp".format(time.strftime('%d%m%Y_%H%M%S')))
+        save_workspace(fileName, wsp)
+
     print('\nDONE!')
 
     # Wait for an input
@@ -317,6 +322,8 @@ def make_parser():
 
     parser.add_option('-d', '--directory', help='The directory with FID data')
 
+    parser.add_option('-s', '--save', help='Save the workspace', action="store_true")
+
     # parser.add_option('-v', '--verbose', action="store_true", help='Output the model fitting progress')
 
     # # opt_parse can be configured to store different kinds of values
@@ -339,7 +346,7 @@ def make_parser():
                         directory=os.path.join( SCRIPT_PATH, 'data\\juice'),   #Juices\\S13.35_Orange_small\\001-cold'),
                         residual=False,
                         error=None,
-                        make_template=False,
+                        save=False,
                         number=0)
 
     return parser

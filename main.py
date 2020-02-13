@@ -29,8 +29,6 @@ import nmrglue as ng
 from datetime import date
 import pyqtgraph as pg
 
-colrseq = [tuple(int(255*c) for c in colr) for colr in config.colrseq]
-
 # Set white background in plots
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
@@ -44,7 +42,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '1.0.0'
+version = '1.0.1'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -517,11 +515,13 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         """Plots and returns a handle to a group of stem lines for transition peaks."""
         return plot.plot(x=np.repeat(chsh_stems, 2), y=np.dstack((np.zeros(intn_stems.shape[0]), intn_stems)).flatten(), connect='pairs', **kwargs)
 
-    def plot(self, f, yF, xF=None, zF=None, stems=None, freqBlocks=None):
+    def plot(self, f, yF, xF=None, zF=None, stems=None, freqBlocks=None, indx_colr=None):
         """Plots the data.
         freBlocks is a list of tuples (min, max, bool), where the last position indicates whether the range is active (fitted) or not."""
 
         self.reset()
+
+        colrseq = [tuple(int(255*c) for c in colr) for colr in config.colrseq]
 
         p0, p1, pz, p0r = self.getItem(0,0), self.getItem(1, 0), self.FullViewPlotItem, self.p0r
         f = f.ravel()
@@ -544,9 +544,10 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
         # Plot the components
         if zF is not None:
+            if indx_colr is None: indx_colr = list(range(zF.shape[1]))
             self._zF = [None]*zF.shape[1]
             for i in range(zF.shape[1]):
-                self._zF[i] = p0.plot(f, zF[:,i].ravel().real, pen={'color':colrseq[i+2], 'width':1})
+                self._zF[i] = p0.plot(f, zF[:,i].ravel().real, pen={'color':colrseq[indx_colr[i]+2], 'width':1})
 
         # Plot the ranges
         if freqBlocks is not None:
@@ -557,6 +558,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         # Plot the stem lines
         if stems is not None:
             self._stems.clear()
+            if indx_colr is None: indx_colr = list(range(len(stems)))
             for i, st in enumerate(stems):
                 # Loop over the reported nodes
                 scale = np.concatenate([np.array(val[2]) for _, val in st.items()]).max()    # To scale the inensities
@@ -569,7 +571,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
                     def setStemDraggingFlag(flag):
                         self._stemDragging_flag = flag
 
-                    self._stems[key] = PlotStemsItem(key, chsh_origin, chsh_stems, intn_stems, colrseq[i+2])
+                    self._stems[key] = PlotStemsItem(key, chsh_origin, chsh_stems, intn_stems, colrseq[indx_colr[i]+2])
                     self._stems[key].sigStemsHovered.connect(lambda key, flag : setStemDraggingFlag(flag))
                     self._stems[key].sigStemsClicked.connect(lambda key : self.sigStemsClicked.emit(key))     # Aggregate all clicekd signals fom various stems into a single signal emitted from the MainSpectrumWidget
                     self._stems[key].sigStemsDragged.connect(lambda key, delta : self.sigStemsDragged.emit(key, delta))
@@ -1117,6 +1119,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
     def __init__(self, wsp, parent = None):
         super().__init__()     # QtCore.QAbstractItemModel.__init__(self)
         self.wsp = wsp       # A pointer to the workspace
+        self._copySettingsFromID = None            # Id of the series from which to copy parameter settings
 
     def resetWorkspace(self):
         self.beginResetModel()
@@ -1230,6 +1233,8 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
     def addSeries(self):
         """Adds a new series to the workspace."""
+        # TODO: Additona and removal of series influence the currently copied ID
+        self._copySettingsFromID = None
 
         self.beginInsertRows(QtCore.QModelIndex(), len(self.wsp.series), len(self.wsp.series))        # Parent node, first and last position
 
@@ -1450,6 +1455,8 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
     def remItems(self, items):
         """Removes a Series or a Datum"""
+        self._copySettingsFromID = None
+
         for item in items:
             sID = item.selfID()
             if sID[0] is None:
@@ -1485,6 +1492,16 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
                 self.beginRemoveRows(self.parent(index), index.row(), index.row()) # Parent node, first and last position
                 item.remove()    # Remove itself from the workspace
                 self.endRemoveRows()
+
+    def copySettings(self, item):
+        """Stores a reference to a Series from which the Settings will be copied."""
+        self._copySettingsFrom = item
+
+    def pasteSettings(self, items):
+        """Pastes series settings to a selected Series."""
+        if self._copySettingsFrom is not None:
+            for item in items:
+                item.copySettings(self._copySettingsFrom)
 
 class NavigationTreeView(QTreeView):
     """Model/View based class to display loaded datasets."""
@@ -1536,6 +1553,15 @@ class NavigationTreeView(QTreeView):
             actnRemoveData.setStatusTip('Remove file from the workspace')
             actnRemoveData.triggered.connect(lambda : self.model().remItems(items=[selind.internalPointer() for selind in self.selectedIndexes() if selind.isValid()]))
             popMenu.addAction(actnRemoveData)
+
+            # actnCopySettings = QAction(QIcon('icons\icon_blank.png'), 'Copy settings', self)
+            # actnCopySettings.setStatusTip('Copies the series settings (frequency ranges, steps, and parameter priors)')
+            # actnCopySettings.triggered.connect(lambda : self.model().copySettings(index.internalPointer()))
+            # popMenu.addAction(actnCopySettings)
+            # actnPasteSettings = QAction(QIcon('icons\icon_blank.png'), 'Apply settings', self)
+            # actnPasteSettings.setStatusTip('Applies the copied settings to the current Series')
+            # actnPasteSettings.triggered.connect(lambda : self.model().pasteSettings(items=[selind.internalPointer() for selind in self.selectedIndexes() if selind.isValid()]))
+            # popMenu.addAction(actnPasteSettings)
 
         popMenu.addSeparator()
         popMenu.addAction(actnPasteCrnt)
@@ -1829,7 +1855,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         try:
             item = self.TP[key]
             row = item.siblID()
-        except KeyError:
+        except (KeyError, AttributeError):
             if key == ('.', 'theta', 0):
                 item = self._parsPH0
                 row = 1
@@ -2236,13 +2262,18 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if success:                 # self.datum.T has been updated
             self.beginInsertRows(index, 0, 0) # Parent node, first and last position
 
-            newTP = getDisplayTree(self.datum.T)   # New parameter tree
+            prnt.addChild(getDisplayTree(X))
 
-            # Swap children between the old and new parameter trees
-            for chld in prnt.children():
-                chld.cut()
-            for chld in newTP[prnt.name].children():
-                prnt.addChild(chld.cut())
+            # newTP = getDisplayTree(X)   # New parameter tree
+            # print(repr(X))
+            #
+            # newTP = getDisplayTree(self.datum.T)   # New parameter tree
+            #
+            # # Swap children between the old and new parameter trees
+            # existingChildrenNames = [chld.name for chld in prnt.children()]
+            # for chld in newTP[prnt.name].children():
+            #     if chld.name not in existingChildrenNames:
+            #         prnt.addChild(chld.cut())
 
             self.endInsertRows()
 
@@ -4531,48 +4562,50 @@ class MainView(QMainWindow):
 
     def saveResults(self):
         """Saves the current results of computation into a file."""
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.txt)')
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.xlsx)')
         if filename:
-            if filename == '' : filename = 'results.txt'
-            if filename[-4:] != '.txt': filename += '.txt'
+            if filename == '' : filename = 'results.xlsx'
+            if filename[-5:] != '.xlsx': filename += '.xlsx'
 
-        # Write the results to a file
-        tab = []
-        for sss in self._crnt.series:
-            for ddd in sss.data:
-                row = [sss.name, ddd.name, '{:.6f}'.format(np.linalg.norm(ddd.yT))]
-                ampl, vars, names = [], [], []
-                for name in ddd.repRootNames:
-                    if name not in ddd.xclRootNames:
-                        try:
-                            row += ['{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].mean), '{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].var)]
-                            if name != 'Water':
-                                ampl.append(ddd.smplDistF[(name, 'ampl', 0)].mean)
-                                vars.append(ddd.smplDistF[(name, 'ampl', 0)].var)
-                                names.append(name)
-                        except KeyError:
-                            row += ['{:.6f}'.format(ddd.crntParsH[name]['ampl'][0]), '---']
-                            if name != 'Water':
-                                ampl.append(ddd.crntParsH[name]['ampl'][0])
-                                vars.append(0.0)
-                                names.append(name)
+        # # Write the results to a file
+        # tab = []
+        # for sss in self._crnt.series:
+        #     for ddd in sss.data:
+        #         row = [sss.name, ddd.name, '{:.6f}'.format(np.linalg.norm(ddd.yT))]
+        #         ampl, vars, names = [], [], []
+        #         for name in ddd.repRootNames:
+        #             if name not in ddd.xclRootNames:
+        #                 try:
+        #                     row += ['{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].mean), '{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].var)]
+        #                     if name != 'Water':
+        #                         ampl.append(ddd.smplDistF[(name, 'ampl', 0)].mean)
+        #                         vars.append(ddd.smplDistF[(name, 'ampl', 0)].var)
+        #                         names.append(name)
+        #                 except KeyError:
+        #                     row += ['{:.6f}'.format(ddd.crntParsH[name]['ampl'][0]), '---']
+        #                     if name != 'Water':
+        #                         ampl.append(ddd.crntParsH[name]['ampl'][0])
+        #                         vars.append(0.0)
+        #                         names.append(name)
+        #
+        #         # Compute mole fractions
+        #         ampl = np.array(ampl).ravel()
+        #         vars = np.array(vars).ravel()
+        #         m_tot = np.sum(ampl)      # Total intensity
+        #         v_tot = np.sum(vars)      # Total variance of the intensity estimate
+        #         mfrac = ampl / m_tot
+        #         confi = 2 * mfrac * np.sqrt(vars/(ampl**2) + v_tot/(m_tot**2))
+        #         row += [f for mf, ci in zip(mfrac, confi) for f in ( '{:.6f}'.format(mf), '{:.6f}'.format(ci) )]
+        #
+        #         tab.append(row)
+        # head = ['Series', 'Filename', 'Signal norm'] + [f for name in self.repRootNames for f in (name, 'var')] + [f for name in names for f in ('x_'+name, '95% cred.i.')]
+        # try:
+        #     with open(filename, 'w') as fout:
+        #         print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
+        # except PermissionError:
+        #     print('Can not save the results to file.')
 
-                # Compute mole fractions
-                ampl = np.array(ampl).ravel()
-                vars = np.array(vars).ravel()
-                m_tot = np.sum(ampl)      # Total intensity
-                v_tot = np.sum(vars)      # Total variance of the intensity estimate
-                mfrac = ampl / m_tot
-                confi = 2 * mfrac * np.sqrt(vars/(ampl**2) + v_tot/(m_tot**2))
-                row += [f for mf, ci in zip(mfrac, confi) for f in ( '{:.6f}'.format(mf), '{:.6f}'.format(ci) )]
-
-                tab.append(row)
-        head = ['Series', 'Filename', 'Signal norm'] + [f for name in self.repRootNames for f in (name, 'var')] + [f for name in names for f in ('x_'+name, '95% cred.i.')]
-        try:
-            with open(filename, 'w') as fout:
-                print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
-        except PermissionError:
-            print('Can not save the results to file.')
+        self._crnt.saveResults(filename)
 
 # ------------------------ Parameter list --------------------------------------
     def updateParsList(self, indxStep = None):
@@ -4723,7 +4756,8 @@ class MainView(QMainWindow):
             self.mainFigureWidget.plot(f, yFph, xF,
                 zF = zF if self.actnToggleComps.isChecked() else None,
                 stems = allStems if self.actnToggleStems.isChecked() else None,
-                freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[0].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)])   # if i in self._crnt.steps[0].frqBlkIds])
+                freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[0].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)],
+                indx_colr=[i for i, name in enumerate(self._crnt.repRootNames) if not self._crnt.isXclRootName(name)])   # if i in self._crnt.steps[0].frqBlkIds])
 
             if autoRange:
                 self.mainFigureWidget.autoRange()

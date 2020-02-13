@@ -9,6 +9,7 @@ import sys
 import tabulate
 from math import ceil
 import pywt
+import xlsxwriter
 
 # Functions for generating FIDs and optimization
 from scipy import optimize
@@ -266,6 +267,18 @@ class Workspace():
 
         return T
 
+    def allParsKeys(self, node_name=None, parsKind=None):
+        """Returns all parameter keys for a (sub)tree starting from a specific node."""
+        if node_name is None:
+            node = self.T.findRoot()
+        else: node = self.T[node_name]
+
+        if parsKind is None:
+            parsKind = ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']
+
+        return [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
+                if key[1] in parsKind]      # List of all parameter keys that affect the subtree
+
     def _updateParameters(self):
         """Updates the existing dictionaries of parameters after the tree has changed (e.g. when adding/removing nodes or setting new root nodes). Updates the structure to match with the new default parameters but keeps the old values."""
         oldRoots = self.repRootNames
@@ -493,6 +506,78 @@ class Workspace():
                   .format(np.mean(sampler.acceptance_fraction)))
 
         return sampler
+
+    def saveResults(self, filename='results.xlsx', parsKeys=None):
+        """Saves the reults to an excel file."""
+
+        # Create a workbook and add a worksheet.
+        workbook = xlsxwriter.Workbook(filename)
+        worksheet = workbook.add_worksheet()
+
+        # Which cell to start writing the data from. Rows and columns are zero indexed.
+        datarow = 0
+        datacol = 0
+
+        # Write the header
+        fmt_center = workbook.add_format({'align': 'center', 'valign': 'vcenter'})
+        fmt_cenrot = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'rotation': 90})
+        for i, (text, col_width) in enumerate(zip(['','ID', 'Series Name', 'Data Name'], [3, 5, 3, 15])):
+            worksheet.merge_range(0, i, 2, i, text, fmt_center)
+            worksheet.set_column(i, i, col_width)
+        worksheet.merge_range(0, 4, 0, 4+2*len(self.repRootNames)-1, 'Absolute intensities of mixture components', fmt_center)
+
+        col = 4
+        for name in self.repRootNames:
+            worksheet.merge_range(1, col, 1, col+1, name, fmt_center)
+            worksheet.write_row(2, col, ['Intensity, a.u.', 'Variance'])
+            col += 2
+
+
+        # Write the Series names in merged rows
+        row_start = 3
+        for ser in self.series:
+            row_stop = row_start + len(ser.data) - 1
+            if len(ser.data) > 1:
+                # Merge rows if there are several Datum files in the Series
+                worksheet.merge_range(row_start, 2, row_stop, 2, ser.name, fmt_cenrot)
+            else:
+                # Write horizontally, if tehre is just one Datum
+                worksheet.write(row_start, 2, ser.name)
+            row_start = row_stop + 1
+
+        # Write the amplitudes and parameters
+        row = 3
+        for ser in self.series:
+            for dat in ser.data:
+                # Write the Datum ID and Name
+                worksheet.write(row, 0, row-2)
+                worksheet.write(row, 1, repr(dat.selfID()))
+                worksheet.write(row, 3, dat.name)
+
+                # Write the results
+                col = 4
+                for name in self.repRootNames:
+                    key=(name, 'ampl', 0)
+                    if not dat.isXclRootName(name):
+                        ampl = dat.getCrntVal(key)
+                        var = dat.smplDistF[key].var if key in dat.smplDistF.keys() else 0.0
+                    else:
+                        ampl, var = [0.0, 0.0]
+                    worksheet.write_row(row, col, [ampl, var])
+                    col += 2
+                row += 1
+
+        # # Iterate over the data and write it out row by row.
+        # for item, cost in (expenses):
+        #     worksheet.write(row, col,     item)
+        #     worksheet.write(row, col + 1, cost)
+        #     row += 1
+        #
+        # # Write a total using a formula.
+        # worksheet.write(row, 0, 'Total')
+        # worksheet.write(row, 1, '=SUM(B1:B4)')
+
+        workbook.close()
 
     def pack(self):
         """Packs the workspace into a dictionary to be stored.
@@ -786,6 +871,34 @@ class Series():
 
         return DDD
 
+    def copySettings(self, serFrom):
+        """Copies main settings (freq blocks, steps, parameters distributions) from another series, serFrom."""
+        if serFrom != self:
+            # Remove existing frequency blocks
+            for i in range(1, len(self.freqBlocks)):
+                self.remFreqBlock(i)
+
+            # Remove all Steps
+            self.steps.clear()
+
+            # Remove all Frequency blocks (only after the steps have been removed)
+            self.freqBlocks.clear()
+
+            # Add new frequency blocks
+            for blk in serFrom.freqBlocks:
+                self.addFreqBlock(lims=(blk.min, blk.max), bslnOrder=blk.bslnOrder)
+
+            # Add new steps
+            for step in serFrom.steps:
+                self.steps.append(copy.deepcopy(step))
+
+            # Update the parameter distributions
+            for key, par in serFrom.parsSpecDict.items():
+                self.setPrior(key, min=par.min, max=par.max, label=par.label, distr=par.distr, p1=par.p1, p2=par.p2, dval=par.dval)
+
+            # Reset apodization and zero-filling
+            self.resetFreqs(zff=serFrom.zff, apod=serFrom.apod)
+
     def import_data(self, path):
         """Loads the data stored in the file. Updates the array of Datum structures; each Datum points onto this file."""
         with open(path, 'rb') as fp:
@@ -891,7 +1004,7 @@ class Series():
     def addFreqBlock(self, lims=None, bslnOrder=(0, 0)):
         """Adds a frequency block for optimization at certain in the self.freqBlocks arrays."""
         if lims is None:
-            self.freqBlocks = []         # Reset the frequency blocks and add the entire signal
+            self.freqBlocks = []         # Reset the frequency blocks and add the entire frequency range
             lims = (-1*float('inf'), float('inf'))
 
         self.freqBlocks.append(freqSpec(min(lims), max(lims), bslnOrder))
@@ -1356,18 +1469,6 @@ class Datum():
         df = (chshTo - chshFrom)*self.c0
         self.yT *= np.exp(2*np.pi*1j*df*self.t)
         self.resetSignals()
-
-    def allParsKeys(self, node_name=None, parsKind=None):
-        """Returns all parameter keys for a (sub)tree starting from a specific node."""
-        if node_name is None:
-            node = self.T.findRoot()
-        else: node = self.T[node_name]
-
-        if parsKind is None:
-            parsKind = ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']
-
-        return [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
-                if key[1] in parsKind]      # List of all parameter keys that affect the subtree
 
     def fittableParsKeys(self, frqBlkIds=None, inRange=None, customPriors=None, node_name=None, considerRange=False):
         """Returns all _individually_ fittable parameters for a (sub)tree starting from a specific node."""

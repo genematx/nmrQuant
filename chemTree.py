@@ -1145,6 +1145,9 @@ class treeNode:
         else: return self.alias
 
     def __getitem__(self, key):
+        # for item in self.items():
+        #     if item.name == key:
+        #         return item
         return self._treeBook[key]
 
     def __getstate__(self):
