@@ -1389,30 +1389,6 @@
       ]
     ]
   },
-  "Water": {
-    "chshH": [
-      [
-        3.75,
-        5.75,
-        "H_water",
-        "Uniform",
-        null,
-        null,
-        null
-      ]
-    ],
-    "name": "Water",
-    "chshC": [],
-    "multH": [
-      1
-    ],
-    "nSpinH": [
-      2
-    ],
-    "jcplHH": [],
-    "multC": [],
-    "pairHH": []
-  },
   "Lactic acid": {
     "chshH": [
       [
@@ -8718,42 +8694,6 @@
         3
       ]
     ]
-  },
-  "TMS": {
-    "chshH": [
-      [
-        -0.25,
-        0.25,
-        "",
-        "Uniform",
-        null,
-        null,
-        null
-      ]
-    ],
-    "name": "TMS",
-    "chshC": [
-      [
-        -0.25,
-        0.25,
-        "",
-        "Uniform",
-        null,
-        null,
-        null
-      ]
-    ],
-    "multH": [
-      4
-    ],
-    "nSpinH": [
-      3
-    ],
-    "jcplHH": [],
-    "multC": [
-      1
-    ],
-    "pairHH": []
   },
   "Cannabidiolic acid (CBDa)": {
     "chshH": [

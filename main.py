@@ -148,10 +148,14 @@ class ChooseFromDBDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Add widgets for entering parameters
-        keysDB = sorted([k for k, v in chemDB.items()])
-        self.cmbox = QComboBox()
-        self.cmbox.addItems(keysDB)
-        layout.addWidget(self.cmbox)
+
+        self.cmboxLibs, self.cmboxChem = QComboBox(), QComboBox()
+        self.cmboxLibs.addItems( sorted([k for k, _ in chemLib.items()]) )
+        self.cmboxLibs.currentIndexChanged.connect(self.setCmboxChemItems)
+        self.setCmboxChemItems(0)
+
+        layout.addWidget(self.cmboxLibs)
+        layout.addWidget(self.cmboxChem)
 
         # OK and Cancel buttons
         self.buttons = QDialogButtonBox(
@@ -162,9 +166,16 @@ class ChooseFromDBDialog(QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
+    def setCmboxChemItems(self, indx):
+        """Sets the items fro the second combo box."""
+        self.cmboxChem.clear()
+        lib_key = self.cmboxLibs.itemText(indx)
+        keysDB = sorted([key for key, val in chemLib[lib_key].items()])
+        self.cmboxChem.addItems(keysDB)
+
     # get the selection
     def getSelection(self):
-        return self.cmbox.currentText()
+        return self.cmboxChem.currentText()
 
     # static method to create the dialog and return (date, time, accepted)
     @staticmethod

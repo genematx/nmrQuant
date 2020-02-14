@@ -20,7 +20,6 @@ import scipy.linalg
 import scipy.signal
 from collections import OrderedDict, MutableMapping
 import os, time
-import marshal, inspect
 import nmrglue
 
 # Functions needed only for Matlab
@@ -51,10 +50,6 @@ class MyTakeStep(object):
         s = self.stepsize
         x = np.random.uniform(-1, 1, x.shape)
         return x
-
-def print_fun(x, f, accepted):
-    print(x)
-    print("at minima %.4f accepted %d" % (f, int(accepted)))
 
 ##### ------------ Main classes for the general program logic ------------ #####
 
@@ -3324,6 +3319,8 @@ def flims(dt, nf):
         return (-nf/(2*dt*nf), (nf/2-1)/(dt*nf))
     else:
         return (-(nf-1)/(2*dt*nf), (nf-1)/(2*nf*dt))
+
+# ------------------------------ License files ---------------------------------
 
 def makeLicenseFile(expiryDate=None, filename='license.lic', options=None):
     """Creates a license file, license.lic. Expiry date should have the format '%d-%m-%Y', e.g. '25-11-1986'."""

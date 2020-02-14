@@ -91,7 +91,7 @@ class chemSpec:
         self.pairHH = pairHH if pairHH is not None else [None]*len(self.jcplHH)     # List of tuples; each tuple contains indices of coupled protons
 
         # Find multiplicities for different spin systems
-        self._spsyAsgnH = []   # list of size 1 x nSpinH; each entry is the index of spin system to which this proton is assigned
+        self._spsyAsgnH, self._nSpsyH = [], 0   # list of size 1 x nSpinH; each entry is the index of spin system to which this proton is assigned
         self.assignSpsy()      # Compute assignment of spins to spin systems
         self.multH = multH if multH is not None or [] else [1]*self._nSpsyH       # Multiplicities of different spin systems (uncoupled, but with the same chemical shifts)
         self.multC = multC if multC is not None or [] else [1]*len(self.chshC)
@@ -238,35 +238,6 @@ class chemSpec:
                 'multC': self.multC,
                 'jcplHH': self.jcplHH,
                 'pairHH': self.pairHH}
-
-def readChemDB(fname='chemDB'):
-    """Reads a chemDB in JSON format and convers it to dictionary of chemSpec class objects."""
-    try:
-        with open(fname+'.json', 'r') as fp:
-            chemDB = json.load(fp)
-    except FileNotFoundError:
-        return dict()
-
-    for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
-        for kk in ['chshH', 'chshC', 'jcplHH']:
-            v[kk] = array2parsSpec(v[kk])
-        for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
-            if v[kk].__class__ is int:
-                v[kk] = [v[kk]]
-    chemDB = {k:chemSpec(**v) for k,v in chemDB.items()}    # Conver orderedDict to chemSpec namedtuple
-    return chemDB
-
-def writeChemDB(chemDB, fname='result'):
-    """Writes the chemDB in JSON format and stores it file name"""
-    chemDB = {k:v.asdict() for k,v in chemDB.items()}   # Convert namedtuples to dictionaries
-    for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
-        for kk in ['chshH', 'chshC', 'jcplHH']:
-            v[kk] = array2parsSpec(v[kk])
-        for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
-            if isinstance(v[kk], int):
-                v[kk] = [v[kk]]
-    with open(fname+'.json', 'w') as fp:
-        json.dump(chemDB, fp)
 
 parsSpec = namedtuple('parsSpec', 'min, max, label, distr, p1, p2, dval')
 parsSpec.__new__.__defaults__ = (-np.inf, np.inf, '', 'Uniform', None, None, None)     # 'mode' specifies the location of the distribution maximum value
@@ -438,13 +409,6 @@ def hpd(x, alpha=0.05):
         # Sort univariate node
         sx = np.sort(x)
         return np.array(calc_min_interval(sx, alpha))
-
-def printChemDB():
-    """Prints chemDB."""
-    for k, v in chemDB.items():
-        print(k,v)
-
-chemDB = readChemDB()     # Load the chemical database
 
 # QD simulations
 def transition_indices(n_spin, k=0):
@@ -1835,6 +1799,7 @@ class chemNodeDB(chemNode):
     """Class for a node describing a chemical from the database, inherited from chemNode. The node can be specified either by passing a name of a species in the database or the QDpars structure (an instance of chemSpec class.)"""
     def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias='', nameDB=None, QDpars=None):
         chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
+        chemDB = {key:val for _, db in chemLib.items() for key, val in db.items()}
         if name in chemDB or nameDB in chemDB:
             self.QDpars = copy.deepcopy(chemDB[self.name if nameDB is None else nameDB])    # Parameters from the database
         elif QDpars is not None:
@@ -2066,3 +2031,100 @@ def ind2pos(ind):
     for i, j in enumerate(ind):
         pos[j] = i
     return pos
+
+# ----------------------------- Chemical Library ------------------------------
+
+def readChemDB(fname='chemDB.json'):
+    """Reads a chemDB in JSON or .cdb format and convers it to a dictionary of chemSpec class objects."""
+    root, ext = os.path.splitext(fname)
+
+    if ext == '.json':
+
+        try:
+            # Try JSON first
+            with open(fname, 'r') as fp:
+                chemDB = json.load(fp)
+        except FileNotFoundError:
+            return dict()
+
+        for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
+            for kk in ['chshH', 'chshC', 'jcplHH']:
+                v[kk] = array2parsSpec(v[kk])
+            for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
+                if v[kk].__class__ is int:
+                    v[kk] = [v[kk]]
+        chemDB = {k:chemSpec(**v) for k,v in chemDB.items()}    # Conver orderedDict to chemSpec namedtuple
+
+    elif ext == '.cdb':
+        chemDB = {}
+
+    return chemDB
+
+def writeChemDB(chemDB, fname='result.json'):
+    """Writes the chemDB in JSON format and stores it file name"""
+    root, ext = os.path.splitext(fname)
+
+    if ext == '.json':
+        chemDB = {k:v.asdict() for k,v in chemDB.items()}   # Convert namedtuples to dictionaries
+        for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
+            for kk in ['chshH', 'chshC', 'jcplHH']:
+                v[kk] = array2parsSpec(v[kk])
+            for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
+                if isinstance(v[kk], int):
+                    v[kk] = [v[kk]]
+        with open(fname+'.json', 'w') as fp:
+            json.dump(chemDB, fp)
+
+def printChemDB():
+    """Prints chemDB."""
+    for k, v in chemDB.items():
+        print(k,v)
+
+def loadChemLibrary(path=None):
+    """Loads the chemical library (a dictionary of chemDB dictionaries)."""
+    if path is None:
+        path = os.getcwd()
+
+    # Define a DB for common chemicals
+    chemLib = {'Common chemicals' :
+                {'Water' : chemSpec(name='Water',
+                                   chshH=[parsSpec(min=3.75, max=5.75, label='H_water')],
+                                   multH=[1],
+                                   nSpinH=[2]),
+                'TMS' : chemSpec(name='TMS',
+                                   chshH=[parsSpec(min=-0.25, max=0.25)],
+                                   chshC=[parsSpec(min=-0.25, max=0.25)],
+                                   multH=[4],
+                                   nSpinH=[3],
+                                   multC=[4]),
+                'TMSP' : chemSpec(name='TMSP',
+                                   chshH=[parsSpec(min=-0.25, max=0.25)],
+                                   chshC=[parsSpec(min=-0.25, max=0.25)],
+                                   multH=[3],
+                                   nSpinH=[3],
+                                   multC=[3]),
+                'Ethanol' : chemSpec(name='Ethanol',
+                                   chshH=[parsSpec(min=0.5, max=1.5, label='H1'), parsSpec(min=3.0, max=4.0, label='H2')],
+                                   chshC=[parsSpec(min=14.9, max=15.1, label='C1'), parsSpec(min=57.9, max=58.1, label='C2')],
+                                   jcplHH=[parsSpec(min=6.0, max=8.0, label='H1-H2',dval=7.0402)],
+                                   multH=[1],
+                                   nSpinH=[3, 2],
+                                   multC=[1, 1],
+                                   pairHH=[[0, 1]])
+                 }
+               }
+
+    # Try loading all JSON and .cdb files in the working directory
+    # List all files in a directory using os.listdir
+    for entry in os.listdir(path):
+        fullpath = os.path.join(path, entry)
+        if os.path.isfile(fullpath):
+            fname, ext = os.path.splitext(entry)
+            if ext in ['.json', '.cdb']:
+                try:
+                    chemLib[fname] = readChemDB(fullpath)
+                except UnpicklingError: pass
+
+    return chemLib
+
+chemLib = loadChemLibrary()            # Load the chemical library
