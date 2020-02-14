@@ -3798,7 +3798,10 @@ class MySpecPlot(FigureCanvas):
 class MainView(QMainWindow):
     """Main GUI form class."""
 
-    def __init__(self, wsp, parent = None):
+    def __init__(self, wsp, expiryTime = np.inf, parent = None):
+        # Set the expiry time/date
+        self._expiryTime = expiryTime
+
         # Initialize with some workspace
         self.wsp = wsp    # The Workspace; main class that holds all logic
         self._crnt = self.wsp     # Currently opened Series/Datum/or the entire Workspace
@@ -3826,6 +3829,18 @@ class MainView(QMainWindow):
         if compile_standalone:
             sys.stdout = EmittingStream(textWritten=self.normalOutputWritten)
             sys.stderr = EmittingStream(textWritten=self.errorOutputWritten)
+
+        # Show the warning window if the license is about to expire (less than 5 days left)
+        if (self._expiryTime - time.time()) < 5*24*3600:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+
+            msg.setText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
+            msg.setInformativeText("Please consider renewing it." )
+            msg.setWindowTitle("Expiring license")
+            # msg.setDetailedText("The details are as follows:")
+            msg.setStandardButtons(QMessageBox.Close)
+            msg.exec_()
 
     def __del__(self):
         # Restore sys.stdout (if used to collect output to the console)
@@ -4056,6 +4071,10 @@ class MainView(QMainWindow):
         exitAction.setShortcut('Ctrl+Q')
         exitAction.setStatusTip('Exit application')
         exitAction.triggered.connect(self.close)
+        # Show the information dialog action
+        actnAbout = QAction(QIcon('icons\icon_info.png'), 'About', self)
+        actnAbout.setStatusTip('Information about the program')
+        actnAbout.triggered.connect(self.showAboutMessage)
 
         # ----------------------- Actions for the plot -------------------------
         # Add freqBlock action
@@ -4174,6 +4193,8 @@ class MainView(QMainWindow):
         fileMenu.addAction(loadAction)
         fileMenu.addAction(saveAction)
         fileMenu.addAction(exitAction)
+        helpMenu = menubar.addMenu('&Help')
+        helpMenu.addAction(actnAbout)
 
         # ------------------------- Set the toolbar ----------------------------
         tbMain.addAction(clearAction)
@@ -4459,6 +4480,19 @@ class MainView(QMainWindow):
     def showSettingsDialog(self):
         """Shows an input dialog and updates settings"""
         accepted = SettingsDialog.run()
+
+    def showAboutMessage(self):
+        """Displays the About message."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+
+        msg.setText("Quantitative NMR analysis with quantum mechanical models.")
+        msg.setInformativeText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
+        msg.setWindowTitle("About qNMR")
+        # msg.setDetailedText("The details are as follows:")
+        msg.setStandardButtons(QMessageBox.Close)
+
+        msg.exec_()            # Returns the values of pressed button
 
     def onAssigned(self):
         """Updates the tree and plots when model peaks have been assigned to picked peaks."""
@@ -4879,13 +4913,54 @@ class MainView(QMainWindow):
         """Selects and cuts a region of interest in the spectrum and adjusts the underlying data accordingly."""
         print('In reduce range')
 
+def checkLicense():
+    # Try loading the license file
+    expiryTime, options = readLicenseFile()
 
+    if expiryTime is None:
+        # No license file found
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+
+        msg.setText("Please place a valid license *.lic file in the program directory.")
+        # msg.setInformativeText("This is additional information")
+        msg.setWindowTitle("Missing license file")
+        # msg.setDetailedText("The details are as follows:")
+        msg.setStandardButtons(QMessageBox.Close)
+
+        msg.exec_()            # Returns the values of pressed button
+
+        return False, False
+
+
+    elif time.time() > expiryTime:
+        # Checks whether the current time is less than the expiry time (in sec from the beginning of the epoch).
+        # The license was found but has expired
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+
+        msg.setText("The license has expired.")
+        msg.setInformativeText("Please place a valid license *.lic file in the program directory.")
+        msg.setWindowTitle("Expired license file")
+        # msg.setDetailedText("The details are as follows:")
+        msg.setStandardButtons(QMessageBox.Close)
+
+        msg.exec_()            # Returns the values of pressed button
+
+        return False, False
+
+    return expiryTime, options
 
 if __name__ == '__main__':
-    app = 0
-    app = QApplication(sys.argv)
 
-    wsp = Workspace()
-    main_view = MainView(wsp)
-    main_view.show()
-    app.exec_()
+    expiryTime, options = checkLicense()
+
+    if expiryTime:
+        app = 0
+        app = QApplication(sys.argv)
+
+        wsp = Workspace()
+        main_view = MainView(wsp, expiryTime)
+        main_view.show()
+
+        app.exec_()

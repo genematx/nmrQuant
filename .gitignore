@@ -113,6 +113,9 @@ dist/
 icons/_dev/
 workspaces/
 notebooks/
+*.lic
+*.wsp
+*.ctr
 *.spec       # Files created by pyinstaller
 main.exe
 results.*

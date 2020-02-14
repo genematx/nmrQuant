@@ -894,7 +894,9 @@ class Series():
 
             # Update the parameter distributions
             for key, par in serFrom.parsSpecDict.items():
-                self.setPrior(key, min=par.min, max=par.max, label=par.label, distr=par.distr, p1=par.p1, p2=par.p2, dval=par.dval)
+                try:
+                    self.setPrior(key, min=par.min, max=par.max, label=par.label, distr=par.distr, p1=par.p1, p2=par.p2, dval=par.dval)
+                except (KeyError, IndexError): pass
 
             # Reset apodization and zero-filling
             self.resetFreqs(zff=serFrom.zff, apod=serFrom.apod)
@@ -3322,3 +3324,40 @@ def flims(dt, nf):
         return (-nf/(2*dt*nf), (nf/2-1)/(dt*nf))
     else:
         return (-(nf-1)/(2*dt*nf), (nf-1)/(2*nf*dt))
+
+def makeLicenseFile(expiryDate=None, filename='license.lic', options=None):
+    """Creates a license file, license.lic. Expiry date should have the format '%d-%m-%Y', e.g. '25-11-1986'."""
+    if options is None:
+        options = {}
+
+    if expiryDate is not None:
+        expiryTime = time.mktime(time.strptime(expiryDate, '%d-%m-%Y'))         # Time in sec from the start of epoch
+    else: expiryTime = time.time() + 30 * 24*3600                               # Give thirty days
+
+    # Save to file
+    with open(filename, 'wb') as fp:
+        dill.dump([expiryTime, options], fp)
+
+def readLicenseFile(path=None):
+    """Tries to locate a license file *.lic in the current directory, reads it, and returns the expiry date."""
+
+    if path is None:
+        path = os.getcwd()
+
+    expiryTime, options = None, None
+
+    # List all files in a directory using os.listdir
+    for entry in os.listdir(path):
+        fullpath = os.path.join(path, entry)
+        if os.path.isfile(fullpath):
+            if fullpath[-4:] == '.lic':
+                try:
+                    with open(fullpath, 'rb') as fp:
+                        expiryTime_new, options_new = dill.load(fp)
+                        if expiryTime is None or expiryTime_new > expiryTime:
+                            # This license is better than one loaded previously
+                            expiryTime = expiryTime_new
+                            options = options_new
+                except UnpicklingError: pass
+
+    return expiryTime, options
