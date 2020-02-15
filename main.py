@@ -7,7 +7,7 @@ from dataio import *
 import config
 
 from PyQt4 import QtGui, QtCore, uic
-from PyQt4.QtGui import QAction, QActionGroup, QApplication, QBrush, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QIcon, QInputDialog, QItemSelectionModel, QItemDelegate, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QMainWindow, QPen, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget, QTableWidget, QToolButton, QTreeView, QToolBar, QWidget
+from PyQt4.QtGui import QAction, QActionGroup, QApplication, QBrush, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QIcon, QInputDialog, QItemSelectionModel, QItemDelegate, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QMainWindow, QPalette, QPen, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget, QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
 from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
@@ -143,48 +143,91 @@ class MyDoubleEdit(QLineEdit):
 class ChooseFromDBDialog(QDialog):
     """A dialog to choose chemicals from the DB to add to the tree."""
 
-    def __init__(self, parent = None):
+    def __init__(self, forbidden_names=None, parent = None):
         super(ChooseFromDBDialog, self).__init__(parent)
-        layout = QVBoxLayout(self)
+
+        self.forbidden_names = forbidden_names if forbidden_names is not None else []
+
+        layout = QFormLayout(self)
+        self.setWindowTitle('Add from database')
+        self.setWindowFlags(Qt.WindowTitleHint)
+        self.setWindowFlags(Qt.Dialog | Qt.MSWindowsFixedSizeDialogHint | Qt.WindowTitleHint)
 
         # Add widgets for entering parameters
-
         self.cmboxLibs, self.cmboxChem = QComboBox(), QComboBox()
         self.cmboxLibs.addItems( sorted([k for k, _ in chemLib.items()]) )
-        self.cmboxLibs.currentIndexChanged.connect(self.setCmboxChemItems)
-        self.setCmboxChemItems(0)
+        self.cmboxLibs.currentIndexChanged.connect(self.onLibrarySelected)
+        self.cmboxChem.currentIndexChanged.connect(self.onChemicalSelected)
+        self.nameEdit = QLineEdit()
+        self.nameEdit.textChanged.connect(self.onTextChanged)
 
-        layout.addWidget(self.cmboxLibs)
-        layout.addWidget(self.cmboxChem)
+        layout.addRow('Database', self.cmboxLibs)
+        layout.addRow('Chemical', self.cmboxChem)
+        layout.addRow('Display as', self.nameEdit)
 
         # OK and Cancel buttons
-        self.buttons = QDialogButtonBox(
+        self.buttonsBox = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
             Qt.Horizontal, self)
-        layout.addWidget(self.buttons)
+        layout.addWidget(self.buttonsBox)
 
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
+        self.buttonsBox.accepted.connect(self.accept)
+        self.buttonsBox.rejected.connect(self.reject)
 
-    def setCmboxChemItems(self, indx):
+        # Initialize the comboboxes
+        # self.onLibrarySelected(0)
+        self.cmboxLibs.setCurrentIndex( self.cmboxLibs.findText('Built-in models') )    # Find the index of the built-in DB
+
+    def onLibrarySelected(self, indx):
         """Sets the items fro the second combo box."""
         self.cmboxChem.clear()
         lib_key = self.cmboxLibs.itemText(indx)
         keysDB = sorted([key for key, val in chemLib[lib_key].items()])
         self.cmboxChem.addItems(keysDB)
 
+    def onChemicalSelected(self, indx):
+        """Called when a chemical has been selected from the database."""
+        name_in_DB = self.cmboxChem.itemText(indx)   # or self.cmboxChem.currentText()
+        self.nameEdit.setText(name_in_DB)
+
+    def onTextChanged(self, text):
+        """Called when the text in the Name Edit changes."""
+
+        if text in self.forbidden_names:
+            self.setToolTip('A node with this name already exists in the model tree. Would you like to use the same model with a different name?')
+            self.nameEdit.setStyleSheet("""
+                                            QLineEdit {
+                                                        background-color: rgb(249, 193, 203);
+                                                        foreground-color: rgb(124, 44, 59);
+                                                        border: 1px solid
+                                                      }
+                                        """)                              # Need to add the border, because otherwise the LineEdit flickers on Windows
+            self.buttonsBox.buttons()[0].setEnabled(False)                # Disable the OK button
+        else:
+            self.setToolTip('')
+            self.nameEdit.setStyleSheet("""
+                                            QLineEdit {
+                                                      }
+                                        """)                              # Restore the normal style (white background)
+            self.buttonsBox.buttons()[0].setEnabled(True)                 # Enable the OK button
+
     # get the selection
     def getSelection(self):
-        return self.cmboxChem.currentText()
+        """Returns the chosen display name for the new chemical and the corresponding chemSpec structure from the database."""
+        displayName = self.nameEdit.text()
+        libsName = self.cmboxLibs.currentText()
+        chemName = self.cmboxChem.currentText()
 
-    # static method to create the dialog and return (date, time, accepted)
+        return displayName, copy.deepcopy(chemLib[libsName][chemName])
+
+    # static method to create the dialog and return (name, QDpars, accepted)
     @staticmethod
-    def run(parent = None):
-        dialog = ChooseFromDBDialog(parent)
+    def run(forbidden_names=None, parent = None):
+        dialog = ChooseFromDBDialog(forbidden_names=forbidden_names, parent=parent)
         result = dialog.exec_()
         if result == QDialog.Accepted:    # If OK was clicked
-            return (dialog.getSelection(), result == QDialog.Accepted)
-        else: return (None, result == QDialog.Accepted)
+            return (*dialog.getSelection(), result == QDialog.Accepted)
+        else: return (None, None, result == QDialog.Accepted)
 
 class SettingsDialog(QDialog):
     def __init__(self, parent = None):
@@ -274,13 +317,13 @@ class SettingsDialog(QDialog):
         # layout.addWidget(smplConfigGroup)
 
         # OK and Cancel buttons
-        self.buttons = QDialogButtonBox(
+        self.buttonsBox = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
             Qt.Horizontal, self)
-        layout.addWidget(self.buttons)
+        layout.addWidget(self.buttonsBox)
 
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
+        self.buttonsBox.accepted.connect(self.accept)
+        self.buttonsBox.rejected.connect(self.reject)
 
     # get current date and time from the dialog
     def getEntries(self):
@@ -2244,9 +2287,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             #     X.setTreeBook()
             #     pars = data["pars"]
         elif source == 'DB':
-            newName, accepted = ChooseFromDBDialog.run()
+            newName, QDpars, accepted = ChooseFromDBDialog.run( forbidden_names=list(self.datum.T.keys()) )
             if accepted:
-                X = chemNodeDB(newName)
+                X = chemNodeDB(newName, QDpars=QDpars)
             else:
                 return 0
         elif source == 'spsy':
@@ -2387,7 +2430,7 @@ class ChemTreeView(QTreeView):
 
 
             # OK and Cancel buttons
-            self.buttons = QDialogButtonBox(
+            self.buttonsBox = QDialogButtonBox(
                 QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
                 Qt.Horizontal, self)
             layoutMain.addLayout(layoutForm)
@@ -2395,10 +2438,10 @@ class ChemTreeView(QTreeView):
                 self.chckReference.setChecked(isReference)
                 layoutMain.addWidget(self.chckReference)
             layoutMain.addWidget(self.chckSeries)
-            layoutMain.addWidget(self.buttons)
+            layoutMain.addWidget(self.buttonsBox)
 
-            self.buttons.accepted.connect(self.accept)
-            self.buttons.rejected.connect(self.reject)
+            self.buttonsBox.accepted.connect(self.accept)
+            self.buttonsBox.rejected.connect(self.reject)
 
             # Resize and change the caption
             prnt_pos = self.parent().mapToGlobal(QtCore.QPoint(0,0))

@@ -82,7 +82,7 @@ class OrderedSet(collections.MutableSet):
 class chemSpec:
     """Class for database entires."""
 
-    def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, **kwargs):
+    def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, Mw=None, **kwargs):
         self.name = name
         self.chshH = chshH if chshH is not None else []       # List of chshH parsSpec's
         self.chshC = chshC if chshC is not None else []
@@ -95,6 +95,8 @@ class chemSpec:
         self.assignSpsy()      # Compute assignment of spins to spin systems
         self.multH = multH if multH is not None or [] else [1]*self._nSpsyH       # Multiplicities of different spin systems (uncoupled, but with the same chemical shifts)
         self.multC = multC if multC is not None or [] else [1]*len(self.chshC)
+
+        self.Mw = Mw                                                            # Molar weight
 
     def assignSpsy(self):
         """Determines spin systems based on coupling between chshH."""
@@ -1135,6 +1137,9 @@ class treeNode:
             newBook.update({node.name:node})
             node._treeBook = newBook
 
+    def keys(self):
+        return self._treeBook.keys()
+
     def rename(self, newName):
         """Checks for potential name conflicts before renaming the tree node."""
         if newName in [node.name for node in self.items()]:
@@ -1800,10 +1805,10 @@ class chemNodeDB(chemNode):
     def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias='', nameDB=None, QDpars=None):
         chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
         chemDB = {key:val for _, db in chemLib.items() for key, val in db.items()}
-        if name in chemDB or nameDB in chemDB:
-            self.QDpars = copy.deepcopy(chemDB[self.name if nameDB is None else nameDB])    # Parameters from the database
-        elif QDpars is not None:
+        if QDpars is not None:
             self.QDpars = QDpars
+        elif name in chemDB or nameDB in chemDB:
+            self.QDpars = copy.deepcopy(chemDB[self.name if nameDB is None else nameDB])    # Parameters from the database
         else:
             raise RuntimeError("The chemical \'" + self.name + '\' is not in the database and no QD parameters are supplied.')
         self.HCmode = None            # Mode of experiment if the node is dendrolized
@@ -2056,7 +2061,15 @@ def readChemDB(fname='chemDB.json'):
         chemDB = {k:chemSpec(**v) for k,v in chemDB.items()}    # Conver orderedDict to chemSpec namedtuple
 
     elif ext == '.cdb':
-        chemDB = {}
+        with open(fname, 'rb') as fp:
+            chemDB = dill.load(fp)
+
+        # Check that what has been loaded is a correct database
+        if isinstance(chemDB, dict):
+            for key, val in chemDB.items():
+                if not isinstance(val, chemSpec):
+                    return dict()
+        else: return dict()
 
     return chemDB
 
@@ -2065,6 +2078,7 @@ def writeChemDB(chemDB, fname='result.json'):
     root, ext = os.path.splitext(fname)
 
     if ext == '.json':
+        # Save in JSON format
         chemDB = {k:v.asdict() for k,v in chemDB.items()}   # Convert namedtuples to dictionaries
         for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
             for kk in ['chshH', 'chshC', 'jcplHH']:
@@ -2072,8 +2086,13 @@ def writeChemDB(chemDB, fname='result.json'):
             for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
                 if isinstance(v[kk], int):
                     v[kk] = [v[kk]]
-        with open(fname+'.json', 'w') as fp:
+        with open(fname, 'w') as fp:
             json.dump(chemDB, fp)
+
+    elif ext == '.cdb':
+        # Save in the dill format (.cdb)
+        with open(fname, 'wb') as fp:
+            dill.dump(chemDB, fp)
 
 def printChemDB():
     """Prints chemDB."""
@@ -2086,7 +2105,7 @@ def loadChemLibrary(path=None):
         path = os.getcwd()
 
     # Define a DB for common chemicals
-    chemLib = {'Common chemicals' :
+    chemLib = {'Built-in models' :
                 {'Water' : chemSpec(name='Water',
                                    chshH=[parsSpec(min=3.75, max=5.75, label='H_water')],
                                    multH=[1],
