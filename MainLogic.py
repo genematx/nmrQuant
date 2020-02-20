@@ -1671,9 +1671,11 @@ class Datum():
         self.smplDistF.clear()
 
 
-    def getCrntVals(self, node_name=None):
+    def getCrntVals(self, node_name=None, keys=None):
         """Returns a flat dictionary of all parameters that affect nodes in the tree below and including the given node."""
-        parsF = {key:self.getCrntVal(key) for key in self.allParsKeys(node_name) + [('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] }
+        if keys is None:
+            keys = self.allParsKeys(node_name) + [('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)]
+        parsF = {key:self.getCrntVal(key) for key in keys }
         return parsF
 
     def setCrntVals(self, parsF):

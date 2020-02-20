@@ -4288,13 +4288,13 @@ class MainView(QMainWindow):
         self.actnFitAllFiles.setStatusTip('Fit all steps for this file')
         self.actnFitAllFiles.triggered.connect(self.fitAllFiles)
         # Undo
-        actnUndo = QAction(self._icon('icon_undo.png'), 'Undo', self)
-        actnUndo.setStatusTip('Undo the previous change to model parameters')
-        actnUndo.triggered.connect(self.pullUndo)
+        self.actnUndo = QAction(self._icon('icon_undo.png'), 'Undo', self)
+        self.actnUndo.setStatusTip('Undo the previous change to model parameters')
+        self.actnUndo.triggered.connect(self.pullUndo)
         # Redo
-        actnRedo = QAction(self._icon('icon_redo.png'), 'Return', self)
-        actnRedo.setStatusTip('Return the undone change to model parameters')
-        actnRedo.triggered.connect(self.pullRedo)
+        self.actnRedo = QAction(self._icon('icon_redo.png'), 'Return', self)
+        self.actnRedo.setStatusTip('Return the undone change to model parameters')
+        self.actnRedo.triggered.connect(self.pullRedo)
         # Stop fitting action
         actnstopThread = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
         actnstopThread.setStatusTip('Stop fitting')
@@ -4336,8 +4336,8 @@ class MainView(QMainWindow):
         tbMain.addAction(self.actnAutoRange)
         # tbMain.addAction(self.actnSaveImage)
         tbMain.addSeparator()
-        tbMain.addAction(actnUndo)
-        tbMain.addAction(actnRedo)
+        tbMain.addAction(self.actnUndo)
+        tbMain.addAction(self.actnRedo)
         tbMain.addSeparator()
         tbMain.addAction(self.actnAutoPhase)
         tbMain.addAction(self.actnSetLshape)
@@ -4557,9 +4557,11 @@ class MainView(QMainWindow):
             stngView, stngConfig = None, None
         settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
 
-        # Reset the undo stack
+        # Reset the undo and redo stacks
         self._undoStack.clear()
+        self.actnUndo.setEnabled(False)
         self._redoStack.clear()
+        self.actnRedo.setEnabled(False)
 
         # Reset the workspace
         self.wsp.reset()
@@ -4633,34 +4635,42 @@ class MainView(QMainWindow):
 
     def pullUndo(self):
         """Restores the last state from the Undo stack."""
-        dat_list, par_list = self._undoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        dats_list, pars_list = self._undoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        self._redoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
 
-        for dat, par in zip(dat_list, par_list):
+        # Set the stored values to the Datums
+        for dat, par in zip(dats_list, pars_list):
             dat.setCrntVals(par)
 
-        self.startThread(saveUndo=False)
-        self._redoStack.append([dat_list, par_list])
+        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
 
     def pullRedo(self):
         """Restores the last state from the Redo stack."""
-        state = self._redoStack.pop()
+        dats_list, pars_list = self._redoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        self._undoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
+
+        # Set the stored values to the Datums
+        for dat, par in zip(dats_list, pars_list):
+            dat.setCrntVals(par)
+
+        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
 
     # ------------------ Working with the fitting thread -----------------------
 
-    def startThread(self, queueFiles=None, queueActns=None, saveUndo=True):
+    def startThread(self, queueFiles=None, queueActns=None, pushUndo=True):
         """Fits the files in the self.fittingQueueFiles list. Must be called only when appropriate self.fittingQueueFiles is set."""
         # Disable controls that can start fitting
         self.actnFitAllSteps.setDisabled(True)
         self.actnFitAllFiles.setDisabled(True)
         self.actnFitLastStep.setDisabled(True)
+        self.actnUndo.setEnabled(False)
+        self.actnRedo.setEnabled(False)
         self.setCursor(Qt.BusyCursor)
 
         if queueFiles is None: queueFiles = [self._crnt]
-        print(sys.getsizeof(self._undoStack))
-        if saveUndo:
+        if pushUndo:
             self._undoStack.append([queueFiles, [dat.getCrntVals() for dat in queueFiles]])
-
-        print(sys.getsizeof(self._undoStack))
+            self._redoStack.clear()
 
         if queueActns is None: queueActns = ['Evl']        # Only evaluate the active step by default
 
@@ -4734,6 +4744,8 @@ class MainView(QMainWindow):
             self.actnFitAllSteps.setEnabled(True)
             self.actnFitAllFiles.setEnabled(True)
             self.actnFitLastStep.setEnabled(True)
+            self.actnUndo.setEnabled(len(self._undoStack) > 0)
+            self.actnRedo.setEnabled(len(self._redoStack) > 0)
             self.unsetCursor()
             self.progressBarFiles.setValue(self.progressBarFiles.maximum())
 
@@ -4763,10 +4775,11 @@ class MainView(QMainWindow):
 
         if not np.isclose(val, oldVal):
 
-            self._undoStack.append([[self._crnt], [{key : oldVal}]])
+            self._undoStack.append([ [self._crnt], [{key : oldVal}] ])
+            self._redoStack.clear()
             self._crnt.setCrntVal(key, val)
 
-            self.startThread(saveUndo=False)
+            self.startThread(pushUndo=False)
 
     def fitAllSteps(self, selectedFiles = None):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
