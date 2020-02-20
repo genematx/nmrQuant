@@ -400,6 +400,11 @@ class Workspace():
         self.T[key].toggleReported()
         self._updateParameters()
 
+    def setRepRoot(self, key, flag=True):
+        """Sets the reportability of a certain root node and updates the parameters accordingly."""
+        self.T[key].setReported(flag)
+        self._updateParameters()
+
     def isXclRootName(self, name):
         """Checks whether the node with the a certain name is ignored in the analysis."""
         flags = [DDD.isXclRootName(name) for SSS in self.series for DDD in SSS.data]
@@ -1471,7 +1476,7 @@ class Datum():
         """Returns all _individually_ fittable parameters for a (sub)tree starting from a specific node."""
         # TODO: Need to check jcplQD
         if frqBlkIds is None:
-            frqBlkIds = self.steps[0].frqBlkIds
+            frqBlkIds = self.steps[-1].frqBlkIds
 
         # If in time domain, all parameters are good
         if len(frqBlkIds) == 0:
@@ -1561,7 +1566,7 @@ class Datum():
             return (rootName, 'chsh'+sfx, indx)
 
         if frqBlkIds is None:
-            frqBlkIds = self.steps[0].frqBlkIds
+            frqBlkIds = self.steps[-1].frqBlkIds
 
         if inRange is None:
             inRange, _ = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
@@ -1610,6 +1615,21 @@ class Datum():
             self.xclRootNames.remove(name)
         except KeyError:
             self.xclRootNames.add(name)
+        self.resetSignals()
+
+    def setXclRootName(self, name, flag=True):
+        """Sets the reported root name to excluded."""
+        if not name in self.repRootNames:
+            return 0
+
+        if flag:
+            self.xclRootNames.add(name)
+        else:
+            try:
+                self.xclRootNames.remove(name)
+            except KeyError:
+                pass
+
         self.resetSignals()
 
     def getTree(self, node_name=None):
@@ -2612,8 +2632,8 @@ class Datum():
         if showRanges:
             for i, blk in enumerate(self.freqBlocks):
                 if showRanges == 'all':
-                    ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2 if i in self.steps[0].frqBlkIds else 0.05, facecolor='yellow')
-                elif showRanges == 'active' and i in self.steps[0].frqBlkIds:
+                    ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2 if i in self.steps[-1].frqBlkIds else 0.05, facecolor='yellow')
+                elif showRanges == 'active' and i in self.steps[-1].frqBlkIds:
                     ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2, facecolor='yellow')
 
         if showLegend: ax_main.legend(loc=0)
@@ -2630,7 +2650,7 @@ class Datum():
         """Computes the signals for plotting. Applies subsampling to the parts of the signals that are out ouf the fitting ranges."""
 
         if frqBlkIds is None:
-            frqBlkIds = self.steps[0].frqBlkIds
+            frqBlkIds = self.steps[-1].frqBlkIds
 
         # Phase the data
         ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
@@ -3319,6 +3339,10 @@ def flims(dt, nf):
         return (-nf/(2*dt*nf), (nf/2-1)/(dt*nf))
     else:
         return (-(nf-1)/(2*dt*nf), (nf-1)/(2*nf*dt))
+
+def split_steps(dat, step):
+    """Splits the list of fited parameters and returns a list of corresponding steps."""
+    return [Step(frqBlkIds = step.frqBlkIds, parsKeys = [key], autoKeys=step.autoKeys, fitCustomLshape = step.fitCustomLshape) for key in step.parsKeys]
 
 # ------------------------------ License files ---------------------------------
 

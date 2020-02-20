@@ -42,7 +42,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '1.0.1'
+version = '1.0.2'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -1049,10 +1049,10 @@ class FreqTableModel(QtCore.QAbstractTableModel):
 
             if role == QtCore.Qt.CheckStateRole and clmn == 0:
                 if row == 0:
-                    if len(self.datum.steps[0].frqBlkIds) > 0:
+                    if len(self.datum.steps[-1].frqBlkIds) > 0:
                         return QtCore.Qt.Unchecked
                     else: return QtCore.Qt.Checked
-                elif row > 0 and (row-1) in self.datum.steps[0].frqBlkIds:
+                elif row > 0 and (row-1) in self.datum.steps[-1].frqBlkIds:
                     return QtCore.Qt.Checked
                 else:
                     return QtCore.Qt.Unchecked
@@ -1105,7 +1105,7 @@ class FreqTableModel(QtCore.QAbstractTableModel):
 
         if role == QtCore.Qt.CheckStateRole:
             if row == 0:
-                if len(self.datum.steps[0].frqBlkIds) > 0:
+                if len(self.datum.steps[-1].frqBlkIds) > 0:
                     for step in self.datum.steps:
                         step.frqBlkIds.clear()
                 self.dataChanged.emit(self.index(0,0), self.index(self.rowCount(), 0))
@@ -1395,7 +1395,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         # Read a Spinsolve data.1d file
         elif path[-3:] in ['.1d', '.2d']:
 
-            yT, c0, f0, dt = read_spinsolve(path)
+            yT, c0, f0, dt, dic = read_spinsolve(path)
 
             nt = yT.shape[0]
             t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
@@ -3750,13 +3750,12 @@ class ParameterDisplayWidget(QWidget):
     def reset(self):
         pass
 
-class FittingThread(QThread):
+class FittingThread_copy(QThread):
     """A worker thread used to fit models to data in several steps."""
 
     def __init__(self):
         super().__init__()
         self._exiting = False      # The exiting attribute is used to tell the thread to stop processing.
-        self.stepIdsToFit = []       # Sequence of steps from the textEdit
         self._queueFiles = []        # Sequence of Datums to fit
         self._queueActns = []        # Sequence of Step IDs to fit
 
@@ -3843,6 +3842,71 @@ class FittingThread(QThread):
 
             if len(self._queueIndx) == 0:
                 self.setExitFlag(True)
+
+class FittingThread(QThread):
+    """A worker thread used to fit models to data in several steps."""
+
+    def __init__(self):
+        super().__init__()
+        self._exiting = False      # The exiting attribute is used to tell the thread to stop processing.
+        self._queueFiles = []        # Sequence of Datums to fit
+        self._queueActns = []        # Sequence of Step IDs to fit
+
+    def __del__(self):
+        """Before a Worker object is destroyed, we need to ensure that it stops processing. For this reason, we implement the following method in a way that indicates to the part of the object that performs the processing that it must stop, and waits until it does so."""
+        self._exiting = True
+        self.wait()
+
+    def setExitFlag(self, flag=True):
+        """Setter of the _exiting flag."""
+        self._exiting = flag
+
+    def isExiting(self):
+        return self._exiting
+
+    def fit(self, fileToFit, actnToRun, evalStepID=-1):
+        self._fileToFit = fileToFit
+        self._actnToRun = actnToRun
+        self._evalStep = self._fileToFit.steps[evalStepID]        # Step that will be evaluated
+
+        self.start()    # calls self.run()   (should be called as self.start() anyway)
+
+    def run(self):
+
+        fileToFit = self._fileToFit
+        actnToRun = self._actnToRun
+
+        if isinstance(actnToRun, Step):
+            # The action code is an integer - i.e. the number of a step to optimize
+            step = actnToRun
+            # Fit the model parameters
+            fileToFit.optimize(parsKeys=step.parsKeys, autoKeys=step.autoKeys, frqBlkIds=step.frqBlkIds, evaluatePriors=False)
+        else:
+            step = self._evalStep
+
+            if actnToRun in ['Ph0', 'Ph1', 'PhA']:
+                # Adjust the phasing parameters
+                fileToFit.adjust_phase(frqBlkIds=step.frqBlkIds, mode=actnToRun)
+                # Re-evaluate the step to update the (marginalized) amplitudes and the signals to be plotted
+                fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys = set([key for key in step.autoKeys if key != ('.', 'theta', 0)]), returnSignals=True)
+            elif actnToRun == 'Rsd':
+                # Adjusting the residual
+                fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds)
+            elif actnToRun == 'Lsh':
+                # Adjust the lineshape
+                fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
+                # Re-evaluate the step to update the signals to be plotted
+                fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
+            elif actnToRun == 'Lor':
+                # Reset the lineshape to the default (Lorentzian)
+                fileToFit.reset_shape()
+                fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
+            elif actnToRun == 'Evl':
+                # Only evaluatethe last step
+                fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
+            elif actnToRun == 'AuP':
+                # Autophasing
+                fileToFit.auto_phase()
 
 class MySpecPlot(FigureCanvas):
 
@@ -4569,26 +4633,69 @@ class MainView(QMainWindow):
         if queueFiles is None: queueFiles = [self._crnt]
 
         if queueActns is None: queueActns = ['Evl']        # Only evaluate the active step by default
+
         queueActns = [self.treeModel.actvStepIndx if x == 'Fit' else x for x in queueActns]
+        queueActns.insert(0, 'Init')
+
+        # Set up the fitting queue
+        self._fittingQueue = [[file, actn] for file in queueFiles for actn in queueActns]
 
         # Set up the progress bars
-        self.progressBarFiles.setRange(0, len(queueFiles)*len(queueActns))
+        self.progressBarFiles.setRange(0, len(self._fittingQueue))          # Do not include the initialization steps (one for each file)
         self.progressBarFiles.setValue(0)
 
-        # Set up and call the fitting thread
         self.fittingThread.setExitFlag(False)
-        self.fittingThread.setQueue(queueFiles, queueActns, evalStepID=self.treeModel.actvStepIndx)
-        self.fittingThread.fit()
+        self.continueThread()
 
-    def onThreadFinished(self):
-        """Called when the fittingThread finishes processing each step. Depending if there are files/steps in queue, may call the startThread/fitqueueActns function again or just display the results."""
+    def continueThread(self):
+        """Continues fitting the thread if there are any files left."""
+        if len(self._fittingQueue) > 0:
+            fileToFit, actnToRun = self._fittingQueue.pop(0)
 
-        if not self.fittingThread.isExiting():
-            # Fitting several files
-            self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
-            self.fittingThread.fit()
+            if actnToRun == 'Init':
+                # We are starting to fit a new file and will be running through the list of steps from 0 again... Need to set up the initial values.
+                # Determine the starting values of parameters for the next file in the fittingQueueFiles and KEEP the current values if necessary
+                if config.OPTIM_startFrom == "previous":
+                    sid = fileToFit.selfID()
+                    # Check if the current file is not the first one in the Series. If possible use parameters of the previous file, otherwise keep the current parameters.
+                    if sid[1] > 0:
+                        fileToFit.resetCrntPars(crntParsH = copy.deepcopy(fileToFit.series[sid[0]].data[sid[1]-1].crntParsH) )
+                elif config.OPTIM_startFrom == "default":
+                    fileToFit.resetCrntPars()   # Reset to defaults
+                else: # i.e. settings["startgFromPars"] == "current"
+                    pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
+                self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
+
+                self.continueThread()
+
+            elif isinstance(actnToRun, int):
+                # If it is a step with too many parameters, split it into several steps and add them to the queue
+                print("\nOptimizing step {:d}".format(actnToRun+1))
+                actnToRun = fileToFit.steps[actnToRun]
+
+                if len(actnToRun.parsKeys) > 3:
+                    newSteps = split_steps(fileToFit, actnToRun)
+                    self._fittingQueue[:0] = [[fileToFit, step] for step in newSteps]         # Insert all new steps from the beginning of the queue
+
+                    # Update the progress bar accordingly
+                    oldVal, oldMax = self.progressBarFiles.value(), self.progressBarFiles.maximum()
+                    newVal = oldVal*int(math.ceil((oldMax-oldVal+len(newSteps)-1)/(oldMax-oldVal)))           # newVal = int(math.ceil(oldVal*(oldMax+len(newSteps)-1)/oldMax))
+                    newMax = newVal + (oldMax-oldVal) + len(newSteps) - 1
+
+                    self.progressBarFiles.setMaximum(newMax)
+                    self.progressBarFiles.setValue(newVal)
+                else:
+                    # TODO: Possibly check here that the parsKeys in the step are fittable
+                    self._fittingQueue.insert(0, [fileToFit, actnToRun] )          # Substitute the integer with the step
+
+                self.continueThread()
+
+            else:
+                # It is a usual optimization step or an action (e.g. phasing)
+                self.fittingThread.fit(fileToFit, actnToRun)
+
         else:
-            # Fitting only a single (or the last) file; all done now. Reset the widgets
+            # All done. Reset the widgets
             self.plotCurrent(autoRange=False)
             self.treeModel.notifyDataChanged()
 
@@ -4598,6 +4705,15 @@ class MainView(QMainWindow):
             self.actnFitLastStep.setEnabled(True)
             self.unsetCursor()
             self.progressBarFiles.setValue(self.progressBarFiles.maximum())
+
+    def onThreadFinished(self):
+        """Called when the fittingThread finishes processing each step. Depending if there are files/steps in queue, may call the startThread/fitqueueActns function again or just display the results."""
+        self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
+        print('\n')
+
+        if self.fittingThread.isExiting(): self._fittingQueue.clear()
+
+        self.continueThread()
 
     def stopThread(self):
         """Stops fitting in the thread."""
@@ -4844,8 +4960,8 @@ class MainView(QMainWindow):
             self.mainFigureWidget.plot(f, yFph, xF,
                 zF = zF if self.actnToggleComps.isChecked() else None,
                 stems = allStems if self.actnToggleStems.isChecked() else None,
-                freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[0].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)],
-                indx_colr=[i for i, name in enumerate(self._crnt.repRootNames) if not self._crnt.isXclRootName(name)])   # if i in self._crnt.steps[0].frqBlkIds])
+                freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[-1].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)],
+                indx_colr=[i for i, name in enumerate(self._crnt.repRootNames) if not self._crnt.isXclRootName(name)])   # if i in self._crnt.steps[-1].frqBlkIds])
 
             if autoRange:
                 self.mainFigureWidget.autoRange()
@@ -4953,7 +5069,7 @@ class MainView(QMainWindow):
         if lims is None:
             lims = (self._crnt.freqBlocks[indx].min, self._crnt.freqBlocks[indx].max)
         if active is None:
-            active = indx in self._crnt.steps[0].frqBlkIds
+            active = indx in self._crnt.steps[-1].frqBlkIds
 
         self._crnt.altFreqBlock(indx=indx, lims=lims)
 
