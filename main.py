@@ -1735,7 +1735,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
     """A treeView representation class"""
 
     skipColumns = 5    # Number of columns that display numerical values (min, max, default, current) + the name column
-    crntChanged = pyqtSignal()    # Emmitted when current values are chenged by the user
+    requestParameterChange = pyqtSignal(object, float)    # Emmitted when current values are chenged by the user (parKey, newVal)
 
     @staticmethod
     def showName(name):
@@ -1746,7 +1746,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
     def __init__(self, datum, parent = None):
         super().__init__()     # QtCore.QAbstractItemModel.__init__(self)
-        self.datum = datum             # A pointer to the workspace
+        self.datum = datum             # A pointer to the Workspace, the Series, or the Datum
         self.actvStepIndx = -1         # Currently selected active step id
         self._indxRoot = QtCore.QModelIndex()    # "Invalid" index to point to the root of the display
         self._parsSigma2 = viewNode(('.', 'sigma2', 0), alias=None, nodeType='param')       # alias='Variance of noise, s2'
@@ -1820,10 +1820,14 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.resetLshapeTree(flag=False)
         self.endResetModel()
 
-    def notifyDataChanged(self, index=None):
+    def notifyDataChanged(self, key=None):
         """Update the entire tree (if index is None); otherwise, only update the row at index."""
-        index_start = self.index(index.row(), 0, self.parent(index)) if index is not None else self._indxRoot
-        index_stop = self.index(index.row(), self.columnCount(self.parent(index)), self.parent(index)) if index is not None else self._indxRoot
+        if key is not None:
+            index = self.indxByKey(key)
+            index_start = self.index(index.row(), 0, self.parent(index))
+            index_stop = self.index(index.row(), self.columnCount(self.parent(index)), self.parent(index))
+        else:
+            index_start, index_stop = self._indxRoot, self._indxRoot
 
         self._unfittableParsKeys = None              # Will reset the list of fittable parameters
 
@@ -2135,16 +2139,16 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             if node.nodeType == 'param':
                 # Update parameter specification
                 if clmn == 4:
-                    try:
-                        self.datum.setCrntVal(node.name, value)
-                        self.crntChanged.emit()
-                        self.dataChanged.emit(index, index)
-                    except: return False
+                    # try:
+                    # self.datum.setCrntVal(node.name, value)
+                    self.requestParameterChange.emit(node.name, float(value))
+                    # self.dataChanged.emit(index, index)
+                    # except: return False
 
             elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
-                self.datum.T[node.name].set_intn(float(value))
-                self.crntChanged.emit()
-                self.dataChanged.emit(index, index)
+                # self.datum.T[node.name].set_intn(float(value))
+                self.requestParameterChange.emit((node.name, 'intn', 0), float(value))
+                # self.dataChanged.emit(index, index)
             else:
                 # Change the node names
                 if clmn == 0:
@@ -2360,11 +2364,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.resetLshapeTree(flag=False)
         self.endRemoveRows()
 
-    def resetShape(self):
-        """Resets the custom lineshape."""
-        self.datum.reset_shape()
-        self.crntChanged.emit()
-
     def clmn2step(self, clmn):
         """A utility function to convert a column index to the corresponding step index."""
         # return clmn-self.skipColumns    # Normal order
@@ -2425,8 +2424,8 @@ class ChemTreeView(QTreeView):
             else:
                 actnDfltFromCrnt.triggered.connect(lambda : self.editDfltVal.setValue(crntVal))
 
-            # Checkbox to set the current parameter as a reference
-            self.chckReference = QCheckBox("Use as reference")
+            # # Checkbox to set the current parameter as a reference
+            # self.chckReference = QCheckBox("Use as reference")
 
 
             # OK and Cancel buttons
@@ -2434,9 +2433,9 @@ class ChemTreeView(QTreeView):
                 QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
                 Qt.Horizontal, self)
             layoutMain.addLayout(layoutForm)
-            if isReference is not None:          # If the parameter can be set as a reference (e.g. if it is a chemical shift or an intensity)
-                self.chckReference.setChecked(isReference)
-                layoutMain.addWidget(self.chckReference)
+            # if isReference is not None:          # If the parameter can be set as a reference (e.g. if it is a chemical shift or an intensity)
+            #     self.chckReference.setChecked(isReference)
+            #     layoutMain.addWidget(self.chckReference)
             layoutMain.addWidget(self.chckSeries)
             layoutMain.addWidget(self.buttonsBox)
 
@@ -2491,8 +2490,7 @@ class ChemTreeView(QTreeView):
                     'p1':self.editPriorP1.value(),\
                     'p2':self.editPriorP2.value(),\
                     'dval':self.editDfltVal.value()},\
-                    self.chckSeries.isChecked(),\
-                    self.chckReference.isChecked()
+                    self.chckSeries.isChecked(), False   #,\                    self.chckReference.isChecked()
 
     class LabelAndButton(QWidget):
         """A widget consisting of a label and a small button used to display phase correction in the tree"""
@@ -2680,9 +2678,6 @@ class ChemTreeView(QTreeView):
                 popMenu.addAction(actnShowRows)
 
             elif node.nodeType == 'lshape':
-                actnResetShape = QAction(QIcon('icons\icon_resetShape.png'), 'Reset custom shape', self)
-                actnResetShape.setStatusTip('Remove the custom lineshape.')
-                actnResetShape.triggered.connect(self.model().resetShape)
                 actnIncreaseOrder = QAction(QIcon('icons\icon_increaseOrder.png'), 'Increase order', self)
                 actnIncreaseOrder.setStatusTip('Increase the order of lineshape correction polynomial.')
                 actnIncreaseOrder.triggered.connect(self.model().increaseOrder)
@@ -2690,7 +2685,6 @@ class ChemTreeView(QTreeView):
                 actnDecreaseOrder.setStatusTip('Decrease the order of lineshape correction polynomial.')
                 actnDecreaseOrder.triggered.connect(self.model().decreaseOrder)
 
-                popMenu.addAction(actnResetShape)
                 popMenu.addAction(actnIncreaseOrder)
                 popMenu.addAction(actnDecreaseOrder)
                 popMenu.addSeparator()
@@ -2788,9 +2782,9 @@ class ChemTreeView(QTreeView):
                     crnt = crnt.parent
                 else: pass # It is either a Datum and no series flag was set or it is a Series
                 crnt.setPrior(key, **newParSpec, reset=True)
-                if isReference is not None:
-                    crnt.setReferenceChshKey(key = key if setReference else None)
-                    if setReference: self.model().crntChanged.emit()            # Update the computed signals
+                # if isReference is not None:
+                #     crnt.setReferenceChshKey(key = key if setReference else None)
+                #     if setReference: self.model().requestParameterChange.emit()            # Update the computed signals
 
     def saveSubtree(self, index):
         """Saves the subtree starting with the node index."""
@@ -2947,11 +2941,11 @@ class ChemTreeView(QTreeView):
 
         # Update the value
         val = self.model().datum.getCrntVal(stemKey)
-        self.model().datum.setCrntVal(stemKey, val + delta)
-        self.model().notifyDataChanged()
+        # self.model().datum.setCrntVal(stemKey, val + delta)
+        # self.model().notifyDataChanged()
 
         # Emit the signal to recompute the model
-        self.model().crntChanged.emit()
+        self.model().requestParameterChange.emit(stemKey, val+delta)
 
 class PeakPickingWidget(QWidget):
 
@@ -3923,6 +3917,8 @@ class MainView(QMainWindow):
         # Initialize with some workspace
         self.wsp = wsp    # The Workspace; main class that holds all logic
         self._crnt = self.wsp     # Currently opened Series/Datum/or the entire Workspace
+        self._undoStack = []      # The stack of previous actions; each entry is a 2-tuple with the first element = the datum, second elent = flat dictionary of previous parameter values
+        self._redoStack = []
 
         # Global settings
         settings.update({"ax0Limits": None,
@@ -4035,8 +4031,8 @@ class MainView(QMainWindow):
         self.treeView = ChemTreeView()
         self.treeModel = ChemTreeModel(self.wsp)
         self.treeView.setModel(self.treeModel)
-        self.treeModel.crntChanged.connect( self.startThread )       # Evaluates the active step if current values are changed by the user
-        self.treeView.changedSelected.connect(self.selectStems)                  # If new parameter is selected by the user
+        self.treeModel.requestParameterChange.connect( self.onParameterChange )       # Updates the parameters and evaluates the active step if current values are changed by the user
+        self.treeView.changedSelected.connect(self.selectStems)                       # If new parameter is selected by the user
         self.treeView.requestAdjustment.connect( lambda actnToRun : self.startThread(queueActns=[actnToRun]) )     # Adjust the phase
 
         # create a text edit widget to choose the optimization sequence
@@ -4291,6 +4287,14 @@ class MainView(QMainWindow):
         self.actnFitAllFiles = QAction(self._icon('icon_fitAllFiles.png'), 'Fit all files', self)
         self.actnFitAllFiles.setStatusTip('Fit all steps for this file')
         self.actnFitAllFiles.triggered.connect(self.fitAllFiles)
+        # Undo
+        actnUndo = QAction(self._icon('icon_undo.png'), 'Undo', self)
+        actnUndo.setStatusTip('Undo the previous change to model parameters')
+        actnUndo.triggered.connect(self.pullUndo)
+        # Redo
+        actnRedo = QAction(self._icon('icon_redo.png'), 'Return', self)
+        actnRedo.setStatusTip('Return the undone change to model parameters')
+        actnRedo.triggered.connect(self.pullRedo)
         # Stop fitting action
         actnstopThread = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
         actnstopThread.setStatusTip('Stop fitting')
@@ -4331,6 +4335,9 @@ class MainView(QMainWindow):
         tbMain.addAction(self.actnToggleResid)
         tbMain.addAction(self.actnAutoRange)
         # tbMain.addAction(self.actnSaveImage)
+        tbMain.addSeparator()
+        tbMain.addAction(actnUndo)
+        tbMain.addAction(actnRedo)
         tbMain.addSeparator()
         tbMain.addAction(self.actnAutoPhase)
         tbMain.addAction(self.actnSetLshape)
@@ -4550,6 +4557,10 @@ class MainView(QMainWindow):
             stngView, stngConfig = None, None
         settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
 
+        # Reset the undo stack
+        self._undoStack.clear()
+        self._redoStack.clear()
+
         # Reset the workspace
         self.wsp.reset()
         if newWorkspace is not None:
@@ -4620,9 +4631,23 @@ class MainView(QMainWindow):
         #dataFiles[self.indxCrntFile].update()
         pass
 
+    def pullUndo(self):
+        """Restores the last state from the Undo stack."""
+        dat_list, par_list = self._undoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+
+        for dat, par in zip(dat_list, par_list):
+            dat.setCrntVals(par)
+
+        self.startThread(saveUndo=False)
+        self._redoStack.append([dat_list, par_list])
+
+    def pullRedo(self):
+        """Restores the last state from the Redo stack."""
+        state = self._redoStack.pop()
+
     # ------------------ Working with the fitting thread -----------------------
 
-    def startThread(self, queueFiles=None, queueActns=None):
+    def startThread(self, queueFiles=None, queueActns=None, saveUndo=True):
         """Fits the files in the self.fittingQueueFiles list. Must be called only when appropriate self.fittingQueueFiles is set."""
         # Disable controls that can start fitting
         self.actnFitAllSteps.setDisabled(True)
@@ -4631,6 +4656,11 @@ class MainView(QMainWindow):
         self.setCursor(Qt.BusyCursor)
 
         if queueFiles is None: queueFiles = [self._crnt]
+        print(sys.getsizeof(self._undoStack))
+        if saveUndo:
+            self._undoStack.append([queueFiles, [dat.getCrntVals() for dat in queueFiles]])
+
+        print(sys.getsizeof(self._undoStack))
 
         if queueActns is None: queueActns = ['Evl']        # Only evaluate the active step by default
 
@@ -4641,7 +4671,7 @@ class MainView(QMainWindow):
         self._fittingQueue = [[file, actn] for file in queueFiles for actn in queueActns]
 
         # Set up the progress bars
-        self.progressBarFiles.setRange(0, len(self._fittingQueue))          # Do not include the initialization steps (one for each file)
+        self.progressBarFiles.setRange(0, len(self._fittingQueue))
         self.progressBarFiles.setValue(0)
 
         self.fittingThread.setExitFlag(False)
@@ -4696,6 +4726,7 @@ class MainView(QMainWindow):
 
         else:
             # All done. Reset the widgets
+            # This will be executed always when the thread is finished, either normally or by termination.
             self.plotCurrent(autoRange=False)
             self.treeModel.notifyDataChanged()
 
@@ -4709,7 +4740,6 @@ class MainView(QMainWindow):
     def onThreadFinished(self):
         """Called when the fittingThread finishes processing each step. Depending if there are files/steps in queue, may call the startThread/fitqueueActns function again or just display the results."""
         self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
-        print('\n')
 
         if self.fittingThread.isExiting(): self._fittingQueue.clear()
 
@@ -4725,6 +4755,18 @@ class MainView(QMainWindow):
         step = self._crnt.steps[indx]
         samples = self._crnt.sample(frqBlkIds=step.frqBlkIds, parsKeys=None if onlyAutoKeys else step.parsKeys, autoKeys=step.autoKeys, evaluatePriors=True, nwalkers=None, nsteps=250)     # parsKeys=step.parsKeys
         reportMCMC(samples)
+
+    def onParameterChange(self, key, val):
+        """Sets a new value to the parameter key."""
+
+        oldVal = self._crnt.getCrntVal(key)
+
+        if not np.isclose(val, oldVal):
+
+            self._undoStack.append([[self._crnt], [{key : oldVal}]])
+            self._crnt.setCrntVal(key, val)
+
+            self.startThread(saveUndo=False)
 
     def fitAllSteps(self, selectedFiles = None):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""

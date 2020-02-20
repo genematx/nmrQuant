@@ -1651,20 +1651,29 @@ class Datum():
     def getCrntVal(self, key):
         """Returns the relative or absolute value of the parameter key."""
         # TODO: Will be deprecated.
-        return self.crntParsH[key[0]][key[1]][key[2]]
+        if key[1] == 'intn':
+            return self.T[key[0]].intn
+        else:
+            return self.crntParsH[key[0]][key[1]][key[2]]
 
     def setCrntVal(self, key, val):
         """Updates the current value of the parameter key."""
+        self._gof = None           # Need to update the goodness of fit
+
+        if key[1] == 'intn':
+            self.T[key[0]].set_intn(val)
+            return 0
+
         if key == self.refChshKey:
             self.setGlobalChshVal(self.getGlobalChshVal() + (float(val) - self.getPrior(key).dflt()) )
             val = self.getPrior(key).dflt()
         self.crntParsH[key[0]][key[1]][key[2]] = float(val)
         self.smplDistF.clear()
-        self._gof = None           # Need to update the goodness of fit
+
 
     def getCrntVals(self, node_name=None):
         """Returns a flat dictionary of all parameters that affect nodes in the tree below and including the given node."""
-        parsF = {key:self.getCrntVal(key) for key in self.allParsKeys(node_name)}
+        parsF = {key:self.getCrntVal(key) for key in self.allParsKeys(node_name) + [('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] }
         return parsF
 
     def setCrntVals(self, parsF):
