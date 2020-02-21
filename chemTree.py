@@ -988,7 +988,7 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
         for jcpl, spinop in zip(jcplQD, spinopsJ):
             H = H + jcpl * spinop
 
-        if False:
+        if True:
             # Use general QD simulations
 
             def split_arrays(omega, intn, chsh):
