@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import time
 
 # Functions fro reading different file formats.
 # Each function has standardized inputs and outputs.
@@ -156,6 +157,8 @@ def read_pars(filename):
 
                 dic[key] = val
 
+    dic['timeSaved'] = time.asctime(time.gmtime(os.path.getmtime(filename)))
+
     return dic
 
 def read_spinsolve(path):
@@ -207,4 +210,4 @@ def read_spinsolve(path):
 
     # name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
 
-    return yT, c0, f0, dt
+    return yT, c0, f0, dt, dic

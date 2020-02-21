@@ -82,7 +82,7 @@ class OrderedSet(collections.MutableSet):
 class chemSpec:
     """Class for database entires."""
 
-    def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, **kwargs):
+    def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, Mw=None, **kwargs):
         self.name = name
         self.chshH = chshH if chshH is not None else []       # List of chshH parsSpec's
         self.chshC = chshC if chshC is not None else []
@@ -91,10 +91,12 @@ class chemSpec:
         self.pairHH = pairHH if pairHH is not None else [None]*len(self.jcplHH)     # List of tuples; each tuple contains indices of coupled protons
 
         # Find multiplicities for different spin systems
-        self._spsyAsgnH = []   # list of size 1 x nSpinH; each entry is the index of spin system to which this proton is assigned
+        self._spsyAsgnH, self._nSpsyH = [], 0   # list of size 1 x nSpinH; each entry is the index of spin system to which this proton is assigned
         self.assignSpsy()      # Compute assignment of spins to spin systems
         self.multH = multH if multH is not None or [] else [1]*self._nSpsyH       # Multiplicities of different spin systems (uncoupled, but with the same chemical shifts)
         self.multC = multC if multC is not None or [] else [1]*len(self.chshC)
+
+        self.Mw = Mw                                                            # Molar weight
 
     def assignSpsy(self):
         """Determines spin systems based on coupling between chshH."""
@@ -238,35 +240,6 @@ class chemSpec:
                 'multC': self.multC,
                 'jcplHH': self.jcplHH,
                 'pairHH': self.pairHH}
-
-def readChemDB(fname='chemDB'):
-    """Reads a chemDB in JSON format and convers it to dictionary of chemSpec class objects."""
-    try:
-        with open(fname+'.json', 'r') as fp:
-            chemDB = json.load(fp)
-    except FileNotFoundError:
-        return dict()
-
-    for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
-        for kk in ['chshH', 'chshC', 'jcplHH']:
-            v[kk] = array2parsSpec(v[kk])
-        for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
-            if v[kk].__class__ is int:
-                v[kk] = [v[kk]]
-    chemDB = {k:chemSpec(**v) for k,v in chemDB.items()}    # Conver orderedDict to chemSpec namedtuple
-    return chemDB
-
-def writeChemDB(chemDB, fname='result'):
-    """Writes the chemDB in JSON format and stores it file name"""
-    chemDB = {k:v.asdict() for k,v in chemDB.items()}   # Convert namedtuples to dictionaries
-    for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
-        for kk in ['chshH', 'chshC', 'jcplHH']:
-            v[kk] = array2parsSpec(v[kk])
-        for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
-            if isinstance(v[kk], int):
-                v[kk] = [v[kk]]
-    with open(fname+'.json', 'w') as fp:
-        json.dump(chemDB, fp)
 
 parsSpec = namedtuple('parsSpec', 'min, max, label, distr, p1, p2, dval')
 parsSpec.__new__.__defaults__ = (-np.inf, np.inf, '', 'Uniform', None, None, None)     # 'mode' specifies the location of the distribution maximum value
@@ -438,13 +411,6 @@ def hpd(x, alpha=0.05):
         # Sort univariate node
         sx = np.sort(x)
         return np.array(calc_min_interval(sx, alpha))
-
-def printChemDB():
-    """Prints chemDB."""
-    for k, v in chemDB.items():
-        print(k,v)
-
-chemDB = readChemDB()     # Load the chemical database
 
 # QD simulations
 def transition_indices(n_spin, k=0):
@@ -1022,9 +988,11 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
         for jcpl, spinop in zip(jcplQD, spinopsJ):
             H = H + jcpl * spinop
 
-        if True:
+        if False:
+            # Use general QD simulations
 
-            def split_arrays(omega, intn, chsh, n_spin=None):
+            def split_arrays(omega, intn, chsh):
+                """Splits arrays of peak frequencies and intensities according to the values of corresponding chemical shifts."""
                 n_spin = len(chsh)
 
                 # Sort the values of chemical shifts
@@ -1036,16 +1004,16 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
                 omega, intn = omega[indx], intn[indx]
                 csintn = np.cumsum(intn)
 
-                # Find the indices for splits
+                # Find the indices for splits (indicated by integer values of intensities in the ordered cumsum array)
                 indx_split = [np.searchsorted(csintn, i) for i in range(1, n_spin)]       #     Faster than indx_split = np.searchsorted(csintn, [range(1, n_spin)])[0]
                 indx_split[0] = max(indx_split[0], 1)    # If the first entry csintn[0]>1 then the first split would occur at the index 0 and create an empty array
 
-                # Loop over all splits and move the boundary forward if it's closer to the left (lower) chemical shift, or backward, if the previous transition is closer to the right hemical shift. The boundaries are defined from the left (i.e. the boundary is the lowest frequency in the next group of peaks).
+                # Loop over all splits and move the boundary forward if it's closer to the left (lower) chemical shift, or backward, if the previous transition is closer to the right chemical shift. The boundaries are defined from the left (i.e. the boundary is the lowest frequency in the next group of peaks).
                 for i, ind in enumerate(indx_split):
                     if i > 0 and ind == indx_split[i-1]:
                         ind += 1     # Prevent repeating splits (and resulting empty arrays)
 
-                    if chsh[i] != chsh[i+1]:
+                    if not np.isclose(chsh[i], chsh[i+1]):
                         while True:
                             if omega[ind]-chsh[i] < chsh[i+1]-omega[ind]:
                                 ind += 1
@@ -1069,8 +1037,8 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
             # Diagonalize the Hamiltonian
             omega, intn = QDsims(H, TM)
 
-            # Split the transitions according to their closest chemical shifts
-            omega, intn = split_arrays(omega, intn, chsh=chshQD[np.array(chshAsgn)-1], n_spin=n_spin)
+            # Split the transitions according to their closest chemical shifts (return n_spin arrays)
+            omega, intn = split_arrays(omega, intn, chsh=chshQD[np.array(chshAsgn)-1])
 
         else:
             # 2. Compute the matrix of states.
@@ -1141,10 +1109,13 @@ class treeNode:
 
     def __str__(self):
         if self.alias is None or self.alias == '':
-            return self.name
+            return str(self.name)
         else: return self.alias
 
     def __getitem__(self, key):
+        # for item in self.items():
+        #     if item.name == key:
+        #         return item
         return self._treeBook[key]
 
     def __getstate__(self):
@@ -1167,6 +1138,9 @@ class treeNode:
         for node in self.items():
             newBook.update({node.name:node})
             node._treeBook = newBook
+
+    def keys(self):
+        return self._treeBook.keys()
 
     def rename(self, newName):
         """Checks for potential name conflicts before renaming the tree node."""
@@ -1355,6 +1329,51 @@ class viewNode(treeNode):
         self.hidden = hidden
         self.meta = meta             # Any metadata
 
+class parsNode(treeNode):
+    """A class for nodes in the tree of parameters (e.g. chemical shifts)."""
+    def __init__(self, name, alias='', crnt=0.0, ancs=0.0):
+        super().__init__(name, alias)
+        self.crnt = crnt
+        self.lims = np.zeros(2)
+        self.ancs = ancs      # The value of the parameter pulled from the ancestors (e.g. sum of all chemical shifts above)
+
+        name = self.name[0]
+        indx = self.name[2]
+        sfx = self.name[1][4:]    # the 'QD' suffix
+        self.keys = [(name, 'alph'+sfx, indx),
+                     (name.replace('SPSY', '')+'.'+str(indx+1) if sfx else name, 'ampl', 0)]  # A list of keys related to this chemical shift (chsh, alph, ampl, etc.)    (name, 'chsh'+sfx, indx)
+
+    def propLims(self, limsPrnt=None):
+        """Propagates the limits of the parameter through the tree."""
+
+        # Initialize the lims to the ancestral value
+        if limsPrnt is None:
+            limsPrnt = self.ancs*np.ones(2) if self.isRoot() else self._parent.lims
+
+        self.lims = self.crnt + limsPrnt
+        for chld in self.children():
+            chld.propLims(self.lims)
+
+    def isInRange(self, range, offset=0.0):
+        """Checks whether the self.lims fall into any of the subintervals in the range. Range is a list of tuples, e.g. minmaxTuple."""
+        try:
+            minl = min(self.lims) + min(offset)
+            maxl = max(self.lims) + max(offset)
+        except TypeError:
+            minl, maxl = min(self.lims)+offset, max(self.lims)+offset
+        return any([minl > min(r) and maxl < max(r) for r in range])
+
+    def propCrnt(self, crntPrnt=None):
+        """Propagates the current values of the parameter through the tree."""
+
+        # Initialize the lims to the ancestral value
+        if crntPrnt is None:
+            crntPrnt = self.ancs if self.isRoot() else self._parent.crnt
+
+        self.crnt = self.crnt + crntPrnt
+        for chld in self.children():
+            chld.propLims(self.crnt)
+
 class chemNode(treeNode):
     "Main class to store the chemical parameters in the tree"
     def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias=''):
@@ -1468,6 +1487,13 @@ class chemNode(treeNode):
         for chld in self.children():
             chld.propPoles(self.uPoles)
 
+    def getChshTree(self, sfx='', indx=0):
+        """Creates a tree by arranging chemical shift for all descendants of the node."""
+        P = parsNode(name = (self.name, 'chsh', 0) )                 # e.g. ('Mixture', 'chsh', 0)
+        for chld in self.children():
+            P.addChild(chld.getChshTree())
+        return P
+
     #@profile
     def evalTime(self, t, c0, chsh=[], alph=[], **kwargs):
         "Computes the node's response u=sPoleIntn*exp(-alph*t+i*omega*t)"
@@ -1488,7 +1514,6 @@ class chemNode(treeNode):
 
 class chemNodeQD(chemNode):
 
-    #@profile
     def __init__(self, name, spsy, chsh = None, alph = None, alphQD = None, ampl = None, phase = None, intn = 1., alias=''):
         chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
         self.chshQD = spsy.chsh
@@ -1709,6 +1734,16 @@ class chemNodeQD(chemNode):
 
         self.oldTime = t
 
+    def getChshTree(self, sfx='', indx=0):
+        """Creates a parameters tree. Takes into account the parsKind parameter of itself and also all QD parameters, but omits any attached chemNodeT children. sfx = '' or 'QD'. """
+        P = parsNode( name = (self.name, 'chsh'+sfx, indx) )       # Works for QD parameters as well
+
+        if not sfx:
+            for i in range( len( self.chshQD ) ):
+                P.addChild( parsNode( name = (self.name, 'chshQD', i) ) )
+
+        return P
+
 class chemNodeT(chemNode):
     "Terminal nodes that emit signals. Can only be used as leaves."
     def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias=''):
@@ -1766,16 +1801,16 @@ class chemNodeT(chemNode):
             self.uF = ne.evaluate('sum(conj( x ) * y, axis=1)', local_dict={'x':self.uF, 'y':self.qPolesIntn}).ravel()
             # self.uF = np.inner(np.conj(self.uF), self.qPolesIntn).ravel()
             self.uF *= self.intn * np.sqrt((f[1]-f[0])*c0*dt)
-            # print(self.uF.shape)
 
 class chemNodeDB(chemNode):
     """Class for a node describing a chemical from the database, inherited from chemNode. The node can be specified either by passing a name of a species in the database or the QDpars structure (an instance of chemSpec class.)"""
     def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias='', nameDB=None, QDpars=None):
         chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
-        if name in chemDB or nameDB in chemDB:
-            self.QDpars = copy.deepcopy(chemDB[self.name if nameDB is None else nameDB])    # Parameters from the database
-        elif QDpars is not None:
+        chemDB = {key:val for _, db in chemLib.items() for key, val in db.items()}
+        if QDpars is not None:
             self.QDpars = QDpars
+        elif name in chemDB or nameDB in chemDB:
+            self.QDpars = copy.deepcopy(chemDB[self.name if nameDB is None else nameDB])    # Parameters from the database
         else:
             raise RuntimeError("The chemical \'" + self.name + '\' is not in the database and no QD parameters are supplied.')
         self.HCmode = None            # Mode of experiment if the node is dendrolized
@@ -1858,15 +1893,19 @@ def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, lshapeOrder=2, gamma=0
     return pars
 
 #@profile
-def evalTreeT(tree, t, c0, pars=None):
+def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
     """Evaluate the entire tree of chemNodes. Returns the time-domain response for the specified (reported) nodes in the tree. tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
+    # A set of excluded RootNames
+    if xclRootNames is None:
+        xclRootNames = set([])
+
     # 1. Evaluate all nodes (computes self-responses s(t))
     for node in tree.items():
         node.evalTime(t, c0, **pars[node.name])
         #print(node.sT)
 
     # 2. Determine the root reported nodes (determine the reported subtrees)
-    repRoots = [v for v in tree.repRoots()]
+    repRoots = [v for v in tree.repRoots() if v.name not in xclRootNames]
 
     # 3. Collect the childrens' responses, starting from the bottom, and multiply them with your own
     for rep in repRoots:
@@ -1895,10 +1934,12 @@ def evalTreeT(tree, t, c0, pars=None):
     return Z, [i.name for i in repRoots]
 
 # @profile
-def evalTreeF(tree, f, dt, c0, f0=0, pars=None):
+def evalTreeF(tree, f, dt, c0, f0=0, pars=None, xclRootNames=None):
     """Evaluates the entire tree of chemNodes and returns a model spectrum directly in the frequency domain. Tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
     tau = 0     #    or use
     #tau = -pars['.']['tau'][0]
+    if xclRootNames is None:
+        xclRootNames = set([])
 
     # 1. Update all poles of each node in the tree and propagate them to find uPoles of the leaves
     for node in tree.items():
@@ -1906,7 +1947,7 @@ def evalTreeF(tree, f, dt, c0, f0=0, pars=None):
     tree.findRoot().propPoles()     # Propagate all poles
 
     # 2. Determine the root reported nodes (determine the reported subtrees)
-    repRoots = [v for v in tree.repRoots()]
+    repRoots = [v for v in tree.repRoots() if v.name not in xclRootNames]
 
     # 3. Collect the childrens' responses, starting from the bottom
     for rep in repRoots:
@@ -1946,13 +1987,13 @@ def peakName2parsKey(name, pars='chshQD'):
     return (name[0]+'-SPSY'+indx[0] if int(indx[0])>0 else name[0], pars, int(indx[1])-1)
 
 #@profile
-def getFID(T, t, c0, f0=0, pars=None, tau=None):
+def getFID(T, t, c0, f0=0, pars=None, tau=None, xclRootNames=None):
     """Returns modeled signals in the time domain in the form of FID."""
     if pars is None:
         pars = defaultTreePars(T)
     if tau is None:
         tau = pars["."]["tau"][0]
-    Z, repRootNames = evalTreeT(T, np.array(t)+tau, c0, pars=pars)
+    Z, repRootNames = evalTreeT(T, np.array(t)+tau, c0, pars=pars, xclRootNames=xclRootNames)
     # Shift the signal by f0
     Z = Z * np.exp(-1j*2*np.pi*f0*(np.array(t)+tau)).reshape(-1,1)
     # Apply lineshape correction
@@ -1997,3 +2038,114 @@ def ind2pos(ind):
     for i, j in enumerate(ind):
         pos[j] = i
     return pos
+
+# ----------------------------- Chemical Library ------------------------------
+
+def readChemDB(fname='chemDB.json'):
+    """Reads a chemDB in JSON or .cdb format and convers it to a dictionary of chemSpec class objects."""
+    root, ext = os.path.splitext(fname)
+
+    if ext == '.json':
+
+        try:
+            # Try JSON first
+            with open(fname, 'r') as fp:
+                chemDB = json.load(fp)
+        except FileNotFoundError:
+            return dict()
+
+        for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
+            for kk in ['chshH', 'chshC', 'jcplHH']:
+                v[kk] = array2parsSpec(v[kk])
+            for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
+                if v[kk].__class__ is int:
+                    v[kk] = [v[kk]]
+        chemDB = {k:chemSpec(**v) for k,v in chemDB.items()}    # Conver orderedDict to chemSpec namedtuple
+
+    elif ext == '.cdb':
+        with open(fname, 'rb') as fp:
+            chemDB = dill.load(fp)
+
+        # Check that what has been loaded is a correct database
+        if isinstance(chemDB, dict):
+            for key, val in chemDB.items():
+                if not isinstance(val, chemSpec):
+                    return dict()
+        else: return dict()
+
+    return chemDB
+
+def writeChemDB(chemDB, fname='result.json'):
+    """Writes the chemDB in JSON format and stores it file name"""
+    root, ext = os.path.splitext(fname)
+
+    if ext == '.json':
+        # Save in JSON format
+        chemDB = {k:v.asdict() for k,v in chemDB.items()}   # Convert namedtuples to dictionaries
+        for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
+            for kk in ['chshH', 'chshC', 'jcplHH']:
+                v[kk] = array2parsSpec(v[kk])
+            for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
+                if isinstance(v[kk], int):
+                    v[kk] = [v[kk]]
+        with open(fname, 'w') as fp:
+            json.dump(chemDB, fp)
+
+    elif ext == '.cdb':
+        # Save in the dill format (.cdb)
+        with open(fname, 'wb') as fp:
+            dill.dump(chemDB, fp)
+
+def printChemDB():
+    """Prints chemDB."""
+    for k, v in chemDB.items():
+        print(k,v)
+
+def loadChemLibrary(path=None):
+    """Loads the chemical library (a dictionary of chemDB dictionaries)."""
+    if path is None:
+        path = os.getcwd()
+
+    # Define a DB for common chemicals
+    chemLib = {'Built-in models' :
+                {'Water' : chemSpec(name='Water',
+                                   chshH=[parsSpec(min=3.75, max=5.75, label='H_water')],
+                                   multH=[1],
+                                   nSpinH=[2]),
+                'TMS' : chemSpec(name='TMS',
+                                   chshH=[parsSpec(min=-0.25, max=0.25)],
+                                   chshC=[parsSpec(min=-0.25, max=0.25)],
+                                   multH=[4],
+                                   nSpinH=[3],
+                                   multC=[4]),
+                'TMSP' : chemSpec(name='TMSP',
+                                   chshH=[parsSpec(min=-0.25, max=0.25)],
+                                   chshC=[parsSpec(min=-0.25, max=0.25)],
+                                   multH=[3],
+                                   nSpinH=[3],
+                                   multC=[3]),
+                'Ethanol' : chemSpec(name='Ethanol',
+                                   chshH=[parsSpec(min=0.5, max=1.5, label='H1'), parsSpec(min=3.0, max=4.0, label='H2')],
+                                   chshC=[parsSpec(min=14.9, max=15.1, label='C1'), parsSpec(min=57.9, max=58.1, label='C2')],
+                                   jcplHH=[parsSpec(min=6.0, max=8.0, label='H1-H2',dval=7.0402)],
+                                   multH=[1],
+                                   nSpinH=[3, 2],
+                                   multC=[1, 1],
+                                   pairHH=[[0, 1]])
+                 }
+               }
+
+    # Try loading all JSON and .cdb files in the working directory
+    # List all files in a directory using os.listdir
+    for entry in os.listdir(path):
+        fullpath = os.path.join(path, entry)
+        if os.path.isfile(fullpath):
+            fname, ext = os.path.splitext(entry)
+            if ext in ['.json', '.cdb']:
+                try:
+                    chemLib[fname] = readChemDB(fullpath)
+                except UnpicklingError: pass
+
+    return chemLib
+
+chemLib = loadChemLibrary()            # Load the chemical library

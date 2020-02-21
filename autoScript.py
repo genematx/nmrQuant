@@ -19,14 +19,15 @@ from optparse import OptionParser
 import sys, os, time
 from io import BytesIO
 import config
+import subprocess
 
 import numpy as np
 from chemTree import loadTree
-from MainLogic import Workspace, next_pow_of_2
+from MainLogic import Workspace, next_pow_of_2, save_workspace
 from dataio import read_spinsolve
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, Flowable
 from reportlab.lib.styles import getSampleStyleSheet
 
 from PIL import ImageFile
@@ -37,9 +38,14 @@ rcParams['ps.fonttype'] = 42               # Needed to be able to save figures i
 SCRIPT_PATH = os.path.abspath(os.path.dirname(sys.argv[0]))
 CALLED_PATH = os.getcwd()                                          # Where it has been executed from
 
-def script(dirName, residual=False):
+def script_sugars(dirName, showFigure=True, showResidual=False):
     # Load the data
-    yT, c0, f0, dt = read_spinsolve(dirName)
+    yT, c0, f0, dt, pars = read_spinsolve(dirName)
+
+    try:
+        acquScore = 1.0 if pars['acqDelay'] > 10.0 else 0.0
+    except KeyError:
+        acquScore = 0.5
 
     # Define the array of time samples
     nt = yT.shape[0]
@@ -47,52 +53,90 @@ def script(dirName, residual=False):
 
     # Create a new Workspace and add the data there
     wsp = Workspace()
-    ser = wsp.addSeries(c0=c0, f0=f0, t=t, nf=1*next_pow_of_2(len(t)) )
+    ser = wsp.addSeries(c0=c0, f0=f0, t=t)
     DDD = ser.addDatum(yT)
 
     # Define and set the chemical tree
-    T = loadTree(os.path.join(SCRIPT_PATH, 'GluSucFruWater.ctr'))
+    tree_fname = 'GluSucFruMaCaEthWater.ctr'
+    try:
+        T = loadTree(tree_fname)
+    except FileNotFounderror:
+        T = loadTree(os.path.join(SCRIPT_PATH, tree_fname))
     wsp.setTree(T)
 
     # Align the spectrum based on the frequency of the water peak
     DDD.alignToSolventPeak(chshTo=4.75)
 
     # Define regions for optimization
-    DDD.addFreqBlock(lims=(2.5, 6.0))
+    DDD.addFreqBlock(lims=(0.0, 10.0))                     # Block #1
+    DDD.addFreqBlock(lims=(3.0, 4.3), bslnOrder=(1,0))    # Block #2 - main sugars
+    DDD.addFreqBlock(lims=(5.0, 5.6), bslnOrder=(3,0))     # Block #3 - sugars anomeric protons
+    DDD.addFreqBlock(lims=(2.4, 3.1), bslnOrder=(2,0))     # Block #4 - acids
+    DDD.addFreqBlock(lims=(0.6, 1.75), bslnOrder=(1,0))    # Block #5 - ethanol
 
+    # Define lists of autoKeys (for convenience)
+    autoKeys = {'Water' : [('.', 'sigma2', 0), ('Water', 'ampl', 0)],
+                'WaterSugars': [('.', 'sigma2', 0), ('Water', 'ampl', 0), ('Glucose', 'ampl', 0), ('Fructose', 'ampl', 0), ('Sucrose', 'ampl', 0)],
+                'Sugars' : [('.', 'sigma2', 0), ('Glucose', 'ampl', 0), ('Fructose', 'ampl', 0), ('Sucrose', 'ampl', 0)],
+                'Acids' : [('.', 'sigma2', 0), ('Citric acid', 'ampl', 0), ('Malic acid', 'ampl', 0)],
+                'Ethanol' : [('.', 'sigma2', 0), ('Ethanol', 'ampl', 0)]}
 
-    # --------------------------- Run optimization -----------------------------
+    # # --------------------------- Run optimization -----------------------------
 
     # Optimize global chemical shift
-    DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'chsh', 0), ('Water-SPSY1', 'chshQD', 0)])
+    DDD.optimize(frqBlkIds=[1], autoKeys=autoKeys['WaterSugars'],
+                 parsKeys=[('Mixture', 'chsh', 0), ('Water-SPSY1', 'chshQD', 0)])
 
     # Optimize the peak width
-    DDD.optimize(frqBlkIds=[1], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
-    DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'alph', 0), ('Water-SPSY1', 'alphQD', 0)])
+    DDD.optimize(frqBlkIds=[1], autoKeys=autoKeys['WaterSugars'], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
+    # DDD.optimize(frqBlkIds=[1], parsKeys=[('Mixture', 'alph', 0), ('Water-SPSY1', 'alphQD', 0)])
 
-    # Check if the solution is in H2O
-    val, meta = DDD.evaluate(frqBlkIds=[1], returnSignals=True)
-    ampl = meta['ampl'][0]
-    if ampl[0] / sum(ampl) > 0.95:
-        DDD.addFreqBlock(lims=(3.1, 4.2))      # Add new frequency block
+    DDD.optimize(frqBlkIds=[2, 3], autoKeys=autoKeys['WaterSugars'], parsKeys=[('Sugars', 'chsh', 0)], nhop=5)
+    DDD.optimize(frqBlkIds=[2, 3], autoKeys=autoKeys['WaterSugars'], parsKeys=[('Sugars', 'alph', 0)])
+    DDD.optimize(frqBlkIds=[1], autoKeys=autoKeys['WaterSugars'], parsKeys=[('Water-SPSY1', 'chshQD', 0)])
+    DDD.optimize(frqBlkIds=[1], autoKeys=autoKeys['WaterSugars'], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
+    DDD.optimize(frqBlkIds=[2, 3], autoKeys=autoKeys['Sugars'], parsKeys=[('Sugars', 'chsh', 0)])
+    DDD.optimize(frqBlkIds=[2, 3], autoKeys=autoKeys['Sugars'], parsKeys=[('Sugars', 'alph', 0)])
 
-        DDD.optimize(frqBlkIds=[2], parsKeys=[('Water-SPSY1', 'alphQD', 0)])
-        DDD.optimize(frqBlkIds=[2], parsKeys=[('Water-SPSY1', 'chshQD', 0)])
-        DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'chsh', 0)])
-        DDD.optimize(frqBlkIds=[2], parsKeys=[('Sugars', 'alph', 0)])
+    # # Correct the phasing
+    # DDD.setPrior(key=('.', 'theta', 0), distr='Constant')
+    # DDD.adjust_phase(mw=512, mode='PhA')
 
-        val, meta = DDD.evaluate(frqBlkIds=[2], returnSignals=True)
+    DDD.optimize(frqBlkIds=[4], autoKeys=autoKeys['Acids'], parsKeys=[('Acids', 'chsh', 0)], nhop=5)
+    DDD.optimize(frqBlkIds=[4], autoKeys=autoKeys['Acids'], parsKeys=[('Acids', 'alph', 0)])
+    DDD.optimize(frqBlkIds=[4], autoKeys=autoKeys['Acids'], parsKeys=[('Malic acid', 'chsh', 0), ('Citric acid', 'chsh', 0)], nhop=5)
+    DDD.optimize(frqBlkIds=[4], autoKeys=autoKeys['Acids'], parsKeys=[('Acids', 'alph', 0)])
+
+    # Optimize ethanol
+    DDD.setPrior(key=('Ethanol', 'alph', 0), min=-DDD.getCrntVal(key=('Mixture', 'alph', 0)))    # Set the minimum bound on alpha
+    DDD.optimize(frqBlkIds=[5], autoKeys=autoKeys['Ethanol'], parsKeys=[('Ethanol', 'chsh', 0)], nhop=3)
+    DDD.optimize(frqBlkIds=[5], autoKeys=autoKeys['Ethanol'], parsKeys=[('Ethanol', 'alph', 0)])
+
+    val, meta = DDD.evaluate(frqBlkIds=[2, 3, 4, 5], autoKeys=[], returnSignals=True)
+
 
     # ------------------------- Output the results -----------------------------
 
-    # val, meta = DDD.evaluate(frqBlkIds=[1], returnSignals=True)
+    intns = meta['ampl'][0]           # Array of component intensities
+    # Compute mole fractions
+    total = sum([np.asscalar(intn) for name, intn in zip(DDD.repRootNames, intns) if name not in ['Water', 'Chloroform']])
+    mfracs = [np.asscalar(intn)/total if name not in ['Water', 'Chloroform'] else None for name, intn in zip(DDD.repRootNames, intns)]
+    # Compute absolute concentrations
+    Mw = {'Fructose':180.156, 'Sucrose':342.30, 'Glucose':180.156, 'Citric acid':192.123, 'Malic acid':134.087, 'Water':18.01528, 'Ethanol':46.069}
+    I_H2O = np.asscalar(intns[DDD.repRootNames.index('Water')])
+    aconcs = [np.asscalar(intn)*Mw[name]*1000/(I_H2O*Mw['Water']) for name, intn in zip(DDD.repRootNames, intns)]
+    # Combine all results
     data = {'names': DDD.repRootNames,
-            'intns': meta['ampl'][0],
-            'image': get_figure(DDD, residual=residual),
-            'path': os.path.abspath(dirName)}
-    report(data)
+            'intns': intns,
+            'aconcs': aconcs,
+            'mfracs': mfracs,
+            'image': get_figure(DDD, residual=showResidual) if showFigure else None,
+            'path': os.path.abspath(dirName),
+            'acqu': acquScore,
+            'timeSaved': pars['timeSaved'],
+            'score': DDD.goodness_of_fit(frqBlkIds=[2])}
 
-    print('\nDONE!')
+    return wsp, data
 
 def main(cmdline=None):
     """Example main function.
@@ -129,7 +173,17 @@ def main(cmdline=None):
 
     # -------------------- Execute the script ----------------------
     # dirName =     # 'C:\\Users\\yma80\\Data\\UWA_Sugars\\Raw Data\\1\\1Pulse-H (1 0% - 1)\\1\\'
-    script(opts.directory, residual=opts.residual)
+
+    wsp, data = script_sugars(opts.directory, True, opts.residual)
+
+    report(data)
+
+    # ------------------------- Save the workspace -----------------------------
+    if opts.save:
+        fileName = os.path.join(CALLED_PATH, "workspace_{:s}.wsp".format(time.strftime('%d%m%Y_%H%M%S')))
+        save_workspace(fileName, wsp)
+
+    print('\nDONE!')
 
     # Wait for an input
     # print( CALLED_PATH)
@@ -140,12 +194,13 @@ def main(cmdline=None):
 
 def get_figure(DDD, residual=False):
     # Plot the signals and save the figure to a temporary fill
+    xlims = (5.5, 2.5) if True else 0     # (DDD.freqBlocks[1].max, DDD.freqBlocks[1].min)
+
     if residual:
-        fig, ax = plt.subplots(2, 1, figsize=(13, 7), sharex=True)
+        fig, ax = plt.subplots(2, 1, figsize=(13, 7), sharex=True, sharey=True)
         f, yFph, xF, _ = DDD.plot(ax_main=ax[0], ax_residual=ax[1], showRanges=None, showComponents=True, returnSignals=True)
 
         # Scale the displayed range to the sugars region
-        xlims = (DDD.freqBlocks[1].max, DDD.freqBlocks[1].min)
         ymin, ymax = min(0, yFph[(3.0 < f) & (f < 4.2)].min()), yFph[(3.0 < f) & (f < 4.2)].max()
         ylims = (ymin-0.05*(ymax-ymin), ymax+0.05*(ymax-ymin))
         ax[0].set_xlim(*xlims)
@@ -155,7 +210,6 @@ def get_figure(DDD, residual=False):
         f, yFph, xF, _ = DDD.plot(ax_main=fig.gca(), showRanges=None, showComponents=True, returnSignals=True)
 
         # Scale the displayed range to the sugars region
-        xlims = (DDD.freqBlocks[1].max, DDD.freqBlocks[1].min)
         ymin, ymax = min(0, yFph[(3.0 < f) & (f < 4.2)].min()), yFph[(3.0 < f) & (f < 4.2)].max()
         ylims = (ymin-0.05*(ymax-ymin), ymax+0.05*(ymax-ymin))
         fig.gca().set_xlim(*xlims)
@@ -173,20 +227,63 @@ def get_figure(DDD, residual=False):
 def report(data):
     """Generates a pdf report with the results."""
 
+    class OKCircle(Flowable):
+        """
+        Circle flowable --- draws a circle of a specifci color in a flowable
+        """
+        #----------------------------------------------------------------------
+        def __init__(self, size=4, score=0.5):
+            Flowable.__init__(self)
+            self.size = size
+            if score > 0.9:
+                self.color = (0.0, 0.66, 0.35)
+            elif score < 0.25:
+                self.color = (0.93, 0.195, 0.215)
+            else:
+                self.color = (0.95, 0.52, 0.20)
+        #----------------------------------------------------------------------
+        def __repr__(self):
+            return "Circle"
+        #----------------------------------------------------------------------
+        def draw(self):
+            """
+            draw the circle
+            """
+            self.canv.setFillColorRGB(*self.color)
+            self.canv.circle(0, 5, self.size, stroke=0, fill=1)
+
     Story=[]
 
-    doc = SimpleDocTemplate(os.path.join(CALLED_PATH, "results.pdf"),
+    fileName = os.path.join(CALLED_PATH, "results_{:s}.pdf".format(time.strftime('%d%m%Y_%H%M%S')))
+    doc = SimpleDocTemplate(fileName,
                             rightMargin=72,leftMargin=72,
                             topMargin=72,bottomMargin=18)
     stylesheet=getSampleStyleSheet()
 
-    formatted_time = time.ctime()
-    ptext = '<font size=10>{:s}</font>'.format(formatted_time)
-    Story.append(Paragraph(ptext, stylesheet['Normal']))
+    ptext = '<font size=14>{:s}</font>'.format('qNMR Analysis of a Fruit Juice Sample')
+    Story.append(Paragraph(ptext, stylesheet['Title']))
+    Story.append(Spacer(1, 24))
+
+    tab = []
+    tab.append(['Data directory:', '{:s}'.format(data['path'])])
+    tab.append(['Acquisition time:', '{:s}'.format(data['timeSaved'])])
+    tab.append(['Analysis time:', '{:s}'.format(time.ctime())])
+    tab.append(['Acquisition parameters:', OKCircle(score=data['acqu'])])
+    tab.append(['Residual after fit:', OKCircle(score=data['score'])])
+    tab = Table(tab, style=[('LEFTPADDING', (0,0), (1,4), 0), ('FONTSIZE', (0,0), (1,4), 9)], colWidths=(130, None) )
+    Story.append(tab)
     Story.append(Spacer(1, 12))
 
-    ptext = '<font size=10>{:s}</font>'.format(data['path'])
-    Story.append(Paragraph(ptext, stylesheet['Normal']))
+    # Insert the table
+    Story.append(Spacer(1, 18))
+    names, intns, mfracs, aconcs = data['names'], data['intns'], data['mfracs'], data['aconcs']
+    tab = [['', 'Intensity, a.u.', 'Mole frac., mol/mol', 'Absolute conc., g/L']]
+    mfracs = ['{:.3f}'.format(mfrac) if name not in ['Water', 'Chloroform'] else '' for name, mfrac in zip(names, mfracs)]
+    aconcs = ['{:.3f}'.format(aconc) if name not in ['Water', 'Chloroform'] else '' for name, aconc in zip(names, aconcs)]
+    for name, intn, mfrac, aconc in zip(names, intns, mfracs, aconcs):
+        tab.append([name, '{:.3f}'.format(np.asscalar(intn)), mfrac, aconc])
+    tab = Table(tab, style=[('LINEBELOW', (0,0), (3,0), 1, (0,0,0))], colWidths=None )
+    Story.append(tab)
     Story.append(Spacer(1, 12))
 
     # Insert the figure
@@ -198,22 +295,12 @@ def report(data):
     Story.append(Image(imgdata, width=450, height=height*450/width))
     Story.append(Spacer(1, 12))
 
-    # Insert the table
-    names, intns = data['names'], data['intns']
-    tab = [['', 'Intensity, a.u.', 'Mole frac., mol/mol']]
-    total = sum([np.asscalar(intn) for name, intn in zip(names, intns) if name not in ['Water', 'Chloroform']])
-    mfracs = ['{:.4f}'.format(np.asscalar(intn)/total) if name not in ['Water', 'Chloroform'] else '' for name, intn in zip(names, intns)]
-    for name, intn, mfrac in zip(names, intns, mfracs):
-        tab.append([name, '{:.4f}'.format(np.asscalar(intn)), mfrac])
-    tab = Table(tab, style=[('LINEBELOW', (0,0), (2,0), 1, (0,0,0))] )
-    Story.append(tab)
-    Story.append(Spacer(1, 12))
-
     # ptext = '<font size=12>Thank you very much and we look forward to serving you.</font>'
     # Story.append(Paragraph(ptext, stylesheet['Normal']))
 
-
     doc.build(Story)
+
+    subprocess.Popen(fileName,shell=True)
 
 def make_parser():
     """Construct an option parser"""
@@ -238,6 +325,8 @@ def make_parser():
 
     parser.add_option('-d', '--directory', help='The directory with FID data')
 
+    parser.add_option('-s', '--save', help='Save the workspace', action="store_true")
+
     # parser.add_option('-v', '--verbose', action="store_true", help='Output the model fitting progress')
 
     # # opt_parse can be configured to store different kinds of values
@@ -257,10 +346,10 @@ def make_parser():
 
     parser.set_defaults(verbose=False,
                         createRDSIndex=False,
-                        directory=os.path.join( SCRIPT_PATH, 'data\\1'),
+                        directory=os.path.join( SCRIPT_PATH, 'data\\juice'),   #Juices\\S13.35_Orange_small\\001-cold'),
                         residual=False,
                         error=None,
-                        make_template=False,
+                        save=False,
                         number=0)
 
     return parser
