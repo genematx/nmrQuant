@@ -988,9 +988,11 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
         for jcpl, spinop in zip(jcplQD, spinopsJ):
             H = H + jcpl * spinop
 
-        if True:
+        if False:
+            # Use general QD simulations
 
             def split_arrays(omega, intn, chsh):
+                """Splits arrays of peak frequencies and intensities according to the values of corresponding chemical shifts."""
                 n_spin = len(chsh)
 
                 # Sort the values of chemical shifts

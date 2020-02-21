@@ -342,7 +342,7 @@ class Workspace():
             self.T[node].cut()
         except:
             print("Can not remove the node.")
-            return 0
+            return False
 
         # Update the parameters of all series/datasets
         self._updateParameters()
@@ -1670,7 +1670,6 @@ class Datum():
         self.crntParsH[key[0]][key[1]][key[2]] = float(val)
         self.smplDistF.clear()
 
-
     def getCrntVals(self, node_name=None, keys=None):
         """Returns a flat dictionary of all parameters that affect nodes in the tree below and including the given node."""
         if keys is None:
@@ -1950,9 +1949,10 @@ class Datum():
             Gz=Gz, Gy=None, gamma=gamma, m0=m0, iS0=iS0, a_sigma2=a_sigma2, b_sigma2=b_sigma2, \
             funcType=funcType, robust=robust)
         diff_theta = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase estimated from the complex valued amplitudes
-        theta = (theta + diff_theta + np.pi) % (2 * np.pi) - np.pi             # Updated value of theta
+        theta = (theta + diff_theta)   # + np.pi) % (2 * np.pi) - np.pi             # Updated value of theta
         m_ampl = ampl*np.exp(-1j*diff_theta)
         #m_ampl[:na] = m_ampl[:na].real
+        # TODO: This needs revision
         if m_ampl[:na].real.sum() < 0:      # Make sure that all amplitudes are positive
             m_ampl = - m_ampl
             theta = (theta + np.pi + np.pi) % (2 * np.pi) - np.pi

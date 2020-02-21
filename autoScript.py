@@ -71,7 +71,7 @@ def script_sugars(dirName, showFigure=True, showResidual=False):
     DDD.addFreqBlock(lims=(0.0, 10.0))                     # Block #1
     DDD.addFreqBlock(lims=(3.0, 4.3), bslnOrder=(1,0))    # Block #2 - main sugars
     DDD.addFreqBlock(lims=(5.0, 5.6), bslnOrder=(3,0))     # Block #3 - sugars anomeric protons
-    DDD.addFreqBlock(lims=(2.4, 3.1), bslnOrder=(0,0))     # Block #4 - acids
+    DDD.addFreqBlock(lims=(2.4, 3.1), bslnOrder=(2,0))     # Block #4 - acids
     DDD.addFreqBlock(lims=(0.6, 1.75), bslnOrder=(1,0))    # Block #5 - ethanol
 
     # Define lists of autoKeys (for convenience)
@@ -174,7 +174,7 @@ def main(cmdline=None):
     # -------------------- Execute the script ----------------------
     # dirName =     # 'C:\\Users\\yma80\\Data\\UWA_Sugars\\Raw Data\\1\\1Pulse-H (1 0% - 1)\\1\\'
 
-    wsp, data = script_sugars(opts.directory, opts.residual)
+    wsp, data = script_sugars(opts.directory, True, opts.residual)
 
     report(data)
 

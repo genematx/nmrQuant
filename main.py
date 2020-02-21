@@ -2339,14 +2339,12 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         """Removes a chemical from the tree"""
         node = index.internalPointer()
 
+        self.beginRemoveRows(self.parent(index), index.row(), index.row()) # Parent node, first and last position
         success = self.datum.delTreeNode(node.name)
-
-        if success:                 # self.datum.T has been updated
-            self.beginRemoveRows(self.parent(index), index.row(), index.row()) # Parent node, first and last position
-
+        if success:
             node.cut()
 
-            self.endRemoveRows()
+        self.endRemoveRows()
 
     def increaseOrder(self):
         """Increases the order of the lineshape correction polynomial."""
@@ -4380,7 +4378,11 @@ class MainView(QMainWindow):
 
     def onFreqRangeChanged(self, indx, lims):
         # print('Frequency block has changed', indx, lims)
+        self.actnChangeFreqBlock.setChecked(False)
+        self.mainFigureWidget.setCursor(mode='normal')
         self.updFreqBlock(indx, lims)
+
+        self.actnGroupFreqBlocks._previuosAction = None
 
     def onMouseClicked(self, pos):
         # print('Mouse clicked', pos)
@@ -4779,7 +4781,7 @@ class MainView(QMainWindow):
             self._redoStack.clear()
             self._crnt.setCrntVal(key, val)
 
-            self.startThread(pushUndo=False)
+        self.startThread(pushUndo=False)
 
     def fitAllSteps(self, selectedFiles = None):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
@@ -5109,6 +5111,8 @@ class MainView(QMainWindow):
         self.freqTableModel.addFreqBlock(xmin + dref_chsh, xmax + dref_chsh)
         self.mainFigureWidget.addFreqRange((xmin, xmax))
 
+        self.startThread(pushUndo=False)
+
         self.preprocTool.setNewDatum(self._crnt)
 
     def remFreqBlock(self, indx):
@@ -5116,6 +5120,8 @@ class MainView(QMainWindow):
         # Find which block (if any) covers the passed location and which one to remove if there are multiple blocks.
         self.mainFigureWidget.remFreqRange(indx)
         self.freqTableModel.remFreqBlock(indx)
+
+        self.startThread(pushUndo=False)
 
         self.preprocTool.setNewDatum(self._crnt)
 
@@ -5131,6 +5137,8 @@ class MainView(QMainWindow):
         # In general, calling both functions below is unnecessary as the changes heve likely been caused by either freqTableModel or mainFigureWidget
         self.freqTableModel.notifyDataChanged(indx)
         self.mainFigureWidget.updFreqRange( indx, lims, active )
+
+        self.startThread(pushUndo=False)
 
         self.preprocTool.setNewDatum(self._crnt)
 
