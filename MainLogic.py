@@ -195,14 +195,17 @@ class Workspace():
                         pass
 
     def setHCmode(self, HCmode):
-        self.HCmode = HCmode
+        
+        if HCmode != self.HCmode:
 
-        if self.T is not None:
-            # add QD nodes to the tree based on the mode of the current workspace
-            for node in self.T.items():
-                if isinstance(node, chemNodeDB) and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
+            self.HCmode = HCmode
 
-            self._updateParameters()    # Also sets self.repRootNames
+            if self.T is not None:
+                # add QD nodes to the tree based on the mode of the current workspace
+                for node in self.T.items():
+                    if isinstance(node, chemNodeDB) and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
+
+                self._updateParameters()    # Also sets self.repRootNames
 
     def set_lshapeOrder(self, newOrder):
         """Sets a new lineshape correction order."""
@@ -2340,6 +2343,7 @@ class Datum():
         # Find the corrected amplitudes
         zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)           # Values of the first time-domain points for each model signal
         zF0 = np.sum(self.zF[indxInRange, :] - zT0.ravel()/(2*np.sqrt(len(self.f))), axis=0).real / np.sqrt(len(self.f))     # What the (restricted) models sum to; should be 1/2*zT0 if the entire frequency range
+        corr_comp = np.where(zF0 > 0.01*sum(zF0))[0]           # Indices of components to correct, choose only large components
 
         bF0 = ampl.reshape(1,-1)*zT0.reshape(1,-1)/(2*np.sqrt(len(self.f)))             # Zero-order baselines
         Za = self.zF[indxInRange, :] * ampl.reshape(1,-1)
@@ -2348,12 +2352,14 @@ class Datum():
         C = absZa/np.sum(absZa, axis=1).reshape(-1,1)                     # Weights for redistributing the residual
 
         posZa_corr = posZa + res.real*C           # Corrected models without the constant baselines
-        ampl_corr = np.sum(posZa_corr.real, axis=0)/zF0.real.ravel()
-        ampl_corr *= np.nanmean(ampl.ravel()/np.sum(posZa.real, axis=0))     # Corrected amplitudes. Introduces a scaling factor to make the sum of Za approximately equal the intensities
+        ampl_corr = ampl
+        ampl_corr[corr_comp] = np.sum(posZa_corr[:, corr_comp].real, axis=0)/zF0[corr_comp].real.ravel()
+        ampl_corr[corr_comp] *= np.nanmean(ampl[corr_comp].ravel()/np.sum(posZa[:, corr_comp].real, axis=0))     # Corrected amplitudes. Introduces a scaling factor to make the sum of Za approximately equal the intensities
         Za_corr = self.zF[indxInRange, :] * ampl_corr.reshape(1,-1)
 
         # Save the corrections and amplitudes
         reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
+
         for name, val in zip(reportedNames, ampl_corr):
             self.setCrntVal(key=(name, 'ampl', 0), val=val)
         self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)
@@ -2776,10 +2782,6 @@ class Datum():
                 'nF_opti' : sum( [len(self._get_indxFreq(i)) for i in self.steps[-1].frqBlkIds] )}   # Find the number of points in the active optimization ranges
 
 #### Utility functions #####
-
-def arrhash(x):
-    """Very quick and dirty function to hash np arrays."""
-    return x[0] + x[-1] + len(x)
 
 def gmm_pdf(x, m, S, w=None):
     """Returns an analytical fucntion for a mixture of Gaussians (nd<=2)
