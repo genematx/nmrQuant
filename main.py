@@ -233,6 +233,10 @@ class SettingsDialog(QDialog):
     def __init__(self, oldSettings, parent = None):
         super(SettingsDialog, self).__init__(parent)
 
+        self.setWindowTitle('Settings')
+        self.setWindowFlags(Qt.WindowTitleHint)
+        self.setWindowFlags(Qt.Dialog | Qt.MSWindowsFixedSizeDialogHint | Qt.WindowTitleHint)
+
         layout = QVBoxLayout(self)
 
         # ----------- Radio buttons for seleting the starting values -----------
