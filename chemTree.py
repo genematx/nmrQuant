@@ -922,6 +922,115 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
 #     print('Exiting the QDSims function\n')
     return omega, intn, trans, uHs, vHs
 
+def QDsimsAB(chshQD, jcplQD, n_spin=(1,1)):
+    """Simulates an approximate response for an AmBn system."""
+
+    def expand_multiplet(freq, intn, order=2):
+        """Expands doublet of peaks into multiplets while preserving the intensities ratio. order is the number of coupled spins, e.g. 2 to get a triplet."""
+        if order == 1:
+            return freq, intn
+
+        d = np.abs(freq[1]-freq[0])  # Step between the peaks
+        m = np.mean(freq)   # Center of the multiplet (doesn't have to be the actual chemical shift)
+        coef = np.array([scipy.special.binom(order, i) for i in range(order+1)])      # Binomoal coefficients
+
+        freq_out = m + d * (np.arange(order+1)-order/2)
+        intn_out = coef * (intn[0]**np.arange(order, -1, -1)) * (intn[1]**np.arange(order+1))
+
+        return freq_out, intn_out
+
+    if len(chshQD) != 2:
+        raise RuntimeError('Only two-spin systems are supported.')
+
+    # Find the transitions for an AB system first. See Keeler, page 2-15
+    J = np.asscalar(np.abs(jcplQD))          # Works only with abs(J)
+    D = np.asscalar(np.sqrt( (chshQD[1]-chshQD[0])**2 + J**2 ))
+    S = -np.asscalar(np.array(chshQD[0] + chshQD[1]))      # Positive in the original source
+    sin2t = J/D
+
+    freqQDpeaks = [np.array([-D-S-J, -D-S+J])/2, np.array([D-S-J, D-S+J])/2]
+    intnQDpeaks = [np.array([1-sin2t, 1+sin2t])/2, np.array([1+sin2t, 1-sin2t])/2]
+
+    # Flip the order of the results if the chemcial shifts are in the reverse order
+    if chshQD[1] < chshQD[0]:
+        freqQDpeaks.reverse()
+        intnQDpeaks.reverse()
+
+    # Treat multiple-spin cases
+    freqQDpeaks[0], intnQDpeaks[0] = expand_multiplet(freqQDpeaks[0], intnQDpeaks[0], n_spin[1])
+    freqQDpeaks[1], intnQDpeaks[1] = expand_multiplet(freqQDpeaks[1], intnQDpeaks[1], n_spin[0])
+
+    # Scale intensities by the number of spins
+    intnQDpeaks[0] *= n_spin[0]
+    intnQDpeaks[1] *= n_spin[1]
+
+    # Add empty arrays to represent transition peaks (for consistency with other methods)
+    freqQDpeaks.append(np.empty(0))
+    intnQDpeaks.append(np.empty(0))
+
+    return freqQDpeaks, intnQDpeaks
+
+def QDsimsPairs(chshQD, jcplQD, chshAsgn, jcplAsgn):
+    """Simulates large spin system by splitting them in pairs of coupled spins"""
+    # TODO 1: Need to check magnetically inequivalent spins
+    # TODO 2: Use triplets and/or higher multiplets
+    if False:
+        # # Find groups of equivalent spins. Most of the time, they will be corresponding to spins with the same chemical shift, but is some cases, spins with the same chsh may be coupled with different coupling constants to different spins (e.g. in the ring).
+        # jcplAsgn_full = np.array(jcplAsgn).T + jcplAsgn         # Complete double-sided J-couplingassignment matrix
+        # similarity_matrix = np.vstack([jcplAsgn_full, chshAsgn])   # Similar columns in this matrix should be groupped together
+        # print(similarity_matrix)
+        pass
+    else:
+        indx_meq = [chshAsgn.index(i+1) for i in range(len(chshQD))]    # List of representative indices of equivalence classes of spins
+        nspin_meq = [chshAsgn.count(i+1) for i in range(len(indx_meq))]
+        chsh_meq = chshQD
+
+    jcpl_meq = np.array( [[jcplQD[jcplAsgn[i][j]-1] if jcplAsgn[i][j] != 0 else np.inf for j in indx_meq] for i in indx_meq] ) #
+
+    # Determine all pairs of coupled equivalent spins
+    pairs = [(i, j) for i, j in zip( *np.where(np.logical_not(np.isinf(jcpl_meq))) )]
+
+    # Simulate each pair as an AmBn system
+    freq_meq, intn_meq = [[] for _ in range(len(indx_meq))], [[] for _ in range(len(indx_meq))]     # Each element is a list of np arrays of freq/intn of peaks corresponding to different groups of magnetically equivalent spins
+    for p, q in pairs:
+        freq, intn = QDsimsAB( (chsh_meq[p], chsh_meq[q]), jcpl_meq[p][q], n_spin=(nspin_meq[p], nspin_meq[q]) )
+        freq_meq[p].append(freq[0])
+        freq_meq[q].append(freq[1])
+        intn_meq[p].append(intn[0])
+        intn_meq[q].append(intn[1])
+
+    # Convolve the multiplets for each equivalent spin
+    for i in range(len(indx_meq)):
+        freq_meq[i], intn_meq[i] = convolve_multiplets(freq_meq[i], intn_meq[i], chsh_meq[i], nspin_meq[i])
+
+    # Distribute the equivalent spins among the distinct chemical shifts (some chsh may be assigned multiple equivalent groups)
+    if len(freq_meq) > len(chshQD):
+        # This chack is only to save time
+        freqQDpeaks, intnQDpeaks = [None]*len(chshQD), [None]*len(chshQD)
+        for i in len(chshQD):
+            pass
+    else: freqQDpeaks, intnQDpeaks = freq_meq, intn_meq
+
+    return freqQDpeaks, intnQDpeaks
+
+def convolve_multiplets(freqs, intns, freq_offs, n_spin=None):
+    """Convolves peaks of two multiplets. freqs and intns are lists of np arrays of frequencies and intensities corresponding to each transition peak."""
+    if n_spin is None:
+        n_spin = np.mean([np.sum(x) for x in intns])
+
+    freq_out, intn_out = freqs.pop().ravel(), intns.pop().ravel()         # Intialize the results
+
+    for freq in freqs:
+        freq_out = (freq_out[None, :] + freq[:, None] - freq_offs).ravel()
+
+    for intn in intns:
+        intn_out = (intn_out[None, :] * intn[:, None]).ravel()
+
+    # Scale the intensitie according to the number of spins
+    intn_out /= intn_out.sum()/n_spin
+
+    return freq_out, intn_out
+
 # @ profile
 def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spinopsJ=None, TM=None):
     """Computes the transition lines for a spin system."""
@@ -935,7 +1044,7 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
 
         return freqQPeaks, intnQPeaks
 
-    elif n_spin < 13:     # False: #
+    elif n_spin < 12:     # False: #
         # Case 2. Small spin system
 
         # 0. Compute the spin operators if they are not supplied
@@ -980,6 +1089,7 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
                             spinopsJ[jcplAsgn[i][j]-1] += (Lx[i].dot(Lx[j]) + Ly[i].dot(Ly[j]) + Lz[i].dot(Lz[j])).real
 #             spinopsL = [sps.dia_matrix(m.real) for m in spinopsL]
 #             spinopsJ = [sps.dia_matrix(m.real) for m in spinopsJ]
+                pass
 
         # 1. Build the Hamiltonian
         H = np.zeros((2**n_spin, 2**n_spin), dtype='float64')
@@ -1051,26 +1161,27 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
             # 3. Diagonalize the Hamiltonian
             omega, intn, trans, _, _ = QDsimsGrpd(H, TM, states)   # assign_by_dist=(len(np.unique(chshAsgn))<len(chshAsgn))
 
+        # Combine the peaks into arrays corresponding to each chemical shift. Add the combination transitions to the arrays of their closest resonances
+        freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
+        indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
+        for i in range(len(chshQD)):
+            indx_combin = np.where(indMin == i)[0]
+            indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
+            freqQPeaks[i] = np.concatenate( [omega[j] for j in indx_simple ] + [omega[-1][indx_combin]] )
+            intnQPeaks[i] = np.concatenate( [ intn[j] for j in indx_simple ] + [ intn[-1][indx_combin]] )
+
     else:
         # Case 3. Combined spin system
+        freqQPeaks, intnQPeaks = QDsimsPairs(chshQD, jcplQD, chshAsgn, jcplAsgn)
 
-        # Build the connection matrix (0 - no coupling, 1+ - strong coupling)
-        df = np.abs( chshQD[np.array(chshAsgn)-1].reshape(-1,1) - chshQD[np.array(chshAsgn)-1].reshape(1,-1) )      # Pairwise difference in chemical shifts (in Hz)
-        dj = np.where(jcplAsgn, jcplQD[np.array(jcplAsgn)-1], 0)
-        dj += dj.T       # Make symmetric
-        C = np.divide(dj, df, out=np.zeros((n_spin, n_spin), dtype='float'), where=(df!=0) )
-
-        # Cluster the spin system
+        # # Build the connection matrix (0 - no coupling, 1+ - strong coupling)
+        # df = np.abs( chshQD[np.array(chshAsgn)-1].reshape(-1,1) - chshQD[np.array(chshAsgn)-1].reshape(1,-1) )      # Pairwise difference in chemical shifts (in Hz)
+        # dj = np.where(jcplAsgn, jcplQD[np.array(jcplAsgn)-1], 0)
+        # dj += dj.T       # Make symmetric
+        # C = np.divide(dj, df, out=np.zeros((n_spin, n_spin), dtype='float'), where=(df!=0) )
+        #
+        # # Cluster the spin system
         pass
-
-    # Combine the peaks into arrays corresponding to each chemical shift. Add the combination transitions to the arrays of their closest resonances
-    freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
-    indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
-    for i in range(len(chshQD)):
-        indx_combin = np.where(indMin == i)[0]
-        indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
-        freqQPeaks[i] = np.concatenate( [omega[j] for j in indx_simple ] + [omega[-1][indx_combin]] )
-        intnQPeaks[i] = np.concatenate( [ intn[j] for j in indx_simple ] + [ intn[-1][indx_combin]] )
 
     return freqQPeaks, intnQPeaks
 
@@ -1389,7 +1500,7 @@ class chemNode(treeNode):
         self.uT = []             # response that includes children/parents along the tree
         self.sPole = 0.          # self-pole determined by alph and chsh
         self.uPoles = 0.         # Poles that includes the effect of all parents
-        self.oldTime = []
+        self._oldHash = None
 
     def set_intn(self, intn):
         """Sets a new intensity value for the tree node and updates its signals."""
@@ -1469,7 +1580,7 @@ class chemNode(treeNode):
         """Resets the oldPars, s(t), and u(t) to their default (empty) values. Everything will be recomputed at the next evaluation."""
         self.uT = []
         self.sT = []
-        self.oldTime = []
+        self._oldHash = None
 
     def getPoles(self, c0, chsh=[], alph=[], **kwargs):
         """Computes the poles and returns 1 if they have changed, 0 otehrwise"""
@@ -1497,10 +1608,12 @@ class chemNode(treeNode):
     #@profile
     def evalTime(self, t, c0, chsh=[], alph=[], **kwargs):
         "Computes the node's response u=sPoleIntn*exp(-alph*t+i*omega*t)"
+        newHash = arrhash(t)
         self.getPoles(c0, chsh, alph)
-        if self.sT == [] or not np.array_equal(self.oldTime, t):
+        if self.sT == [] or self._oldHash != newHash:
             self.sT = self.intn if self.sPole == 0 else self.intn * np.exp(np.outer(t, self.sPole)).ravel()
-            self.oldTime = t
+
+            self._oldHash = newHash
 
     def evalFreq(self, f, dt, c0, f0=0, tau=0):
         "Computes the node's response in the frequency domain assuming that all nodes have updated uPoles."
@@ -1721,18 +1834,19 @@ class chemNodeQD(chemNode):
     #@profile
     def evalTime(self, t, c0, chsh=[], alph=[], chshQD=[], alphQD=[], jcplQD=[], **kwargs):
         "Computes the node's response sT and also updates the children if any QD parameters have changed."
+        newHash = arrhash(t)
         self.getPoles(c0, chsh, alph, chshQD, alphQD, jcplQD)
-        if self.sT == [] or not np.array_equal(self.oldTime, t):
+        if self.sT == [] or self._oldHash != newHash:
             self.sT = self.intn if self.sPole == 0 else self.intn * np.exp(np.outer(t, self.sPole)).ravel()
 
         # Evaluate children as well
         for i, chld in enumerate(self.children()):
-            if chld.qT == [] or not np.array_equal(self.oldTime, t):
+            if chld.qT == [] or self._oldHash != newHash:
                 chld.qT = np.inner( np.exp(np.outer(t, chld.qPoles)), chld.qPolesIntn ).ravel()
-            if chld.sT == [] or not np.array_equal(self.oldTime, t):
+            if chld.sT == [] or self._oldHash != newHash:
                 chld.sT = chld.intn * chld.qT * np.exp(np.outer(t, chld.sPole)).ravel()
 
-        self.oldTime = t
+        self._oldHash = newHash
 
     def getChshTree(self, sfx='', indx=0):
         """Creates a parameters tree. Takes into account the parsKind parameter of itself and also all QD parameters, but omits any attached chemNodeT children. sfx = '' or 'QD'. """
@@ -1790,9 +1904,9 @@ class chemNodeT(chemNode):
     def evalFreq(self, f, dt, c0, f0=0, tau=0):
         "Computes the node's response in the frequency domain assuming that all ancestors have updated uPoles."
         # Check if the signal needs to be reevaluated
-        if self.uF == [] or self.uF.size != f.size:
-            # print(self.name)
-            # print(self.uPoles.shape)
+        newHash = arrhash(f)
+
+        if self.uF == [] or self._oldHash != newHash:
             self.uF = np.exp(1j*tau*(self.uPoles.imag - 2*np.pi*f0)).reshape((1,-1))
             x1 = 1j*2*np.pi*(c0*f-f0).reshape((-1,1))
             x2 = np.conj(self.uPoles - 1j*2*np.pi*f0).reshape((1,-1))
@@ -1801,6 +1915,8 @@ class chemNodeT(chemNode):
             self.uF = ne.evaluate('sum(conj( x ) * y, axis=1)', local_dict={'x':self.uF, 'y':self.qPolesIntn}).ravel()
             # self.uF = np.inner(np.conj(self.uF), self.qPolesIntn).ravel()
             self.uF *= self.intn * np.sqrt((f[1]-f[0])*c0*dt)
+
+            self._oldHash = newHash
 
 class chemNodeDB(chemNode):
     """Class for a node describing a chemical from the database, inherited from chemNode. The node can be specified either by passing a name of a species in the database or the QDpars structure (an instance of chemSpec class.)"""
@@ -2030,6 +2146,10 @@ def loadTree(fname):
     return T
 
 # ------------- Utility functions -------------
+def arrhash(x):
+    """Very quick and dirty function to hash np arrays."""
+    return x[0] + x[-1] + len(x)
+
 def ind2pos(ind):
     """Converts an n-array of unique integers from 0 to n-1 (e.g. indices) into
        the array (positions) whose j-th entry corresponds to the index the

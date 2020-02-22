@@ -78,5 +78,6 @@ def from_dict(self, D):
         elif key == 'DISPL_ShiftToReference':
             self.DISPL_ShiftToReference = val
 
+
 def reset():
     pass

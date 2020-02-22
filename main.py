@@ -230,7 +230,7 @@ class ChooseFromDBDialog(QDialog):
         else: return (None, None, result == QDialog.Accepted)
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent = None):
+    def __init__(self, oldSettings, parent = None):
         super(SettingsDialog, self).__init__(parent)
 
         layout = QVBoxLayout(self)
@@ -258,9 +258,14 @@ class SettingsDialog(QDialog):
         rbtnGroup.setLayout(groupLayout)
 
         # ----------- Settings for the QD simulations --------------------------
+        self.cmboxHCSelector = QComboBox()
+        self.cmboxHCSelector.addItem("1H")
+        self.cmboxHCSelector.addItem("13C")
+        self.cmboxHCSelector.setCurrentIndex( self.cmboxHCSelector.findText(oldSettings['HCmode']) )
         self.editRerunThreshold = MyDoubleEdit(config.QD_RerunQDchshThreshold)
         self.editAggregateThreshold = MyDoubleEdit(config.QD_AggregatePeaksThreshold)
         groupLayout = QFormLayout()
+        groupLayout.addRow("Nucleus", self.cmboxHCSelector)
         groupLayout.addRow("Merge resonances closer than, Hz", self.editAggregateThreshold)
         groupLayout.addRow("Update if chsh changed by, ppm", self.editRerunThreshold)
         qdConfigGroup = QGroupBox("QD settings")
@@ -327,6 +332,8 @@ class SettingsDialog(QDialog):
 
     # get current date and time from the dialog
     def getEntries(self):
+        newSettings = {}
+
         # Update the starting values settings
         if self.rbtnStartFromPrevious.isChecked():
             config.OPTIM_startFrom = 'previous'
@@ -339,6 +346,7 @@ class SettingsDialog(QDialog):
         # Update the QD settings
         config.QD_RerunQDchshThreshold = self.editRerunThreshold.value()
         config.QD_AggregatePeaksThreshold = self.editAggregateThreshold.value()
+        newSettings['HCmode'] = self.cmboxHCSelector.currentText()
 
         # Update the optimization settings
         config.OPTIM_maxBasinhoppingSteps = self.spbxBasinhopping.value()
@@ -357,15 +365,18 @@ class SettingsDialog(QDialog):
         else: config.SAMPL_varEstimator = 'liberal'"""
         config.SAMPL_robustLS = True if self.chkboxRobustLS.isChecked() else False
 
+        return newSettings
+
     # static method to create the dialog and return
     @staticmethod
-    def run(parent = None):
-        dialog = SettingsDialog(parent)
+    def run(oldSettings, parent = None):
+        dialog = SettingsDialog(oldSettings, parent)
         result = dialog.exec_()
         if result == QDialog.Accepted:    # If OK was clicked
-            dialog.getEntries()
+            newSettings = dialog.getEntries()
+        else: newSettings = oldSettings
         #else: chkdForAll = False
-        return QDialog.Accepted
+        return QDialog.Accepted, newSettings
 
 class SpectrumPlotItem(pg.PlotItem):
     """A customized PlotItem with zoomed out view."""
@@ -1758,9 +1769,12 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.resetChemTree(flag=False)
         self.resetLshapeTree(flag=False)
 
-    def resetChemTree(self, flag=True):
+    def resetChemTree(self, T=None, flag=True):
         """Updates the chemical tree."""
         if flag: self.beginResetModel()
+
+        if T is not None:
+            self.datum.setTree(T)
 
         # The tree of parameters to be displayed
         self.TP = getDisplayTree(self.datum.T) if self.datum.T is not None else viewNode('')
@@ -1812,6 +1826,18 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             # The list of steps is the same (the new Datum is in the same Series)
             self.datum = datum
             self.notifyDataChanged()
+
+    def setHCmode(self, new_HCmode):
+        """Sets the HC mode of the workspace."""
+        if self.datum.HCmode != new_HCmode:
+
+            self.beginResetModel()
+
+            self.datum.setHCmode(new_HCmode)
+            self.resetChemTree(flag=False)
+            self.resetLshapeTree(flag=False)
+
+            self.endResetModel()
 
     def fullReset(self, datum):
         self.beginResetModel()
@@ -4351,11 +4377,6 @@ class MainView(QMainWindow):
 
         # ---------------------- Toolbar for the tree --------------------------
         tbTree.addAction(actnLoadTree)
-        self.cmboxHCSelector = QComboBox()
-        self.cmboxHCSelector.addItem("1H")
-        self.cmboxHCSelector.addItem("13C")
-        self.cmboxHCSelector.currentIndexChanged.connect(self.onHCSelect)
-        tbTree.addWidget(self.cmboxHCSelector)
         tbTree.addAction(actnAddStep)
         tbTree.addAction(actnDelStep)
         tbTree.addSeparator()
@@ -4483,23 +4504,7 @@ class MainView(QMainWindow):
 
         T = loadTree(filename)
 
-        # if filename:
-        #     with open(filename, 'rb') as fp:
-        #         data = dill.load(fp)
-        #
-        # T = data["tree"]
-        # T.setTreeBook()
-
-        # NOTE: Technically, this is unsafe. The tree should be better reset from the treeModel rather than in the workspace and then the module updated.....
-        self.wsp.setTree(T)
-        self.treeModel.resetChemTree()
-
-    def onHCSelect(self, val):
-        """Selects a mode 1H/13C."""
-        newMode = '1H' if val == 0 else '13C'
-
-        self.wsp.setHCmode(newMode)
-        self.treeModel.resetChemTree()
+        self.treeModel.resetChemTree(T)
 
     def onSaveWspAction(self):
         """Saves the workspace including the stepClass class and the steps array."""
@@ -4612,7 +4617,10 @@ class MainView(QMainWindow):
 
     def showSettingsDialog(self):
         """Shows an input dialog and updates settings"""
-        accepted = SettingsDialog.run()
+        accepted, newSettings = SettingsDialog.run(oldSettings={'HCmode': self.wsp.HCmode})
+
+        if accepted:
+            self.treeModel.setHCmode(newSettings['HCmode'])
 
     def showAboutMessage(self):
         """Displays the About message."""
@@ -4687,6 +4695,7 @@ class MainView(QMainWindow):
         self.progressBarFiles.setValue(0)
 
         self.fittingThread.setExitFlag(False)
+
         self.continueThread()
 
     def continueThread(self):
