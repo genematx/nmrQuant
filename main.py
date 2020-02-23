@@ -609,7 +609,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         # Plot the residual
         if xF is not None:
             self._xF = p0.plot(f, xF.ravel().real, pen={'color': colrseq[1], 'width': 1})
-            p1.plot(f, (yF-xF).ravel().real, pen={'color':colrseq[5], 'width':1})
+            p1.plot(f, np.where(xF.ravel() != 0, (yF-xF).ravel().real, 0), pen={'color':colrseq[5], 'width':1})
 
         # Plot the components
         if zF is not None:

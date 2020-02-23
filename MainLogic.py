@@ -195,7 +195,7 @@ class Workspace():
                         pass
 
     def setHCmode(self, HCmode):
-        
+
         if HCmode != self.HCmode:
 
             self.HCmode = HCmode
@@ -2627,7 +2627,8 @@ class Datum():
 
             # Plot the residuals
             if ax_residual is not None:
-                rF = (yFph - xF).real if real else (yFph - xF).imag
+                rF = np.where(xF != 0, yFph-xF, 0)
+                rF = rF.real if real else rF.imag
                 ax_residual.plot(f, rF, '-', color='darkkhaki')
                 # rmsResidual += np.sqrt(np.nanmean(np.abs(rF)**2))
 
