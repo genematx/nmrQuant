@@ -197,14 +197,15 @@ def get_figure(DDD, residual=False):
     xlims = (5.5, 2.5) if True else 0     # (DDD.freqBlocks[1].max, DDD.freqBlocks[1].min)
 
     if residual:
-        fig, ax = plt.subplots(2, 1, figsize=(13, 7), sharex=True, sharey=True)
+        fig, ax = plt.subplots(2, 1, figsize=(13, 7), sharex=True)
         f, yFph, xF, _ = DDD.plot(ax_main=ax[0], ax_residual=ax[1], showRanges=None, showComponents=True, returnSignals=True)
 
         # Scale the displayed range to the sugars region
         ymin, ymax = min(0, yFph[(3.0 < f) & (f < 4.2)].min()), yFph[(3.0 < f) & (f < 4.2)].max()
-        ylims = (ymin-0.05*(ymax-ymin), ymax+0.05*(ymax-ymin))
+        ylims = np.array( (ymin-0.05*(ymax-ymin), ymax+0.05*(ymax-ymin)) )
         ax[0].set_xlim(*xlims)
         ax[0].set_ylim(*ylims)
+        ax[1].set_ylim( *(ylims-np.mean(ylims)) )
     else:
         fig = plt.figure(figsize=(13, 4))
         f, yFph, xF, _ = DDD.plot(ax_main=fig.gca(), showRanges=None, showComponents=True, returnSignals=True)

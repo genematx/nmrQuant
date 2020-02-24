@@ -42,7 +42,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '1.0.2'
+version = '1.1.0'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -609,7 +609,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         # Plot the residual
         if xF is not None:
             self._xF = p0.plot(f, xF.ravel().real, pen={'color': colrseq[1], 'width': 1})
-            p1.plot(f, (yF-xF).ravel().real, pen={'color':colrseq[5], 'width':1})
+            p1.plot(f, np.where(xF.ravel() != 0, (yF-xF).ravel().real, 0), pen={'color':colrseq[5], 'width':1})
 
         # Plot the components
         if zF is not None:
@@ -2895,8 +2895,11 @@ class ChemTreeView(QTreeView):
             self.model().datum.setCrntVal(key, val)
         self.model().notifyDataChanged()
 
-    def copyCrntPars(self, keys):
+    def copyCrntPars(self, keys=None):
         """Copy current values of selected parameters."""
+        if keys is None:
+            # Copy all parameters
+            keys = self.model().datum.allParsKeys()
         self._copy_buffer.clear()
         self._copy_buffer = {key : self.model().datum.getCrntVal(key) for key in keys}
 
@@ -3942,6 +3945,18 @@ class MainView(QMainWindow):
         # Set the expiry time/date
         self._expiryTime = expiryTime
 
+        # Show the warning window if the license is about to expire (less than 5 days left)
+        if (self._expiryTime - time.time()) < 5*24*3600:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+
+            msg.setText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
+            msg.setInformativeText("Please consider renewing it." )
+            msg.setWindowTitle("Expiring license")
+            # msg.setDetailedText("The details are as follows:")
+            msg.setStandardButtons(QMessageBox.Close)
+            msg.exec_()
+
         # Initialize with some workspace
         self.wsp = wsp    # The Workspace; main class that holds all logic
         self._crnt = self.wsp     # Currently opened Series/Datum/or the entire Workspace
@@ -3971,18 +3986,6 @@ class MainView(QMainWindow):
         if compile_standalone:
             sys.stdout = EmittingStream(textWritten=self.normalOutputWritten)
             sys.stderr = EmittingStream(textWritten=self.errorOutputWritten)
-
-        # Show the warning window if the license is about to expire (less than 5 days left)
-        if (self._expiryTime - time.time()) < 5*24*3600:
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Information)
-
-            msg.setText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
-            msg.setInformativeText("Please consider renewing it." )
-            msg.setWindowTitle("Expiring license")
-            # msg.setDetailedText("The details are as follows:")
-            msg.setStandardButtons(QMessageBox.Close)
-            msg.exec_()
 
     def __del__(self):
         # Restore sys.stdout (if used to collect output to the console)
@@ -4287,6 +4290,14 @@ class MainView(QMainWindow):
         actnDelStep = QAction(self._icon('icon_delStep.png'), 'Remove active step', self)
         actnDelStep.setStatusTip('Remove an optimization step')
         actnDelStep.triggered.connect(self.treeModel.delStep)
+        # Copy All parameters
+        actnCopyAllPars = QAction(self._icon('icon_copy.png'), 'Copy all parameters', self)
+        actnCopyAllPars.setStatusTip('Copy current values of all parameters')
+        actnCopyAllPars.triggered.connect(lambda : self.treeView.copyCrntPars(keys=None))
+        # Paste copied parameters
+        actnPastePars = QAction(self._icon('icon_pasteCrnt.png'), 'Paste parameters', self)
+        actnPastePars.setStatusTip('Paste values of copied parameters as current')
+        actnPastePars.triggered.connect(lambda : self.treeView.pasteCrntPars(datums=None))
         # Toggle LS/TLS
         self.actnToggleTLS = QAction(self._icon('icon_TLS.png'), 'Use TLS algorithm', self)
         self.actnToggleTLS.setStatusTip('Use the Total Least Squares algorithm')
@@ -4383,6 +4394,9 @@ class MainView(QMainWindow):
         tbTree.addAction(actnLoadTree)
         tbTree.addAction(actnAddStep)
         tbTree.addAction(actnDelStep)
+        tbTree.addSeparator()
+        tbTree.addAction(actnCopyAllPars)
+        tbTree.addAction(actnPastePars)
         tbTree.addSeparator()
         # tbTree.addAction(self.actnToggleTLS)
         tbTree.addAction(self.actnFitLastStep)
