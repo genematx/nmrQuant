@@ -200,12 +200,12 @@ class Workspace():
 
             self.HCmode = HCmode
 
-            if self.T is not None:
-                # add QD nodes to the tree based on the mode of the current workspace
-                for node in self.T.items():
-                    if isinstance(node, chemNodeDB) and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
+        if self.T is not None:
+            # add QD nodes to the tree based on the mode of the current workspace
+            for node in self.T.items():
+                if isinstance(node, chemNodeDB) and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
 
-                self._updateParameters()    # Also sets self.repRootNames
+            self._updateParameters()    # Also sets self.repRootNames
 
     def set_lshapeOrder(self, newOrder):
         """Sets a new lineshape correction order."""
