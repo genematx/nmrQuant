@@ -272,10 +272,17 @@ class Workspace():
         else: node = self.T[node_name]
 
         if parsKind is None:
-            parsKind = ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']
+            parsKind = ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD', '.']
 
-        return [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
-                if key[1] in parsKind]      # List of all parameter keys that affect the subtree
+        parsKeys = [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
+                    if key[1] in parsKind]      # List of all parameter keys that affect the subtree
+
+        if '.' in parsKind:
+            parsKeys.extend([('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] + \
+                            [('.', 'lshapeR', i) for i in range(self.lshapeOrder)] + \
+                            [('.', 'lshapeI', i) for i in range(self.lshapeOrder)])
+
+        return parsKeys
 
     def _updateParameters(self):
         """Updates the existing dictionaries of parameters after the tree has changed (e.g. when adding/removing nodes or setting new root nodes). Updates the structure to match with the new default parameters but keeps the old values."""
@@ -2671,8 +2678,15 @@ class Datum():
             frqBlkIds = self.steps[-1].frqBlkIds
 
         # Phase the data
-        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
+        theta, tau = self.getCrntVal(key=('.', 'theta', 0)), self.getCrntVal(key=('.', 'tau', 0))
+        ph = np.exp(-1j*2*np.pi * tau * (self.f*self.c0-self.f0) - 1j*theta ).reshape(-1,1)
         yFph = self.yF * ph
+        # Flip the phase if needed
+        if np.median(yFph.real) - np.min(yFph.real) > np.max(yFph.real) - np.median(yFph.real):
+            # Possibly also change the value in the model
+            # theta = (theta + np.pi + np.pi) % (2 * np.pi) - np.pi
+            # self.setCrntVal(key=('.', 'theta', 0), val=theta)
+            yFph *= -1
 
         # Subsample out-of-range parts of the spectrum
         inRange, outRange = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
