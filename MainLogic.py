@@ -195,9 +195,8 @@ class Workspace():
                         pass
 
     def setHCmode(self, HCmode):
-
+      
         if HCmode != self.HCmode:
-
             self.HCmode = HCmode
 
         if self.T is not None:
