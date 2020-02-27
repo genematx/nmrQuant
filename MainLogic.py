@@ -264,19 +264,20 @@ class Workspace():
 
         return T
 
-    def allParsKeys(self, node_name=None, parsKind=None):
+    def allParsKeys(self, node_name=None, parsKind=None, globPars=False):
         """Returns all parameter keys for a (sub)tree starting from a specific node."""
         if node_name is None:
             node = self.T.findRoot()
         else: node = self.T[node_name]
 
         if parsKind is None:
-            parsKind = ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD', '.']
+            parsKind = ['chsh', 'chshQD', 'alph', 'alphQD', 'jcplQD']
 
         parsKeys = [key for key in flatten(defaultTreePars(node, startFromRoot=False)).keys() \
                     if key[1] in parsKind]      # List of all parameter keys that affect the subtree
 
-        if '.' in parsKind:
+        if globPars:
+            # Global parameter keys
             parsKeys.extend([('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] + \
                             [('.', 'lshapeR', i) for i in range(self.lshapeOrder)] + \
                             [('.', 'lshapeI', i) for i in range(self.lshapeOrder)])
@@ -523,27 +524,51 @@ class Workspace():
         workbook = xlsxwriter.Workbook(filename)
         worksheet = workbook.add_worksheet()
 
+        # Keys of parameters to output
+        if parsKeys is None:
+            parsKeys = self.allParsKeys(parsKind=['chshQD', 'jcplQD'])
+        chshKeys = sorted( [key for key in parsKeys if key[1]=='chshQD'] )
+        jcplKeys = sorted( [key for key in parsKeys if key[1]=='jcplQD'] )
+
         # Which cell to start writing the data from. Rows and columns are zero indexed.
         datarow = 0
         datacol = 0
 
         # Write the header
+        ncol_ampl = 2*len(self.repRootNames)       # Number of columns for amplitudes
+        ncol_chsh = len(chshKeys)
+        ncol_jcpl = len(jcplKeys)
         fmt_center = workbook.add_format({'align': 'center', 'valign': 'vcenter'})
         fmt_cenrot = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'rotation': 90})
         for i, (text, col_width) in enumerate(zip(['','ID', 'Series Name', 'Data Name'], [3, 5, 3, 15])):
-            worksheet.merge_range(0, i, 2, i, text, fmt_center)
+            worksheet.merge_range(0, i, 3, i, text, fmt_center)
             worksheet.set_column(i, i, col_width)
-        worksheet.merge_range(0, 4, 0, 4+2*len(self.repRootNames)-1, 'Absolute intensities of mixture components', fmt_center)
+        worksheet.merge_range(0, 4, 1, 4+ncol_ampl-1, 'Absolute intensities of mixture components, a.u.', fmt_center)
+        if ncol_chsh > 0:
+            worksheet.merge_range(0, 4+ncol_ampl, 0, 4+ncol_ampl+ncol_chsh-1, 'Chemical shifts of spins, ppm', fmt_center)
+        if ncol_jcpl > 0:
+            worksheet.merge_range(0, 4+ncol_ampl+ncol_chsh, 0, 4+ncol_ampl+ncol_chsh+ncol_jcpl-1, 'J-coupling values, Hz', fmt_center)
 
         col = 4
+        # Write the amplitude names
         for name in self.repRootNames:
-            worksheet.merge_range(1, col, 1, col+1, name, fmt_center)
-            worksheet.write_row(2, col, ['Intensity, a.u.', 'Variance'])
+            worksheet.merge_range(2, col, 2, col+1, name, fmt_center)
+            worksheet.write_row(3, col, ['Intensity, a.u.', 'Variance'])
             col += 2
+        # Write the chemical shift names
+        for key in chshKeys:
+            worksheet.write( 2, col, self.getPrior(key).label )
+            worksheet.write( 3, col, str(key) )
+            col += 1
+        # Write the J-coupling names
+        for key in jcplKeys:
+            worksheet.write( 2, col, self.getPrior(key).label )
+            worksheet.write( 3, col, str(key) )
+            col += 1
 
 
         # Write the Series names in merged rows
-        row_start = 3
+        row_start = 4
         for ser in self.series:
             row_stop = row_start + len(ser.data) - 1
             if len(ser.data) > 1:
@@ -555,7 +580,7 @@ class Workspace():
             row_start = row_stop + 1
 
         # Write the amplitudes and parameters
-        row = 3
+        row = 4
         for ser in self.series:
             for dat in ser.data:
                 # Write the Datum ID and Name
@@ -574,7 +599,16 @@ class Workspace():
                         ampl, var = [0.0, 0.0]
                     worksheet.write_row(row, col, [ampl, var])
                     col += 2
+                # Write the chemical shift and J-couplings values
+                for key in chshKeys + jcplKeys:
+                    val = dat.getCrntVal(key)
+                    worksheet.write( row, col, val )
+                    worksheet.write( 3, col, str(key) )
+                    col += 1
                 row += 1
+
+        # Save all values of chemical shifts
+
 
         # # Iterate over the data and write it out row by row.
         # for item, cost in (expenses):
@@ -631,7 +665,7 @@ class Workspace():
                                                     'sF' : dat.sF,
                                                     'sT' : dat.sT,
                                                     'jointPrior' : dat._joint,
-                                                    'refChshKey' : dat.refChshKey,
+                                                    '_refKey' : dat._refKey,
                                                     'flagAdapFreq' : dat._flagAdapFreq,
                                                     'xclRootNames' : dat.xclRootNames
                                                     })
@@ -692,8 +726,8 @@ class Workspace():
                 newDatum.sT = dat['sT'] if 'sT' in dat.keys() else None
                 if 'smplDistF' in dat.keys():
                     newDatum.smplDistF.update(dat['smplDistF'])
-                if 'refChshKey' in dat.keys():
-                    newDatum.setReferenceChshKey(dat['refChshKey'])
+                if '_refKey' in dat.keys():
+                    newDatum.setRefKey(dat['_refKey'])
                 if 'jointPrior' in dat.keys():
                     newDatum.setJointPrior(dat['jointPrior'])
 
@@ -816,10 +850,10 @@ class Series():
             except KeyError:
                 return getattr(self.T[key[0]], key[1])[key[2]]
 
-    def setReferenceChshKey(self, key=None):
+    def setRefKey(self, key=None):
         """Sets the reference chemical shift and updates the global chemical shift accordingly."""
         for DDD in self.data:
-            DDD.setReferenceChshKey(key)
+            DDD.setRefKey(key)
 
     def addMetaParameter(self, **kwargs):
         """Adds a new meta parameter to the current Series. Additional key word argumrnts may include standard parsSpec arguments: label, min, max, distr, p1, p2, dval."""
@@ -1368,6 +1402,7 @@ class Datum():
         self._joint = None            # A joint prior of all parameters
         self._flagAdapFreq = flagAdapFreq if flagAdapFreq is not None else (len(self.yT) > 2**16)
         self._gof = None              # Computed goodness of fit
+        self._refKey = None
         self.fullReset(crntParsH, priors)
 
     # @profile
@@ -1698,6 +1733,38 @@ class Datum():
     def setGlobalChshVal(self, val):
         """Sets the value of the top-level chemical shift in the parameter tree."""
         self.setCrntVal(key = (self.T.findRoot().name, 'chsh', 0), val=val)
+
+    def getRefKey(self):
+        """Returns the reference chemical shift key."""
+        if self._refKey is not None:
+            return self._refKey
+        else:
+            allKeys = self.allParsKeys(parsKind=['chshQD'])   # All keys
+            posKeys = [('TMS-SPSY1', 'chshQD', 0),
+                       ('TMSP-SPSY1', 'chshQD', 0),
+                       ('Water-SPSY1', 'chshQD', 0),
+                       ('Chloroform-SPSY1', 'chshQD', 0)]     # Possible reference keys in the order of importance
+            for key in posKeys:
+                if key in allKeys: return key
+
+    def setRefKey(self, key=None):
+        """Returns the reference chemical shift key."""
+
+        if (key not in self.allParsKeys(parsKind=['chshQD'])) and (key is not None):
+            raise KeyError(key)
+
+        self._refKey = key
+
+    def scaleToRef(self):
+        """References the chemical shift scale to a certain peak's default chemical shift."""
+        refKey = self.getRefKey()
+        crntRefVal = self.getCrntVal(refKey)
+        dfltRefVal = self.getPrior(refKey).dflt()
+        diffVal = crntRefVal - dfltRefVal
+        self.setGlobalChshVal(self.getGlobalChshVal() + diffVal)
+
+        for key in self.allParsKeys(parsKind=['chshQD']):
+            self.setCrntVal(key, self.getCrntVal(key)-diffVal)
 
     def setReferenceChshKey(self, key=None):
         """Sets the reference chemical shift and updates the global chemical shift accordingly."""

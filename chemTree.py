@@ -2123,6 +2123,10 @@ def getFID(T, t, c0, f0=0, pars=None, tau=None, xclRootNames=None):
 # Functions for saving and loading predefined trees
 def saveTree(fname, tree):
     """Saves a chemTree datastructure along with its default parameters within a pickled format."""
+    tree = copy.deepcopy(tree)
+    for node in tree.items():
+        node.reset()
+
     if os.path.splitext(fname)[1] != '.ctr':
         fname += '.ctr'
     with open(fname, 'wb') as fp:
