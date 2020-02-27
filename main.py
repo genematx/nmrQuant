@@ -1953,6 +1953,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             elif key == ('.', 'sigma2', 0):
                 item = self._parsSigma2
                 row = 3
+            else: return None
         column = 0
         return self.createIndex(row, column, item)
 
@@ -2452,8 +2453,8 @@ class ChemTreeView(QTreeView):
             else:
                 actnDfltFromCrnt.triggered.connect(lambda : self.editDfltVal.setValue(crntVal))
 
-            # # Checkbox to set the current parameter as a reference
-            # self.chckReference = QCheckBox("Use as reference")
+            # Checkbox to set the current parameter as a reference
+            self.chckReference = QCheckBox("Use as reference")
 
 
             # OK and Cancel buttons
@@ -2461,9 +2462,9 @@ class ChemTreeView(QTreeView):
                 QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
                 Qt.Horizontal, self)
             layoutMain.addLayout(layoutForm)
-            # if isReference is not None:          # If the parameter can be set as a reference (e.g. if it is a chemical shift or an intensity)
-            #     self.chckReference.setChecked(isReference)
-            #     layoutMain.addWidget(self.chckReference)
+            if isReference is not None:          # If the parameter can be set as a reference (e.g. if it is a chemical shift)
+                self.chckReference.setChecked(isReference)
+                layoutMain.addWidget(self.chckReference)
             layoutMain.addWidget(self.chckSeries)
             layoutMain.addWidget(self.buttonsBox)
 
@@ -2518,10 +2519,11 @@ class ChemTreeView(QTreeView):
                     'p1':self.editPriorP1.value(),\
                     'p2':self.editPriorP2.value(),\
                     'dval':self.editDfltVal.value()},\
-                    self.chckSeries.isChecked(), False   #,\                    self.chckReference.isChecked()
+                    self.chckSeries.isChecked(), \
+                    self.chckReference.isChecked()
 
     class LabelAndButton(QWidget):
-        """A widget consisting of a label and a small button used to display phase correction in the tree"""
+        """A widget consisting of a label and a small button, e.g. used to display phase adjustment in the tree."""
 
         clicked = pyqtSignal()
 
@@ -2728,6 +2730,10 @@ class ChemTreeView(QTreeView):
                     popMenu.addSeparator()
 
                 # Define parameter setting actions
+                actnScaleToRef = QAction(QIcon('icons\icon_none.png'), 'Set reference', self)
+                actnScaleToRef.setStatusTip('Reset all chemical shifts in the model to the reference')
+                actnScaleToRef.triggered.connect( self.model().datum.scaleToRef )
+
                 actnPromotePriors = QAction(QIcon('icons\icon_globalPriors.png'), 'Set prior as global' if len(slctdKeys) == 1 else 'Set priors as global', self)
                 actnPromotePriors.setStatusTip('Use this prior for all datasets in the Workspace')
                 actnPromotePriors.triggered.connect(lambda : self.promotePriors(keys=slctdKeys))
@@ -2764,6 +2770,8 @@ class ChemTreeView(QTreeView):
                     popMenu.addAction(actnPasteCrnt)
                     popMenu.addAction(actnPasteDflt)
                     popMenu.addAction(actnResetToDflt)
+                    if node.name == self.model().datum.getRefKey():
+                        popMenu.addAction(actnScaleToRef)
                 if isinstance(self.model().datum, Series):
                     popMenu.addAction(actnPasteCrnt)
                     popMenu.addAction(actnPasteDflt)
@@ -2797,7 +2805,7 @@ class ChemTreeView(QTreeView):
             param = self.model().datum.getPrior(key)
             try:
                 crntVal = self.model().datum.getCrntVal(key)
-                isReference = (self.model().datum.refChshKey == key) if key[1][:4] == 'chsh' else None
+                isReference = (self.model().datum.getRefKey() == key) if key[1][:4] == 'chsh' else None
             except AttributeError:
                 crntVal, isReference = None, None
 
@@ -2810,9 +2818,9 @@ class ChemTreeView(QTreeView):
                     crnt = crnt.parent
                 else: pass # It is either a Datum and no series flag was set or it is a Series
                 crnt.setPrior(key, **newParSpec, reset=True)
-                # if isReference is not None:
-                #     crnt.setReferenceChshKey(key = key if setReference else None)
-                #     if setReference: self.model().requestParameterChange.emit()            # Update the computed signals
+                if isReference is not None:
+                    crnt.setRefKey(key = key if setReference else None)
+                    # if setReference: self.model().requestParameterChange.emit()            # Update the computed signals
 
     def saveSubtree(self, index):
         """Saves the subtree starting with the node index."""
@@ -4748,11 +4756,12 @@ class MainView(QMainWindow):
 
                     # Update the progress bar accordingly
                     oldVal, oldMax = self.progressBarFiles.value(), self.progressBarFiles.maximum()
-                    newVal = oldVal*int(math.ceil((oldMax-oldVal+len(newSteps)-1)/(oldMax-oldVal)))           # newVal = int(math.ceil(oldVal*(oldMax+len(newSteps)-1)/oldMax))
-                    newMax = newVal + (oldMax-oldVal) + len(newSteps) - 1
+                    if oldMax != oldVal:
+                        newVal = oldVal*int(math.ceil((oldMax-oldVal+len(newSteps)-1)/(oldMax-oldVal)))           # newVal = int(math.ceil(oldVal*(oldMax+len(newSteps)-1)/oldMax))
+                        newMax = newVal + (oldMax-oldVal) + len(newSteps) - 1
 
-                    self.progressBarFiles.setMaximum(newMax)
-                    self.progressBarFiles.setValue(newVal)
+                        self.progressBarFiles.setMaximum(newMax)
+                        self.progressBarFiles.setValue(newVal)
                 else:
                     # TODO: Possibly check here that the parsKeys in the step are fittable
                     self._fittingQueue.insert(0, [fileToFit, actnToRun] )          # Substitute the integer with the step
@@ -5173,8 +5182,10 @@ class MainView(QMainWindow):
         """Selects and cuts a region of interest in the spectrum and adjusts the underlying data accordingly."""
         print('In reduce range')
 
-def checkLicense():
-    # Try loading the license file
+if __name__ == '__main__':
+    app = 0
+    app = QApplication(sys.argv)
+
     expiryTime, options = readLicenseFile()
 
     if expiryTime is None:
@@ -5188,10 +5199,7 @@ def checkLicense():
         # msg.setDetailedText("The details are as follows:")
         msg.setStandardButtons(QMessageBox.Close)
 
-        msg.exec_()            # Returns the values of pressed button
-
-        return False, False
-
+        msg.show()            # Returns the values of pressed button
 
     elif time.time() > expiryTime:
         # Checks whether the current time is less than the expiry time (in sec from the beginning of the epoch).
@@ -5205,22 +5213,10 @@ def checkLicense():
         # msg.setDetailedText("The details are as follows:")
         msg.setStandardButtons(QMessageBox.Close)
 
-        msg.exec_()            # Returns the values of pressed button
-
-        return False, False
-
-    return expiryTime, options
-
-if __name__ == '__main__':
-
-    expiryTime, options = checkLicense()
-
-    if expiryTime:
-        app = 0
-        app = QApplication(sys.argv)
-
+        msg.show()         # msg.exec_()            # Returns the values of pressed button
+    else:
         wsp = Workspace()
         main_view = MainView(wsp, expiryTime)
         main_view.show()
 
-        app.exec_()
+    app.exec_()
