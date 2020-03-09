@@ -1615,13 +1615,13 @@ class chemNode(treeNode):
 
             self._oldHash = newHash
 
-    def evalFreq(self, f, dt, c0, f0=0, tau=0):
+    def evalFreq(self, f, dt, df, c0, f0=0, tau=0):
         "Computes the node's response in the frequency domain assuming that all nodes have updated uPoles."
         # # Check if the signal needs to be reevaluated
         # if self.uF == []:
         self.uF = np.zeros((len(f), 1), dtype='complex128').ravel()
         for chld in self.children():
-            chld.evalFreq(f, dt, c0, f0, tau)
+            chld.evalFreq(f, dt, df, c0, f0, tau)
             self.uF += chld.uF
         self.uF *= self.intn
 
@@ -1901,7 +1901,7 @@ class chemNodeT(chemNode):
 
     # @njit
     # @profile
-    def evalFreq(self, f, dt, c0, f0=0, tau=0):
+    def evalFreq(self, f, dt, df, c0, f0=0, tau=0):
         "Computes the node's response in the frequency domain assuming that all ancestors have updated uPoles."
         # Check if the signal needs to be reevaluated
         newHash = arrhash(f)
@@ -1914,7 +1914,7 @@ class chemNodeT(chemNode):
             self.uF = ne.evaluate( 'x / -expm1( (x1 + x2)*dt )', local_dict={'x':self.uF, 'x1':x1, 'x2':x2, 'dt':dt})       # Compute exp(x)-1 in one go
             self.uF = ne.evaluate('sum(conj( x ) * y, axis=1)', local_dict={'x':self.uF, 'y':self.qPolesIntn}).ravel()
             # self.uF = np.inner(np.conj(self.uF), self.qPolesIntn).ravel()
-            self.uF *= self.intn * np.sqrt((f[1]-f[0])*c0*dt)
+            self.uF *= self.intn * np.sqrt(df*c0*dt)
 
             self._oldHash = newHash
 
@@ -2050,7 +2050,7 @@ def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
     return Z, [i.name for i in repRoots]
 
 # @profile
-def evalTreeF(tree, f, dt, c0, f0=0, pars=None, xclRootNames=None):
+def evalTreeF(tree, f, dt, df, c0, f0=0, pars=None, xclRootNames=None):
     """Evaluates the entire tree of chemNodes and returns a model spectrum directly in the frequency domain. Tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
     tau = 0     #    or use
     #tau = -pars['.']['tau'][0]
@@ -2067,7 +2067,7 @@ def evalTreeF(tree, f, dt, c0, f0=0, pars=None, xclRootNames=None):
 
     # 3. Collect the childrens' responses, starting from the bottom
     for rep in repRoots:
-        rep.evalFreq(f, dt, c0, f0, tau)
+        rep.evalFreq(f, dt, df, c0, f0, tau)
 
     # 4. Put all responses together
     Z = np.ones((len(f), len(repRoots)), float) + 1j*np.zeros((len(f), len(repRoots)), float)

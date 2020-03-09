@@ -894,7 +894,7 @@ def getMeasuredSignals(useComplex=False, DDD=None):
         yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
         yFinRange = yF[indxInRange, :]
     else:
-        zFall, repRootNames = evalTreeF(self.T, self.f.take(np.concatenate([indxInRange, indxPadding])), self.t[1]-self.t[0], self.c0, self.f0, evalParsH)
+        zFall, repRootNames = evalTreeF(self.T, self.f.take(np.concatenate([indxInRange, indxPadding])), self.t[1]-self.t[0], self.f[1]-self.f[0], self.c0, self.f0, evalParsH)
         zFinRange, zFPadding = np.split(zFall, [len(indxInRange)] )
         yFinRange = self.yF[indxInRange, :]
 
