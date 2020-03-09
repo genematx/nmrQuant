@@ -1886,7 +1886,8 @@ class Datum():
             zFinRange = zF[indxInRange, :]
             yFinRange = yF[indxInRange, :]
         else:
-            zFinRange, _ = evalTreeF(self.T, self.f[ indxInRange ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
+            dt, df = self.t[1]-self.t[0], self.parent.f[1]-self.parent.f[0]
+            zFinRange, _ = evalTreeF(self.T, self.f[ indxInRange ], dt, df, self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
 
             # Apply custom lineshape correction (this reduces the range)
             if nw2 > 0 and convolve:
@@ -2023,6 +2024,7 @@ class Datum():
             Gz = 1.0*np.abs(Z)
 
         Gz[:, na:] = 0
+        # print(np.sum(np.abs(Z), axis=0))
         result, ampl, sigma2, meta = log_likelihood(Z, y, ampl=ampl, sigma2=sigma2, \
             Gz=Gz, Gy=None, gamma=gamma, m0=m0, iS0=iS0, a_sigma2=a_sigma2, b_sigma2=b_sigma2, \
             funcType=funcType, robust=robust)
@@ -2156,7 +2158,8 @@ class Datum():
                 zFPadded = zF[indxPadded, :]
                 yFinRange = yF[indxInRange, :]
             else:
-                zFPadded, _ = evalTreeF(self.T, self.f[ indxPadded ], self.t[1]-self.t[0], self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
+                dt, df = self.t[1]-self.t[0], self.parent.f[1]-self.parent.f[0]
+                zFPadded, _ = evalTreeF(self.T, self.f[ indxPadded ], dt, df, self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
                 indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]
                 zFPadded = [z for z in np.split(zFPadded, indxSplit)]
 
