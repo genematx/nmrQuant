@@ -4711,7 +4711,7 @@ class MainView(QMainWindow):
         if queueActns is None: queueActns = ['Evl']        # Only evaluate the active step by default
 
         queueActns = [self.treeModel.actvStepIndx if x == 'Fit' else x for x in queueActns]
-        queueActns.insert(0, 'Init')
+        if len(queueFiles) > 1: queueActns.insert(0, 'Init')
 
         # Set up the fitting queue
         self._fittingQueue = [[file, actn] for file in queueFiles for actn in queueActns]

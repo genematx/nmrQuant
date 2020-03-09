@@ -1834,7 +1834,7 @@ class Datum():
         """Returns the indices of the frequency scale covered by the block i; takes into account possible padding by nw2 on both sides of the range."""
 
         dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0   # Reference chemical shift
-        f = self.f - np.array(dref_chsh)
+        f = self.f - np.array(dref_chsh)           # Complete array of frequencies
 
         return self.freqBlocks[i].indxFreq(f, nw2)
 
@@ -1918,6 +1918,8 @@ class Datum():
         if freqMask is not None:
             bslnPoly = bslnPoly[unmaskedIndx, :]
         nb = bslnPoly.shape[1]     # Total number of baseline terms
+
+        # print(zFinRange.shape)
 
         return zFinRange, bslnPoly, yFinRange, indxInRange
 
