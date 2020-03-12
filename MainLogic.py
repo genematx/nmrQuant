@@ -455,7 +455,7 @@ class Workspace():
             # Perform the linear search on the inital values
             if config.OPTIM_nvalLinearSearch > 0:
                 if len(initVals) == 1:
-                    initVals[0] = self._search(costFuncOpti, bounds[0], initVals[0])
+                    initVals[0] = self._search(lambda x : costFuncOpti(np.array([x])), bounds[0], initVals[0])
                 elif len(initVals) == 2:
                     initVals[0] = self._search(lambda x : costFuncOpti(np.array([x, initVals[1]])), bounds[0], initVals[0])
                     initVals[1] = self._search(lambda x : costFuncOpti(np.array([initVals[0], x])), bounds[1], initVals[1])
