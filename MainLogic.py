@@ -427,20 +427,43 @@ class Workspace():
 
         return SSS
 
+    def _search(self, costFuncOpti, bounds, crntVal=None, nval=None):
+        """Evaluates the cost function on a range of values between the bounds and selects the minimum one. costFuncOpti must be a function of a single variable."""
+        if nval is None:
+            nval = config.OPTIM_nvalLinearSearch
+
+        # Form an array of values to evaluate
+        x = np.linspace(*bounds, nval)
+        if crntVal is not None and ( crntVal > np.min(bounds) and crntVal < np.max(bounds) ):
+            x = np.append(x, crntVal)
+
+        # Evaluate the cost function
+        y = np.array(list(map(costFuncOpti, x)))
+
+        return x[np.argmin(y)]
+
     #@profile
     def _optimize(self, costFuncOpti, bounds, initVals, nhop=None, respectBounds=True, verbose=True):
         """Core optimization routine; used by all Series and Datums in this Workspace"""
-        eps_range = np.mean([np.abs(bnd[1]-bnd[0]) for bnd in bounds])     # Find the range of optomiztion (needed to set the step size for Jacobian)
+        eps_range = np.mean([np.abs(bnd[1]-bnd[0]) for bnd in bounds])     # Find the range of optimiztion (needed to set the step size for Jacobian)
         if len(initVals) > 2 or (nhop is not None and nhop > 0):
             res = optimize.basinhopping(costFuncOpti, initVals, \
                   niter = nhop if nhop is not None else config.OPTIM_maxBasinhoppingSteps, \
                   niter_success = nhop if nhop is not None else config.OPTIM_niterSuccess, T = 10, disp = verbose, \
-                  minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )     #, \
-            #      #take_step=MyTakeStep())
+                  minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )     #    , take_step=MyTakeStep())
         else:
+            # Perform the linear search on the inital values
+            if config.OPTIM_nvalLinearSearch > 0:
+                if len(initVals) == 1:
+                    initVals[0] = self._search(costFuncOpti, bounds[0], initVals[0])
+                elif len(initVals) == 2:
+                    initVals[0] = self._search(lambda x : costFuncOpti(np.array([x, initVals[1]])), bounds[0], initVals[0])
+                    initVals[1] = self._search(lambda x : costFuncOpti(np.array([initVals[0], x])), bounds[1], initVals[1])
+                    initVals[0] = self._search(lambda x : costFuncOpti(np.array([x, initVals[1]])), bounds[0], initVals[0])
+                    # initVals[1] = self._search(lambda x : costFuncOpti(np.array([initVals[0], x])), bounds[1], initVals[1])
+
             res = optimize.minimize(costFuncOpti, x0=initVals, bounds=bounds, method=config.OPTIM_method, \
                   options={'eps':eps_range*1e-05, 'ftol':1e-12})       # Step-size for computing the Jacobian
-            #print(res['message'])
 
         # Discard the found parameters if any of them lies close to its range and run the optimization again
         if respectBounds:
@@ -1033,8 +1056,8 @@ class Series():
             if apod is not None : self.apod = apod
             self.wT = np.exp(-self.apod*self.t) if self.apod > 0 else 1
 
-            for D in self.data:
-                D.resetSignals()
+            for dat in self.data:
+                dat.resetSignals()
 
     def fullReset(self, zff=None, apod=None, priors=None):
         self.resetFreqs(zff, apod)
@@ -1481,8 +1504,11 @@ class Datum():
             #     return np.where(x>0.1, 1.0, x*10.0)
 
             yFscore = np.where(yFnorm>0.1, 1.0, yFnorm*10.0)     # score_fun(yFnorm)
+            yFcumul = np.ceil(np.cumsum(yFscore))                # Cumulative score
+            yFcumul[-1] += 1                                     # Take the last index
+            yFsampl = np.insert(np.diff(yFcumul), 0, 1)          # Which samples to take (including the first one)
 
-            indx = np.where(np.random.random((len(yFscore), 1)) < yFscore)[0]       # indx = np.sort(np.random.randint(0, len(yFabs), 2**15))
+            indx = np.where(yFsampl)[0]       # indx = np.sort(np.random.randint(0, len(yFabs), 2**15))        indx = np.where(np.random.random((len(yFscore), 1)) < yFscore)[0]       # indx = np.sort(np.random.randint(0, len(yFabs), 2**15))
             self._f = self.parent.f[indx, :].reshape(-1,1)
             self.yF = self.yF[indx, :].reshape(-1,1)
 
@@ -1853,7 +1879,7 @@ class Datum():
         return zTw[0:,:], yTw[0:, :]
 
     # @profile
-    def _get_signals_in_freq(self, evalParsH, frqBlkIds=None, freqMask=None, wnd=None, numberField=None, convolve=True):
+    def _get_signals_in_freq(self, evalParsH, frqBlkIds=None, freqMask=None, wnd=None, numberField=None):
         """Returns a matrix of modelled signals and the y vector in frequency domain."""
 
         if frqBlkIds is None:
@@ -1890,7 +1916,7 @@ class Datum():
             zFinRange, _ = evalTreeF(self.T, self.f[ indxInRange ], dt, df, self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
 
             # Apply custom lineshape correction (this reduces the range)
-            if nw2 > 0 and convolve:
+            if nw2 > 0:
                 indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]     # Indices showing how to split the concatenated arrays xF, yF, zF, etc.
                 zFinRange = np.vstack([scipy.signal.fftconvolve(z, self.sF, 'valid') for z in np.split(zFinRange, indxSplit)]) / np.sqrt(len(self.f))
                 indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
@@ -2115,80 +2141,6 @@ class Datum():
         print("sigma2_est = {:.6f}".format(np.asscalar(sigma2_est)))
         return yF, yFbsln
 
-    def set_shape(self, frqBlkIds=None, wnd=None):
-        """Sets the custom lineshape sF and sT."""
-        # TODO! Check this function when using an adaptive frequency scale
-        if self.isAdapFreq():
-            raise RuntimeError('ACustom lineshapes are not supported with adaptive frequency scale.')
-
-        self._gof = None
-        nt, nf = len(self.t), len(self.f)
-        nw = config.MODEL_ShapeKernelSize         # Length of the adaptive lineshape window (in frequency domain)
-        nw2 = int(nw/2)
-
-        evalParsH = self.crntParsH
-
-        if frqBlkIds is None:
-            frqBlkIds = self.steps[-1].frqBlkIds
-
-        # Compute a matrix of model signals Z, either in time or frequency domain
-        if len(frqBlkIds) == 0:
-            # -------------------------- TIME ----------------------------
-            pass
-        else:
-            indxFreqByBlock = [ self._get_indxFreq(i, nw2) for i in frqBlkIds ]
-            indxPadded = np.concatenate(indxFreqByBlock)
-            indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
-
-            if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
-                zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)            # 1. Compute the model signals
-
-                # 1. Apply custom lineshape correction if defined
-                if self.sT is not None:
-                    zT *= self.sT
-
-                # 2. Apply window in the time domain if needed
-                yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
-
-                # 3. Compute the spectra
-                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
-
-                # 4. Take only the valid frequency ranges
-                zFPadded = zF[indxPadded, :]
-                yFinRange = yF[indxInRange, :]
-            else:
-                dt, df = self.t[1]-self.t[0], self.parent.f[1]-self.parent.f[0]
-                zFPadded, _ = evalTreeF(self.T, self.f[ indxPadded ], dt, df, self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
-                indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]
-                zFPadded = [z for z in np.split(zFPadded, indxSplit)]
-
-            mc = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames if name not in self.xclRootNames])           # First na results correspond to the actual amplitudes of components, the rest, if any, correspond to the baselines
-            theta = evalParsH['.']['theta'][0]
-
-            xFPadded = [np.dot(z, mc*np.exp(1j*theta)).reshape(-1,1) for z in zFPadded]
-            yFinRange = self.yF[indxInRange, :]
-            bFinRange = self.bF[indxInRange, :]
-
-            # Form the Toeplitz matrix of shifted arrays
-            S = np.vstack([np.hstack([x[i:i+len(x)-2*nw2] for i in np.arange(2*nw2, -1, -1, dtype='int')]) for x in xFPadded])
-
-            # Solve the system of equations
-            SS = np.dot(S.T.conj(), S) + 0.00*np.eye(nw)
-            sF = np.linalg.solve(SS, np.dot(S.T.conj(), yFinRange-bFinRange))
-            sF /= sum(sF) / np.sqrt(len(self.f))
-
-            # Compute the iFFT of the lineshape
-            sF_padded = np.pad(sF.ravel(), (math.ceil((nf-nw)/2), math.floor((nf-nw)/2)), 'constant', constant_values=0).reshape(-1,1) # Zero-pad sF before taking the iFFT
-            sT = np.fft.ifft(np.fft.ifftshift(sF_padded, axes=0), axis=0)[:nt] * np.sqrt(nf)
-            self.sF, self.sT = sF, sT
-
-    def reset_shape(self):
-        """Resets the custom lineshape to its default values (None)."""
-        self.sT = None
-        self.sF = None
-        self._gof = None
-
     def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False):
         """Evaluates the objective function (logLikelihood + sum of logPriors).
            Inputs:
@@ -2407,7 +2359,8 @@ class Datum():
 
         # Find the model signal
         ampl = np.array([self.getCrntVal(key=(name, 'ampl', 0)) for name in self.repRootNames if name not in self.xclRootNames])
-        xF = self.zF[indxInRange, :].dot(ampl).reshape(-1,1) + self.bF[indxInRange]
+        zF = self.zF[indxInRange, :]
+        xF = zF.dot(ampl).reshape(-1,1) + self.bF[indxInRange]
 
         # Phase the measured data according to the values in the parameters
         theta = self.getCrntVal(key=('.', 'theta', 0))
@@ -2416,34 +2369,113 @@ class Datum():
         yFph=self.yF[indxInRange]*ph
 
         # Evaluate the phasing cost function to find the residual and baseline
-        result, yFph, res, bln = ph_cost(yFph, xF, mw=mw)
+        val, yFph, rFph, bFph = ph_cost(yFph, xF, mw=mw)
 
         # Find the corrected amplitudes
+
         zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)           # Values of the first time-domain points for each model signal
-        zF0 = np.sum(self.zF[indxInRange, :] - zT0.ravel()/(2*np.sqrt(len(self.f))), axis=0).real / np.sqrt(len(self.f))     # What the (restricted) models sum to; should be 1/2*zT0 if the entire frequency range
+        bF0 = zT0.real.ravel()/(2*np.sqrt(len(self.parent.f)))          # Levels of the constant baselines for each signature model
+        zFnb = (zF - bF0).real                # Model signatures with constant baselines removed
+        zF0 = np.sum(zFnb, axis=0).real       # What the (restricted) models sum to; should be np.sqrt(len(self.f))/2*zT0 if the entire frequency range
+
         corr_comp = np.where(zF0 > 0.01*sum(zF0))[0]           # Indices of components to correct, choose only large components
 
-        bF0 = ampl.reshape(1,-1)*zT0.reshape(1,-1)/(2*np.sqrt(len(self.f)))             # Zero-order baselines
+        posZa = zFnb * ampl.reshape(1, -1)
+
+        # Define the weight matrix
         Za = self.zF[indxInRange, :] * ampl.reshape(1,-1)
-        posZa = Za - bF0      # Remove the constant baseline from the model signals
         absZa = np.abs(Za)**2
         C = absZa/np.sum(absZa, axis=1).reshape(-1,1)                     # Weights for redistributing the residual
 
-        posZa_corr = posZa + res.real*C           # Corrected models without the constant baselines
-        ampl_corr = ampl
+        posZa_corr = posZa + rFph.real*C           # Corrected models without the constant baselines
+        ampl_corr = np.copy(ampl)
         ampl_corr[corr_comp] = np.sum(posZa_corr[:, corr_comp].real, axis=0)/zF0[corr_comp].real.ravel()
-        ampl_corr[corr_comp] *= np.nanmean(ampl[corr_comp].ravel()/np.sum(posZa[:, corr_comp].real, axis=0))     # Corrected amplitudes. Introduces a scaling factor to make the sum of Za approximately equal the intensities
-        Za_corr = self.zF[indxInRange, :] * ampl_corr.reshape(1,-1)
+        zF_corr = posZa_corr / ampl_corr + bF0
 
         # Save the corrections and amplitudes
         reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
 
         for name, val in zip(reportedNames, ampl_corr):
             self.setCrntVal(key=(name, 'ampl', 0), val=val)
-        self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)
-        self.zF_corr[indxInRange, :] = (posZa_corr - Za_corr)               # Additive correction for the model signals
-        self.zF_corr[np.ix_(indxInRange, ampl_corr.nonzero()[0])] /= ampl_corr[ampl_corr.nonzero()]       # Scale by the amplitudes. Only those where ampl_corr != 0
-        self.bF_corr[indxInRange] = bln + np.sum(bF0)                       # Additive correction for the baseline
+        self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)        # Additive corrections for the models and the baseline
+        self.zF_corr[indxInRange, :] = zF_corr - self.zF[indxInRange, :]
+        self.bF_corr[indxInRange] = bFph + np.sum(bF0*(ampl-ampl_corr))
+
+    def adjust_shape(self, frqBlkIds=None, wnd=None):
+        """Sets the custom lineshape sF and sT."""
+        # TODO! Check this function when using an adaptive frequency scale
+        if self.isAdapFreq():
+            raise RuntimeError('ACustom lineshapes are not supported with adaptive frequency scale.')
+
+        self._gof = None
+        nt, nf = len(self.t), len(self.f)
+        nw = config.MODEL_ShapeKernelSize         # Length of the adaptive lineshape window (in frequency domain)
+        nw2 = int(nw/2)
+
+        evalParsH = self.crntParsH
+
+        if frqBlkIds is None:
+            frqBlkIds = self.steps[-1].frqBlkIds
+
+        # Compute a matrix of model signals Z, either in time or frequency domain
+        if len(frqBlkIds) == 0:
+            # -------------------------- TIME ----------------------------
+            pass
+        else:
+            indxFreqByBlock = [ self._get_indxFreq(i, nw2) for i in frqBlkIds ]
+            indxPadded = np.concatenate(indxFreqByBlock)
+            indxInRange = np.concatenate([indx[nw2:-nw2] for indx in indxFreqByBlock])
+
+            if ( 'lshapeR' in evalParsH['.'].keys() and (any(evalParsH['.']['lshapeR']) or any(evalParsH['.']['lshapeI'])) ) or wnd is not None:
+                zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)            # 1. Compute the model signals
+
+                # 1. Apply custom lineshape correction if defined
+                if self.sT is not None:
+                    zT *= self.sT
+
+                # 2. Apply window in the time domain if needed
+                yTw, zTw = (self.yT * self.wT * wnd, zT * wnd) if wnd is not None else (self.yT * self.wT, zT)
+
+                # 3. Compute the spectra
+                zF = np.fft.fftshift(np.fft.fft(zTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+                yF = np.fft.fftshift(np.fft.fft(yTw, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
+
+                # 4. Take only the valid frequency ranges
+                zFPadded = zF[indxPadded, :]
+                yFinRange = yF[indxInRange, :]
+            else:
+                dt, df = self.t[1]-self.t[0], self.parent.f[1]-self.parent.f[0]
+                zFPadded, _ = evalTreeF(self.T, self.f[ indxPadded ], dt, df, self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)
+                indxSplit = np.cumsum([len(indx) for indx in indxFreqByBlock])[:-1]
+                zFPadded = [z for z in np.split(zFPadded, indxSplit)]
+
+            mc = np.array([evalParsH[name]['ampl'][0] for name in self.repRootNames if name not in self.xclRootNames])           # First na results correspond to the actual amplitudes of components, the rest, if any, correspond to the baselines
+            theta = evalParsH['.']['theta'][0]
+
+            xFPadded = [np.dot(z, mc*np.exp(1j*theta)).reshape(-1,1) for z in zFPadded]
+            yFinRange = self.yF[indxInRange, :]
+            bFinRange = self.bF[indxInRange, :]
+
+            # Form the Toeplitz matrix of shifted arrays
+            S = np.vstack([np.hstack([x[i:i+len(x)-2*nw2] for i in np.arange(2*nw2, -1, -1, dtype='int')]) for x in xFPadded])
+
+            # Solve the system of equations
+            SS = np.dot(S.T.conj(), S) + 0.00*np.eye(nw)
+            sF = np.linalg.solve(SS, np.dot(S.T.conj(), yFinRange-bFinRange))
+            sF /= sum(sF) / np.sqrt(len(self.f))
+
+            # Compute the iFFT of the lineshape
+            sF_padded = np.pad(sF.ravel(), (math.ceil((nf-nw)/2), math.floor((nf-nw)/2)), 'constant', constant_values=0).reshape(-1,1) # Zero-pad sF before taking the iFFT
+            sT = np.fft.ifft(np.fft.ifftshift(sF_padded, axes=0), axis=0)[:nt] * np.sqrt(nf)
+
+            # Save the lineshape
+            self.sF, self.sT = sF, sT
+
+    def reset_shape(self):
+        """Resets the custom lineshape to its default values (None)."""
+        self.sT = None
+        self.sF = None
+        self._gof = None
 
     def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
@@ -2561,7 +2593,7 @@ class Datum():
                     parsKeys.update([key[1:]])
 
         # print('before', autoKeys, parsKeys)
-        if len(autoKeys) + len(parsKeys) > 0 and len(frqBlkIds) > 0:
+        if len(autoKeys) + len(parsKeys) > 0 and (frqBlkIds is not None and len(frqBlkIds) > 0):
             good, bad = self.fittableParsKeys(frqBlkIds=frqBlkIds, customPriors=customPriors)
 
             # Remove non-fittabel parameters

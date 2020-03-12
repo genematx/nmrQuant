@@ -3783,99 +3783,6 @@ class ParameterDisplayWidget(QWidget):
     def reset(self):
         pass
 
-class FittingThread_copy(QThread):
-    """A worker thread used to fit models to data in several steps."""
-
-    def __init__(self):
-        super().__init__()
-        self._exiting = False      # The exiting attribute is used to tell the thread to stop processing.
-        self._queueFiles = []        # Sequence of Datums to fit
-        self._queueActns = []        # Sequence of Step IDs to fit
-
-    def __del__(self):
-        """Before a Worker object is destroyed, we need to ensure that it stops processing. For this reason, we implement the following method in a way that indicates to the part of the object that performs the processing that it must stop, and waits until it does so."""
-        self._exiting = True
-        self.wait()
-
-    def setQueue(self, queueFiles=[], queueActns=[], evalStepID=-1):
-        self._queueFiles.clear()
-        self._queueActns.clear()
-        self._queueFiles.extend(queueFiles)
-        self._queueActns.extend(queueActns)
-        self._queueIndx = [(i, j) for i in range(len(self._queueFiles)) for j in range(len(self._queueActns))]
-        self.evalStepID = evalStepID       # This step will be evaluated if the entry in the _queueActns == 'Lor', 'Evl', etc.
-
-    def setExitFlag(self, flag=True):
-        """Setter of the _exiting flag."""
-        self._exiting = flag
-        self.setQueue()      # Reset the queue
-
-    def isExiting(self):
-        return self._exiting
-
-    def fit(self):
-        if len(self._queueIndx) > 0:
-            if self._queueIndx[0][1] == 0:
-                # We are starting to fit a new file and will be running through the list of steps from 0 again... Need to set up the initial values.
-                nextFile = self._queueFiles[self._queueIndx[0][0]]
-
-                # Determine the starting values of parameters for the next file in the fittingQueueFiles and KEEP the current values if necessary
-                if config.OPTIM_startFrom == "previous":
-                    sid = nextFile.selfID()
-                    # Check if the current file is not the first one in the Series. If possible use parameters of the previous file, otherwise keep the current parameters.
-                    if sid[1] > 0:
-                        nextFile.resetCrntPars(crntParsH = copy.deepcopy(nextFile.series[sid[0]].data[sid[1]-1].crntParsH) )
-                elif config.OPTIM_startFrom == "default":
-                    nextFile.resetCrntPars()   # Reset to defaults
-                else: # i.e. settings["startgFromPars"] == "current"
-                    pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
-
-            self.start()    # calls self.run()   (should be called as self.start() anyway)
-
-    def run(self):
-
-        indx = self._queueIndx.pop(0)
-        fileToFit = self._queueFiles[indx[0]]
-        actnToRun = self._queueActns[indx[1]]
-
-        if not self._exiting:
-
-            if isinstance(actnToRun, int):
-                # The action code is an integer - i.e. the number of a step to optimize
-                print("\nOptimizing step No. {:d}".format(actnToRun+1))
-                step = fileToFit.steps[actnToRun]
-                # Fit the model parameters
-                fileToFit.optimize(parsKeys=step.parsKeys, autoKeys=step.autoKeys, frqBlkIds=step.frqBlkIds, evaluatePriors=False)
-            else:
-                step = fileToFit.steps[self.evalStepID]        # Step that will be evaluated
-
-                if actnToRun in ['Ph0', 'Ph1', 'PhA']:
-                    # Adjust the phasing parameters
-                    fileToFit.adjust_phase(frqBlkIds=step.frqBlkIds, mode=actnToRun)
-                    # Re-evaluate the step to update the (marginalized) amplitudes and the signals to be plotted
-                    fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys = set([key for key in step.autoKeys if key != ('.', 'theta', 0)]), returnSignals=True)
-                elif actnToRun == 'Rsd':
-                    # Adjusting the residual
-                    fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds)
-                elif actnToRun == 'Lsh':
-                    # Adjust the lineshape
-                    fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
-                    # Re-evaluate the step to update the signals to be plotted
-                    fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
-                elif actnToRun == 'Lor':
-                    # Reset the lineshape to the default (Lorentzian)
-                    fileToFit.reset_shape()
-                    fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
-                elif actnToRun == 'Evl':
-                    # Only evaluatethe last step
-                    fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
-                elif actnToRun == 'AuP':
-                    # Autophasing
-                    fileToFit.auto_phase()
-
-            if len(self._queueIndx) == 0:
-                self.setExitFlag(True)
-
 class FittingThread(QThread):
     """A worker thread used to fit models to data in several steps."""
 
@@ -3927,7 +3834,7 @@ class FittingThread(QThread):
                 fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds)
             elif actnToRun == 'Lsh':
                 # Adjust the lineshape
-                fileToFit.set_shape(frqBlkIds=step.frqBlkIds)
+                fileToFit.adjust_shape(frqBlkIds=step.frqBlkIds)
                 # Re-evaluate the step to update the signals to be plotted
                 fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
             elif actnToRun == 'Lor':
