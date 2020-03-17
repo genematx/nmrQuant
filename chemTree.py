@@ -928,6 +928,7 @@ def QDsimsAB(chshQD, jcplQD, n_spin=(1,1)):
     def expand_multiplet(freq, intn, order=2):
         """Expands doublet of peaks into multiplets while preserving the intensities ratio. order is the number of coupled spins, e.g. 2 to get a triplet."""
         if order == 1:
+            # Don't do anything
             return freq, intn
 
         d = np.abs(freq[1]-freq[0])  # Step between the peaks
@@ -967,6 +968,11 @@ def QDsimsAB(chshQD, jcplQD, n_spin=(1,1)):
     # Add empty arrays to represent transition peaks (for consistency with other methods)
     freqQDpeaks.append(np.empty(0))
     intnQDpeaks.append(np.empty(0))
+
+    return freqQDpeaks, intnQDpeaks
+
+def QDsims3X(chshQD, jcplQD):
+    """Simulates a response for a spin system with 3 independent coupled spins."""
 
     return freqQDpeaks, intnQDpeaks
 
@@ -1048,6 +1054,7 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spino
         # Case 2. Small spin system
 
         # 0. Compute the spin operators if they are not supplied
+        # TODO: Move to global namespace
         if spinopsL is None or spinopsJ is None or TM is None:
             spinopsL, spinopsJ = [0]*len(chshQD), [0]*len(jcplQD)
 

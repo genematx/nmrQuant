@@ -3478,21 +3478,15 @@ class PhasingWidget(QWidget):
 
         return p0deg, p1deg
 
-    def __init__(self, datum, canvas, orientation='Vertical', parent=None):
-        #QWidget.__init__(self)
-        #PhasingForm.__init__(self)
-        #
+    def __init__(self, orientation='Vertical', parent=None):
 
         super().__init__(parent)
 
-        #uic.loadUi("qtFormPhasingWidget.ui", self)
-        #self.setupUi(self)
-
         #print(self.__dict__)
         #self.sliderPh0 = self.ui.findChild(QtGui.QSlider, "sliderPh0")
-        self.datum = datum
-        self.canvas = canvas
-        self.ax = self.canvas.figure.get_axes()
+        # self.datum = datum
+        # self.canvas = canvas
+        # self.ax = self.canvas.figure.get_axes()
 
         self.p0deg = 0.0     # Phasing parameters in degrees
         self.p1deg = 0.0
@@ -3509,8 +3503,8 @@ class PhasingWidget(QWidget):
         self.sliderPh1.valueChanged.connect(self.onPh1SliderChanged)
         self.sliderPh0.sliderReleased.connect(self.phasingComplete)
         self.sliderPh1.sliderReleased.connect(self.phasingComplete)
-        self.sliderPh0.sliderPressed.connect(self.startPlotting)
-        self.sliderPh1.sliderPressed.connect(self.startPlotting)
+        # self.sliderPh0.sliderPressed.connect(self.startPlotting)
+        # self.sliderPh1.sliderPressed.connect(self.startPlotting)
         self.bttnSetPivot = QPushButton('Pivot')
         self.bttnSetPivot.clicked.connect(self.setPivot)
         self.bttnAutoPhase = QPushButton('Auto')
@@ -3552,7 +3546,7 @@ class PhasingWidget(QWidget):
         ph0_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
         self.p0deg = ph0_rel * 180.0
 
-        self.plot()
+        # self.plot()
 
     def onPh1SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
@@ -3566,7 +3560,7 @@ class PhasingWidget(QWidget):
             self.sliderPh0.blockSignals(False)
         self.p1deg = p1deg_new
 
-        self.plot()
+        # self.plot()
 
     def setPivot(self):
         """Sets a pivoting point for phase correction."""
@@ -3652,8 +3646,8 @@ class PhasingWidget(QWidget):
 
     def phasingComplete(self):
         print("Phasing complete:", self.p0deg, self.p1deg)
-        theta, tau = self.deg2tau(self.p0deg, self.p1deg)
-        self.phased.emit(theta, tau) # self.phased.emit(self.p0deg, self.p1deg)
+        # theta, tau = self.deg2tau(self.p0deg, self.p1deg)
+        self.phased.emit(self.p0deg, self.p1deg) # self.phased.emit(self.p0deg, self.p1deg)
 
 class PreprocessingWidget(QWidget):
     """Handles basic preprocessing operations, e.g. zero-filling and apodization."""

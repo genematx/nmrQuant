@@ -2405,7 +2405,7 @@ class Datum():
         """Sets the custom lineshape sF and sT."""
         # TODO! Check this function when using an adaptive frequency scale
         if self.isAdapFreq():
-            raise RuntimeError('ACustom lineshapes are not supported with adaptive frequency scale.')
+            raise RuntimeError('Custom lineshapes are not supported with adaptive frequency scale.')
 
         self._gof = None
         nt, nf = len(self.t), len(self.f)
