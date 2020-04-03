@@ -243,8 +243,8 @@ class chemSpec:
 
 parsSpec = namedtuple('parsSpec', 'min, max, label, distr, p1, p2, dval')
 parsSpec.__new__.__defaults__ = (-np.inf, np.inf, '', 'Uniform', None, None, None)     # 'mode' specifies the location of the distribution maximum value
-parsSpec.rel = lambda self, arg : abs2rel(self, arg)
-parsSpec.abs = lambda self, arg : rel2abs(self, arg)
+# parsSpec.rel = lambda self, arg : abs2rel(self, arg)
+# parsSpec.abs = lambda self, arg : rel2abs(self, arg)
 parsSpec.evalPrior = lambda self, arg : priorProb(self, arg)
 parsSpec.dflt = lambda self : (self.min + self.max) / 2 if self.dval is None else self.dval
 
@@ -263,13 +263,13 @@ freqSpec.__str__ = lambda self : '{:.2f} ... {:.2f}'.format(self.min, self.max) 
 #freqSpec.indxFreq = lambda self, f : np.flatnonzero((f<=self.max)*(f>=self.min))    # Indices of the frequency vector f that fall into the current range
 # freqSpec.bF = lambda self, nf : create_baselines(self, nf)
 
-def rel2abs(parsSpec, rel=0):
-    """Converts between relative and absolute values of a parameter given its range in parsSpec."""
-    return (parsSpec.max-parsSpec.min)*(rel+1)/2 + parsSpec.min
-
-def abs2rel(parsSpec, arg=0):
-    """Converts from absolute to relative values of a parameter given its range in parsSpec."""
-    return (arg-parsSpec.min)/(parsSpec.max-parsSpec.min)*2 - 1
+# def rel2abs(parsSpec, rel=0):
+#     """Converts between relative and absolute values of a parameter given its range in parsSpec."""
+#     return (parsSpec.max-parsSpec.min)*(rel+1)/2 + parsSpec.min
+#
+# def abs2rel(parsSpec, arg=0):
+#     """Converts from absolute to relative values of a parameter given its range in parsSpec."""
+#     return (arg-parsSpec.min)/(parsSpec.max-parsSpec.min)*2 - 1
 
 def priorProb(parsSpec, arg=0):
     """Computes the values of the (log) prior distribution at the relative argument arg."""
@@ -306,17 +306,46 @@ def priorProb(parsSpec, arg=0):
                 beta = parsSpec.p2
                 return alpha*np.log(beta) - np.log(scipy.special.gamma(alpha)) - (alpha+1)*np.log(arg) - beta/arg
 
-def array2parsSpec(arr):
-    """Converts 2D arrays of min and max values to the array of parsRange namedtuples."""
-    ans = arr
-    if arr is not None:
-        ans = [parsSpec(min=v[0], max=v[1], label=v[2] if len(v)>2 else '') for v in arr]
-    else: ans = []
-    return ans
 
-def parsSpec2array(par):
-    """Converts arrays of parsSpec namedtuples to 2D arrays of min and max values."""
-    return [(v.min, v.max) for v in par]
+# Graph of magnetically inequivalent spins
+spinVert = namedtuple('spinVert', 'indxChsh, nspin')             # indxChsh - position in the chshQD array corresponding to the given vertex
+spinEdge = namedtuple('spinEdge', 'indxJcpl, indxVert')          # indxVert is a set of two MEq spin indices (indices of vertices)
+
+def asgn2meqv(chshAsgn, jcplAsgn):
+    """Converts the chshAsgn format to the array of magnetically inequivalent spins."""
+
+    # Find magnetically equivalent groups (same chemical shifts and same coupling patterns)
+    jcplAsgn_full = np.array(jcplAsgn).T + jcplAsgn         # Complete double-sided J-coupling assignment matrix
+    allAsgn = np.vstack([chshAsgn, jcplAsgn_full])
+    allAsgn = [tuple(x.ravel()) for x in np.hsplit(allAsgn, allAsgn.shape[1])]       # List of tuples, s.t. each tuple contains the number of chsh and assignemts of j-couplings
+    uniqAsgn = sorted(set(allAsgn))
+
+    spins = [spinVert(indxChsh = key[0]-1, nspin = allAsgn.count(key)) for key in uniqAsgn]
+
+    indx_meq = [allAsgn.index(key) for key in uniqAsgn]              # List of representative indices of equivalence classes of spins
+
+    links = [spinEdge(jcplAsgn[i][j]-1, set([ii, jj])) for jj, j in enumerate(indx_meq) for ii, i in enumerate(indx_meq) if jcplAsgn[i][j] != 0]
+
+    return spins, links
+
+def meqv2asgn(spins, links):
+    """Converts the spin system representation as a list of magnetically non-equivalent spins to the chshAsgn representation."""
+    chshAsgn = [v.indxChsh+1 for v in spins for _ in range(v.nspin)]
+    n_spin = len(chshAsgn)
+
+    jcplAsgn = [[0]*n_spin for _ in range(n_spin)]
+    indxAsgn = [i for i, v in enumerate(spins) for _ in range(v.nspin)]      # Indices of MEq group, to which each spin is assigned (zero-indexed)
+
+    # Set the values in the jcplAsgn matrix
+    for i in range(n_spin):
+        for j in range(i+1, n_spin):
+            indxVert = set([indxAsgn[i], indxAsgn[j]])
+            if len(indxVert) > 1:       # Consider only the case when indxAsgn[i] != indxAsgn[j]
+                for v in links:
+                    if indxVert == v.indxVert:
+                        jcplAsgn[i][j] = v.indxJcpl+1
+
+    return chshAsgn, jcplAsgn
 
 def smplSpec_from_data(data):
     """Returns the statistics of the 1D np.array of samples, data, in the form of smplSpec."""
@@ -412,6 +441,93 @@ def hpd(x, alpha=0.05):
         sx = np.sort(x)
         return np.array(calc_min_interval(sx, alpha))
 
+class SpinOpsDict(dict):
+    """A dictionary of precomputed spin operators."""
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def hashAsgn(chshAsgn, jcplAsgn):
+        """A function to compute teh hash value for chsh and jcpl Asgn arrays."""
+        arr = tuple(np.concatenate([np.array(chshAsgn).ravel(), np.array(jcplAsgn).ravel()]))
+        return arr
+
+    @staticmethod
+    def spinop(n_spin):
+        # Construct Carrtesian spin operators; will be used to build the Hamiltonian
+        # 1. Define the Pauli matrices (for proton, a spin-1/2 particle)
+        sig_x = sps.csr_matrix([[0, 1/2], [1/2, 0]])
+        sig_y = sps.csr_matrix([[0, -1j/2], [1j/2, 0]])
+        sig_z = sps.csr_matrix([[1/2, 0], [0, -1/2]])
+        unit = sps.identity(2, format='csr')
+        # 2. Build Cartesian spin operators for each spin in the system and the transition probability matrix
+        T = 0
+        Lx = [None]*n_spin
+        Ly = [None]*n_spin
+        Lz = [None]*n_spin
+        for i in range(n_spin):
+            Lx[i] = sps.csr_matrix([1])
+            Ly[i] = sps.csr_matrix([1])
+            Lz[i] = sps.csr_matrix([1])
+            T = sps.kron(sps.identity(2, 'uint', 'csr'), T, 'csr') + sps.kron([[0, 1], [1, 0]], sps.identity(pow(2,i), 'uint', 'csr'), 'csr')
+            for j in range(n_spin):
+                if i == j:
+                    Lx[i] = sps.kron(Lx[i], sig_x, format='csr')
+                    Ly[i] = sps.kron(Ly[i], sig_y, format='csr')
+                    Lz[i] = sps.kron(Lz[i], sig_z, format='csr')
+                else:
+                    Lx[i] = sps.kron(Lx[i], unit, format='csr')
+                    Ly[i] = sps.kron(Ly[i], unit, format='csr')
+                    Lz[i] = sps.kron(Lz[i], unit, format='csr')
+
+        return Lx, Ly, Lz, T
+
+    def __getitem__(self, key):
+        chshAsgn, jcplAsgn = key
+        key = self.hashAsgn(chshAsgn, jcplAsgn)     # Convert the key to a hashable type
+
+        try:
+            return super().__getitem__(key)
+
+        except KeyError:
+            # 0. Compute the spin operators if they are not supplied
+            n_spin = len(chshAsgn)        # Number of spins in the system
+            spinopsL, spinopsJ = [0]*np.max(chshAsgn), [0]*np.max(jcplAsgn)
+
+            Lx, Ly, Lz, TM = self.spinop(n_spin)       # Cartesian spin operators used to construct the Hamiltonian and the Transition matrix
+            for i in range(n_spin):
+                spinopsL[chshAsgn[i]-1] += Lz[i]
+                if jcplAsgn is not None:
+                    for j in range(n_spin):
+                        if jcplAsgn[i][j] != 0:
+                            spinopsJ[jcplAsgn[i][j]-1] += (Lx[i].dot(Lx[j]) + Ly[i].dot(Ly[j]) + Lz[i].dot(Lz[j])).real
+
+            self[key] = (spinopsL, spinopsJ, TM)
+
+            return super().__getitem__(key)
+
+global spinops
+spinops = SpinOpsDict()
+
+def get_hamiltonian(chshQD, jcplQD, chshAsgn, jcplAsgn):
+    """Computes teh Hamiltonian and the transition matrix."""
+    global spinops
+
+    # 0. Compute the spin operators
+    spinopsL, spinopsJ, TM = spinops[(chshAsgn, jcplAsgn)]
+
+    # 1. Build the Hamiltonian
+    n_spin = len(chshAsgn)        # Number of spins in the system
+    H = np.zeros((2**n_spin, 2**n_spin), dtype='float64')
+
+    for chsh, spinop in zip(chshQD, spinopsL):
+        H = H - chsh * spinop
+
+    for jcpl, spinop in zip(jcplQD, spinopsJ):
+        H = H + jcpl * spinop
+
+    return H, TM
+
 # QD simulations
 def transition_indices(n_spin, k=0):
     """Returns indices of singlestate transitons for the kth spin of total n_spin spins in an nxn matrix of intensities or frequencies."""
@@ -419,35 +535,6 @@ def transition_indices(n_spin, k=0):
     diag_indx = [(i, i+2**k) for i in range(2**n_spin-2**k)]    # Indices of the 2**k off diagonal
     rows, cols = zip(*[diag_indx[i] for j in range(0, 2**n_spin, 2**(k+1)) for i in range(j, j+2**k)])
     return rows, cols
-
-def spinop(n_spin):
-    # Construct Carrtesian spin operators; will be used to build the Hamiltonian
-    # 1. Define the Pauli matrices (for proton, a spin-1/2 particle)
-    sig_x = sps.csr_matrix([[0, 1/2], [1/2, 0]], dtype='float64')
-    sig_y = sps.csr_matrix([[0, -1j/2], [1j/2, 0]], dtype='complex128')
-    sig_z = sps.csr_matrix([[1/2, 0], [0, -1/2]], dtype='float64')
-    unit = sps.identity(2, dtype='float64', format='csr')
-    # 2. Build Cartesian spin operators for each spin in the system and the transition probability matrix
-    T = 0
-    Lx = [None]*n_spin
-    Ly = [None]*n_spin
-    Lz = [None]*n_spin
-    for i in range(n_spin):
-        Lx[i] = sps.csr_matrix([1])
-        Ly[i] = sps.csr_matrix([1])
-        Lz[i] = sps.csr_matrix([1])
-        T = sps.kron(sps.identity(2, 'uint', 'csr'), T, 'csr') + sps.kron([[0, 1], [1, 0]], sps.identity(pow(2,i), 'uint', 'csr'), 'csr')
-        for j in range(n_spin):
-            if i == j:
-                Lx[i] = sps.kron(Lx[i], sig_x, format='csr')
-                Ly[i] = sps.kron(Ly[i], sig_y, format='csr')
-                Lz[i] = sps.kron(Lz[i], sig_z, format='csr')
-            else:
-                Lx[i] = sps.kron(Lx[i], unit, format='csr')
-                Ly[i] = sps.kron(Ly[i], unit, format='csr')
-                Lz[i] = sps.kron(Lz[i], unit, format='csr')
-
-    return Lx, Ly, Lz, T
 
 def splitSpSy(big):
     """Splits a large spin system in the form of spsySpec namedtuple into a list of smaller disjoint spin systems. The result is a zip object containing separate disjoint spin systems and their corresponding intensities."""
@@ -520,8 +607,7 @@ def QDsims(H, T, tol=0.0001):
     n_spin = int(math.log2(T.shape[0]))
 
     # Compute the eigenvalues/eigenvectors of the Hamiltonian
-    vH, uH = np.linalg.eigh(np.asarray(H))      # Need to make sure that the Hamiltonian is passed as an array, not a matrix
-    #vH, uH = scipy.linalg.eigh(H)              # Possibly faster in some cases???
+    vH, uH = np.linalg.eigh(np.asarray(H))      # Need to make sure that the Hamiltonian is passed as an array, not a matrix      # vH, uH = scipy.linalg.eigh(H)              # Possibly faster in some cases???
 
     # Find the intensities and transition frequencies
     intn = np.dot(uH.T, T.dot(uH))**2 / (2**(n_spin-1))     # Elementwise power!
@@ -563,6 +649,94 @@ def QDsims(H, T, tol=0.0001):
     intn = n_spin * intn / intn.sum()
 
     return omega, intn
+
+def QTransFull(chshQD, jcplQD, chshAsgn, jcplAsgn, tol=0.0001):
+    """Use general QD simulations to compute the transition peak frequencies and intensities."""
+
+    def split_arrays(omega, intn, chsh):
+        """Splits arrays of peak frequencies and intensities according to the values of corresponding chemical shifts."""
+        n_spin = len(chsh)
+
+        # Sort the values of chemical shifts
+        indx_chsh = np.argsort(chsh)
+        chsh = chsh[indx_chsh]
+
+        # Sort the transitions in the increasing order of their frequencies
+        indx = np.argsort(omega)
+        omega, intn = omega[indx], intn[indx]
+        csintn = np.cumsum(intn)
+
+        # Find the indices for splits (indicated by integer values of intensities in the ordered cumsum array)
+        indx_split = [np.searchsorted(csintn, i) for i in range(1, n_spin)]       #     Faster than indx_split = np.searchsorted(csintn, [range(1, n_spin)])[0]
+        indx_split[0] = max(indx_split[0], 1)    # If the first entry csintn[0]>1 then the first split would occur at the index 0 and create an empty array
+
+        # Loop over all splits and move the boundary forward if it's closer to the left (lower) chemical shift, or backward, if the previous transition is closer to the right chemical shift. The boundaries are defined from the left (i.e. the boundary is the lowest frequency in the next group of peaks).
+        for i, ind in enumerate(indx_split):
+            if i > 0 and ind == indx_split[i-1]:
+                ind += 1     # Prevent repeating splits (and resulting empty arrays)
+
+            if not np.isclose(chsh[i], chsh[i+1]):
+                while True:
+                    if omega[ind]-chsh[i] < chsh[i+1]-omega[ind]:
+                        ind += 1
+                    elif omega[ind-1]-chsh[i] > chsh[i+1]-omega[ind-1]:
+                        ind -= 1
+                    else: break
+
+            indx_split[i] = ind
+
+        # Split the arrays and order them according the original oreder of chemical shifts.
+        omega = np.split(omega, indx_split)
+        intn = np.split(intn, indx_split)
+
+        # Reorder the groups according the order of chemical shifts. Add another empty array at the end (this corresponds to unassigned combination transitions)
+        sorter = itemgetter(*ind2pos(indx_chsh))        # The indices to sort the chemical shifts in increasing order
+        omega = list(sorter(omega)) + [np.empty(0)]
+        intn = list(sorter(intn)) + [np.empty(0)]
+
+        return omega, intn
+
+    n_spin = len(chshAsgn)        # Number of spins in the system
+
+    # Obtain the Hamiltonian
+    H, TM = get_hamiltonian(chshQD, jcplQD, chshAsgn, jcplAsgn)
+
+    # Diagonalize the Hamiltonian
+    omega, intn = QDsims(H, TM)
+
+    # Split the transitions according to their closest chemical shifts (return n_spin arrays)
+    omega, intn = split_arrays(omega, intn, chsh=chshQD[np.array(chshAsgn)-1])
+
+    # if False:
+    #     # 2. Compute the matrix of states.
+    #     # Determine the quantum number for each state (0-alpha, 1-beta)
+    #     states = np.array([state for state in itertools.product([0, 1], repeat=n_spin)])
+    #     # Sort the states according to the order of ALL chemical shifts (with repeats)
+    #     indx = ind2pos(np.argsort( chshQD[np.array(chshAsgn)-1] )[::-1])           # chshAll = chshQD[np.array(self.chshAsgn)-1]
+    #     states = states[states[:, indx].dot(2**np.arange(0, n_spin)[::-1]), :]
+    #
+    #     # 3. Diagonalize the Hamiltonian
+    #     omega, intn, trans, _, _ = QDsimsGrpd(H, TM, states)   # assign_by_dist=(len(np.unique(chshAsgn))<len(chshAsgn))
+    #
+    #     # Combine the peaks into arrays corresponding to each chemical shift. Add the combination transitions to the arrays of their closest resonances
+    #     freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
+    #     indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
+    #     for i in range(len(chshQD)):
+    #         indx_combin = np.where(indMin == i)[0]
+    #         indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
+    #         freqQPeaks[i] = np.concatenate( [omega[j] for j in indx_simple ] + [omega[-1][indx_combin]] )
+    #         intnQPeaks[i] = np.concatenate( [ intn[j] for j in indx_simple ] + [ intn[-1][indx_combin]] )
+
+    # Combine the peaks into arrays corresponding to each chemical shift
+    freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
+    # indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
+    for i in range(len(chshQD)):
+        # indx_combin = np.where(indMin == i)[0]
+        indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
+        freqQPeaks[i] = np.concatenate( [omega[j] for j in indx_simple ] )
+        intnQPeaks[i] = np.concatenate( [ intn[j] for j in indx_simple ] )
+
+    return freqQPeaks, intnQPeaks
 
 # @profile
 def QDsimsGrpd(H, T, states, tol=0.0001):
@@ -867,7 +1041,7 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
         c = np.where(mat_flip < n_spin, 1, -1)
         CI = c*mat_intn
 
-        # Look at all possible combinations of states and determine which ones gives higher intensities of simple transitions
+        # Look at all possible combinations of states and determine which ones give higher intensities of simple transitions
         combs = [[0,1,2,3,4,5], [0,1,2,4,3,5], [0,1,2,4,5,3], [0,1,4,2,3,5], [0,1,4,2,5,3], [1,4,0,2,3,5], \
                  [1,0,2,3,4,5], [1,0,2,4,3,5], [1,0,2,4,5,3], [1,0,4,2,3,5], [1,0,4,2,5,3], [1,4,0,2,5,3]]    # All possible permutations of state indices for M=2 or M=3
 #         combs = [list(p) for p in itertools.permutations([0,1,2,3,4,5])]
@@ -922,12 +1096,13 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
 #     print('Exiting the QDSims function\n')
     return omega, intn, trans, uHs, vHs
 
-def QDsimsAB(chshQD, jcplQD, n_spin=(1,1)):
+def QTransAB(chshQD, jcplQD, n_spin=(1,1)):
     """Simulates an approximate response for an AmBn system."""
 
     def expand_multiplet(freq, intn, order=2):
         """Expands doublet of peaks into multiplets while preserving the intensities ratio. order is the number of coupled spins, e.g. 2 to get a triplet."""
         if order == 1:
+            # Don't do anything
             return freq, intn
 
         d = np.abs(freq[1]-freq[0])  # Step between the peaks
@@ -948,32 +1123,66 @@ def QDsimsAB(chshQD, jcplQD, n_spin=(1,1)):
     S = -np.asscalar(np.array(chshQD[0] + chshQD[1]))      # Positive in the original source
     sin2t = J/D
 
-    freqQDpeaks = [np.array([-D-S-J, -D-S+J])/2, np.array([D-S-J, D-S+J])/2]
-    intnQDpeaks = [np.array([1-sin2t, 1+sin2t])/2, np.array([1+sin2t, 1-sin2t])/2]
+    freqQPeaks = [np.array([-D-S-J, -D-S+J])/2, np.array([D-S-J, D-S+J])/2]
+    intnQPeaks = [np.array([1-sin2t, 1+sin2t])/2, np.array([1+sin2t, 1-sin2t])/2]
 
     # Flip the order of the results if the chemcial shifts are in the reverse order
     if chshQD[1] < chshQD[0]:
-        freqQDpeaks.reverse()
-        intnQDpeaks.reverse()
+        freqQPeaks.reverse()
+        intnQPeaks.reverse()
 
     # Treat multiple-spin cases
-    freqQDpeaks[0], intnQDpeaks[0] = expand_multiplet(freqQDpeaks[0], intnQDpeaks[0], n_spin[1])
-    freqQDpeaks[1], intnQDpeaks[1] = expand_multiplet(freqQDpeaks[1], intnQDpeaks[1], n_spin[0])
+    freqQPeaks[0], intnQPeaks[0] = expand_multiplet(freqQPeaks[0], intnQPeaks[0], n_spin[1])
+    freqQPeaks[1], intnQPeaks[1] = expand_multiplet(freqQPeaks[1], intnQPeaks[1], n_spin[0])
 
     # Scale intensities by the number of spins
-    intnQDpeaks[0] *= n_spin[0]
-    intnQDpeaks[1] *= n_spin[1]
+    intnQPeaks[0] *= n_spin[0]
+    intnQPeaks[1] *= n_spin[1]
 
     # Add empty arrays to represent transition peaks (for consistency with other methods)
-    freqQDpeaks.append(np.empty(0))
-    intnQDpeaks.append(np.empty(0))
+    freqQPeaks.append(np.empty(0))
+    intnQPeaks.append(np.empty(0))
 
-    return freqQDpeaks, intnQDpeaks
+    return freqQPeaks, intnQPeaks
 
-def QDsimsPairs(chshQD, jcplQD, chshAsgn, jcplAsgn):
+def QTrans3X(chshQD, jcplQD, chshAsgn, jcplAsgn):
+    """Simulates a response for a spin system with 3 independent coupled spins."""
+
+    n_spin = len(chshAsgn)        # Number of spins in the system
+
+    if n_spin != 3:
+        raise RuntimeError('Only three-spin systems are supported.')
+
+    # Obtain the Hamiltonian
+    H, TM = get_hamiltonian(chshQD, jcplQD, chshAsgn, jcplAsgn)
+
+    # 2. Compute the matrix of states.
+    # Determine the quantum number for each state (0-alpha, 1-beta)
+    states = np.array([state for state in itertools.product([0, 1], repeat=n_spin)])
+    # Sort the states according to the order of ALL chemical shifts (with repeats)
+    indx = ind2pos(np.argsort( chshQD[np.array(chshAsgn)-1] )[::-1])           # chshAll = chshQD[np.array(self.chshAsgn)-1]
+    states = states[states[:, indx].dot(2**np.arange(0, n_spin)[::-1]), :]
+
+    # 3. Diagonalize the Hamiltonian
+    omega, intn, trans, _, _ = QDsimsGrpd(H, TM, states)   # assign_by_dist=(len(np.unique(chshAsgn))<len(chshAsgn))
+
+    # Combine the peaks into arrays corresponding to each chemical shift. Add the combination transitions to the arrays of their closest resonances
+    freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
+    indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
+    for i in range(len(chshQD)):
+        indx_combin = np.where(indMin == i)[0]
+        indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
+        freqQPeaks[i] = np.concatenate( [omega[j] for j in indx_simple ] + [omega[-1][indx_combin]] )
+        intnQPeaks[i] = np.concatenate( [ intn[j] for j in indx_simple ] + [ intn[-1][indx_combin]] )
+
+    return freqQPeaks, intnQPeaks
+
+def QTransPairs(chshQD, jcplQD, chshAsgn, jcplAsgn):
     """Simulates large spin system by splitting them in pairs of coupled spins"""
     # TODO 1: Need to check magnetically inequivalent spins
     # TODO 2: Use triplets and/or higher multiplets
+    # Deetrmine all groups of magnetically inequivalent spins and represent them as vertices of a graph; coupling between them -- as edges.
+
     if False:
         # # Find groups of equivalent spins. Most of the time, they will be corresponding to spins with the same chemical shift, but is some cases, spins with the same chsh may be coupled with different coupling constants to different spins (e.g. in the ring).
         # jcplAsgn_full = np.array(jcplAsgn).T + jcplAsgn         # Complete double-sided J-couplingassignment matrix
@@ -993,7 +1202,7 @@ def QDsimsPairs(chshQD, jcplQD, chshAsgn, jcplAsgn):
     # Simulate each pair as an AmBn system
     freq_meq, intn_meq = [[] for _ in range(len(indx_meq))], [[] for _ in range(len(indx_meq))]     # Each element is a list of np arrays of freq/intn of peaks corresponding to different groups of magnetically equivalent spins
     for p, q in pairs:
-        freq, intn = QDsimsAB( (chsh_meq[p], chsh_meq[q]), jcpl_meq[p][q], n_spin=(nspin_meq[p], nspin_meq[q]) )
+        freq, intn = QTransAB( (chsh_meq[p], chsh_meq[q]), jcpl_meq[p][q], n_spin=(nspin_meq[p], nspin_meq[q]) )
         freq_meq[p].append(freq[0])
         freq_meq[q].append(freq[1])
         intn_meq[p].append(intn[0])
@@ -1005,13 +1214,21 @@ def QDsimsPairs(chshQD, jcplQD, chshAsgn, jcplAsgn):
 
     # Distribute the equivalent spins among the distinct chemical shifts (some chsh may be assigned multiple equivalent groups)
     if len(freq_meq) > len(chshQD):
-        # This chack is only to save time
-        freqQDpeaks, intnQDpeaks = [None]*len(chshQD), [None]*len(chshQD)
+        # This check is only to save time
+        freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)
         for i in len(chshQD):
             pass
-    else: freqQDpeaks, intnQDpeaks = freq_meq, intn_meq
+    else: freqQPeaks, intnQPeaks = freq_meq, intn_meq
 
-    return freqQDpeaks, intnQDpeaks
+    # # Build the connection matrix (0 - no coupling, 1+ - strong coupling)
+    # df = np.abs( chshQD[np.array(chshAsgn)-1].reshape(-1,1) - chshQD[np.array(chshAsgn)-1].reshape(1,-1) )      # Pairwise difference in chemical shifts (in Hz)
+    # dj = np.where(jcplAsgn, jcplQD[np.array(jcplAsgn)-1], 0)
+    # dj += dj.T       # Make symmetric
+    # C = np.divide(dj, df, out=np.zeros((n_spin, n_spin), dtype='float'), where=(df!=0) )
+    #
+    # # Cluster the spin system
+
+    return freqQPeaks, intnQPeaks
 
 def convolve_multiplets(freqs, intns, freq_offs, n_spin=None):
     """Convolves peaks of two multiplets. freqs and intns are lists of np arrays of frequencies and intensities corresponding to each transition peak."""
@@ -1032,156 +1249,26 @@ def convolve_multiplets(freqs, intns, freq_offs, n_spin=None):
     return freq_out, intn_out
 
 # @ profile
-def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn, spinopsL=None, spinopsJ=None, TM=None):
-    """Computes the transition lines for a spin system."""
+def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn):
+    """Computes the transition lines for a spin system. Outputs the lists of np arrays corresponding to the freq and intn of the computed transition peaks. the lengths of the arrays equal the number of chshQD."""
 
     n_spin = len(chshAsgn)        # Number of spins in the system
 
     if len(jcplQD) == 0:
         # Case 1. All spins have the same chemical shift
-
         freqQPeaks, intnQPeaks = [[chshQD[0]]], [np.array([n_spin])]
 
-        return freqQPeaks, intnQPeaks
+    elif n_spin == 2:
+        # Case 2. AB system
+        freqQPeaks, intnQPeaks = QTransAB(chshQD, jcplQD)
 
     elif n_spin < 12:     # False: #
         # Case 2. Small spin system
-
-        # 0. Compute the spin operators if they are not supplied
-        if spinopsL is None or spinopsJ is None or TM is None:
-            spinopsL, spinopsJ = [0]*len(chshQD), [0]*len(jcplQD)
-
-            def spinop(n_spin):
-                # Construct Carrtesian spin operators; will be used to build the Hamiltonian
-                # 1. Define the Pauli matrices (for proton, a spin-1/2 particle)
-                sig_x = sps.csr_matrix([[0, 1/2], [1/2, 0]])
-                sig_y = sps.csr_matrix([[0, -1j/2], [1j/2, 0]])
-                sig_z = sps.csr_matrix([[1/2, 0], [0, -1/2]])
-                unit = sps.identity(2, format='csr')
-                # 2. Build Cartesian spin operators for each spin in the system and the transition probability matrix
-                T = 0
-                Lx = [None]*n_spin
-                Ly = [None]*n_spin
-                Lz = [None]*n_spin
-                for i in range(n_spin):
-                    Lx[i] = sps.csr_matrix([1])
-                    Ly[i] = sps.csr_matrix([1])
-                    Lz[i] = sps.csr_matrix([1])
-                    T = sps.kron(sps.identity(2, 'uint', 'csr'), T, 'csr') + sps.kron([[0, 1], [1, 0]], sps.identity(pow(2,i), 'uint', 'csr'), 'csr')
-                    for j in range(n_spin):
-                        if i == j:
-                            Lx[i] = sps.kron(Lx[i], sig_x, format='csr')
-                            Ly[i] = sps.kron(Ly[i], sig_y, format='csr')
-                            Lz[i] = sps.kron(Lz[i], sig_z, format='csr')
-                        else:
-                            Lx[i] = sps.kron(Lx[i], unit, format='csr')
-                            Ly[i] = sps.kron(Ly[i], unit, format='csr')
-                            Lz[i] = sps.kron(Lz[i], unit, format='csr')
-
-                return Lx, Ly, Lz, T
-
-            Lx, Ly, Lz, TM = spinop(n_spin)       # Cartesian spin operators used to construct the Hamiltonian and the Transition matrix
-            for i in range(n_spin):
-                spinopsL[chshAsgn[i]-1] += Lz[i]
-                if jcplAsgn is not None:
-                    for j in range(n_spin):
-                        if jcplAsgn[i][j] != 0:
-                            spinopsJ[jcplAsgn[i][j]-1] += (Lx[i].dot(Lx[j]) + Ly[i].dot(Ly[j]) + Lz[i].dot(Lz[j])).real
-#             spinopsL = [sps.dia_matrix(m.real) for m in spinopsL]
-#             spinopsJ = [sps.dia_matrix(m.real) for m in spinopsJ]
-                pass
-
-        # 1. Build the Hamiltonian
-        H = np.zeros((2**n_spin, 2**n_spin), dtype='float64')
-        for chsh, spinop in zip(chshQD, spinopsL):
-            H = H - chsh * spinop
-        for jcpl, spinop in zip(jcplQD, spinopsJ):
-            H = H + jcpl * spinop
-
-        if True:
-            # Use general QD simulations
-
-            def split_arrays(omega, intn, chsh):
-                """Splits arrays of peak frequencies and intensities according to the values of corresponding chemical shifts."""
-                n_spin = len(chsh)
-
-                # Sort the values of chemical shifts
-                indx_chsh = np.argsort(chsh)
-                chsh = chsh[indx_chsh]
-
-                # Sort the transitions in the increasing order of their frequencies
-                indx = np.argsort(omega)
-                omega, intn = omega[indx], intn[indx]
-                csintn = np.cumsum(intn)
-
-                # Find the indices for splits (indicated by integer values of intensities in the ordered cumsum array)
-                indx_split = [np.searchsorted(csintn, i) for i in range(1, n_spin)]       #     Faster than indx_split = np.searchsorted(csintn, [range(1, n_spin)])[0]
-                indx_split[0] = max(indx_split[0], 1)    # If the first entry csintn[0]>1 then the first split would occur at the index 0 and create an empty array
-
-                # Loop over all splits and move the boundary forward if it's closer to the left (lower) chemical shift, or backward, if the previous transition is closer to the right chemical shift. The boundaries are defined from the left (i.e. the boundary is the lowest frequency in the next group of peaks).
-                for i, ind in enumerate(indx_split):
-                    if i > 0 and ind == indx_split[i-1]:
-                        ind += 1     # Prevent repeating splits (and resulting empty arrays)
-
-                    if not np.isclose(chsh[i], chsh[i+1]):
-                        while True:
-                            if omega[ind]-chsh[i] < chsh[i+1]-omega[ind]:
-                                ind += 1
-                            elif omega[ind-1]-chsh[i] > chsh[i+1]-omega[ind-1]:
-                                ind -= 1
-                            else: break
-
-                    indx_split[i] = ind
-
-                # Split the arrays and order them according the original oreder of chemical shifts.
-                omega = np.split(omega, indx_split)
-                intn = np.split(intn, indx_split)
-
-                # Reorder the groups according the order of chemical shifts. Add another empty array at the end (this corresponds to unassigned combination transitions)
-                sorter = itemgetter(*ind2pos(indx_chsh))        # The indices to sort the chemical shifts in increasing order
-                omega = list(sorter(omega)) + [np.empty(0)]
-                intn = list(sorter(intn)) + [np.empty(0)]
-
-                return omega, intn
-
-            # Diagonalize the Hamiltonian
-            omega, intn = QDsims(H, TM)
-
-            # Split the transitions according to their closest chemical shifts (return n_spin arrays)
-            omega, intn = split_arrays(omega, intn, chsh=chshQD[np.array(chshAsgn)-1])
-
-        else:
-            # 2. Compute the matrix of states.
-            # Determine the quantum number for each state (0-alpha, 1-beta)
-            states = np.array([state for state in itertools.product([0, 1], repeat=n_spin)])
-            # Sort the states according to the order of ALL chemical shifts (with repeats)
-            indx = ind2pos(np.argsort( chshQD[np.array(chshAsgn)-1] )[::-1])           # chshAll = chshQD[np.array(self.chshAsgn)-1]
-            states = states[states[:, indx].dot(2**np.arange(0, n_spin)[::-1]), :]
-
-            # 3. Diagonalize the Hamiltonian
-            omega, intn, trans, _, _ = QDsimsGrpd(H, TM, states)   # assign_by_dist=(len(np.unique(chshAsgn))<len(chshAsgn))
-
-        # Combine the peaks into arrays corresponding to each chemical shift. Add the combination transitions to the arrays of their closest resonances
-        freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
-        indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
-        for i in range(len(chshQD)):
-            indx_combin = np.where(indMin == i)[0]
-            indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
-            freqQPeaks[i] = np.concatenate( [omega[j] for j in indx_simple ] + [omega[-1][indx_combin]] )
-            intnQPeaks[i] = np.concatenate( [ intn[j] for j in indx_simple ] + [ intn[-1][indx_combin]] )
+        freqQPeaks, intnQPeaks = QTransFull(chshQD, jcplQD, chshAsgn, jcplAsgn)
 
     else:
         # Case 3. Combined spin system
-        freqQPeaks, intnQPeaks = QDsimsPairs(chshQD, jcplQD, chshAsgn, jcplAsgn)
-
-        # # Build the connection matrix (0 - no coupling, 1+ - strong coupling)
-        # df = np.abs( chshQD[np.array(chshAsgn)-1].reshape(-1,1) - chshQD[np.array(chshAsgn)-1].reshape(1,-1) )      # Pairwise difference in chemical shifts (in Hz)
-        # dj = np.where(jcplAsgn, jcplQD[np.array(jcplAsgn)-1], 0)
-        # dj += dj.T       # Make symmetric
-        # C = np.divide(dj, df, out=np.zeros((n_spin, n_spin), dtype='float'), where=(df!=0) )
-        #
-        # # Cluster the spin system
-        pass
+        freqQPeaks, intnQPeaks = QTransPairs(chshQD, jcplQD, chshAsgn, jcplAsgn)
 
     return freqQPeaks, intnQPeaks
 
@@ -1644,20 +1731,6 @@ class chemNodeQD(chemNode):
         freqSpin = [chshQD[i-1] for i in self.chshAsgn]       # Frequencies of each spin after assignment
         jcplSpin = [[jcplQD[i-1] if i>0 else 0 for i in self.jcplAsgn[j]] for j in range(len(self.jcplAsgn))] if len(jcplQD)>0 else None"""
 
-        n_spin = len(self.chshAsgn)
-        if n_spin < 13:
-            self.spinopsL = [0.0]*len(self.chshQD)
-            self.spinopsJ = [0.0]*len(self.jcplQD)
-            Lx, Ly, Lz, self.TM = spinop(n_spin)       # Cartesian spin operators used to construct the Hamiltonian and the Transition matrix
-            for i in range(n_spin):
-                self.spinopsL[self.chshAsgn[i]-1] += Lz[i]
-                if self.jcplAsgn is not None:
-                    for j in range(n_spin):
-                        if self.jcplAsgn[i][j] != 0:
-                            self.spinopsJ[self.jcplAsgn[i][j]-1] += (Lx[i].dot(Lx[j]) + Ly[i].dot(Ly[j]) + Lz[i].dot(Lz[j])).real
-            #self.spinopsL = [sps.csr_matrix(m) for m in self.spinopsL]
-            #self.spinopsJ = [sps.csr_matrix(m) for m in self.spinopsJ]
-
     def addChild(self, child):
         """Add a terminal node and keep the value of its chemical shift."""
         if type(child) is not chemNodeT:
@@ -1714,97 +1787,7 @@ class chemNodeQD(chemNode):
                                           or ( any( abs(self.oldParsQD["chsh"] - chshQD) > min(config.QD_RerunQDchshThreshold*c0, 0.5*mind_chshQD) ) \
                                                and self.jcplQD != []):
 
-            try:
-                freqQPeaks, intnQPeaks = compute_transitions(chshQD, jcplQD, self.chshAsgn, self.jcplAsgn, spinopsL=self.spinopsL, spinopsJ=self.spinopsJ, TM=self.TM)
-            except AttributeError:
-                freqQPeaks, intnQPeaks = compute_transitions(chshQD, jcplQD, self.chshAsgn, self.jcplAsgn)
-
-            # # QD simulations
-            # n_spin = len(self.chshAsgn)
-            # if len(jcplQD) > 0:
-            #     #print("Running QD simulations.")
-            #     # 4. Build the Hamiltonian
-            #     H = np.zeros((2**n_spin, 2**n_spin), dtype='float64')
-            #     try:
-            #         for chsh, spinop in zip(chshQD, self.spinopsL):
-            #             H = H - chsh * spinop
-            #         for jcpl, spinop in zip(jcplQD, self.spinopsJ):
-            #             H = H + jcpl * spinop
-            #     except AttributeError:
-            #         # TO BE REMOVED IN LATER VERSIONS. LEFT FOR COMPATIBILITY
-            #         print('Using the old version of QM model.')
-            #
-            #         def spinop(n_spin):
-            #             # Construct Carrtesian spin operators; will be used to build the Hamiltonian
-            #             # 1. Define the Pauli matrices (for proton, a spin-1/2 particle)
-            #             sig_x = sps.csr_matrix([[0, 1/2], [1/2, 0]])
-            #             sig_y = sps.csr_matrix([[0, -1j/2], [1j/2, 0]])
-            #             sig_z = sps.csr_matrix([[1/2, 0], [0, -1/2]])
-            #             unit = sps.identity(2, format='csr')
-            #             # 2. Build Cartesian spin operators for each spin in the system and the transition probability matrix
-            #             T = 0
-            #             Lx = [None]*n_spin
-            #             Ly = [None]*n_spin
-            #             Lz = [None]*n_spin
-            #             for i in range(n_spin):
-            #                 Lx[i] = sps.csr_matrix([1])
-            #                 Ly[i] = sps.csr_matrix([1])
-            #                 Lz[i] = sps.csr_matrix([1])
-            #                 T = sps.kron(sps.identity(2, 'uint', 'csr'), T, 'csr') + sps.kron([[0, 1], [1, 0]], sps.identity(pow(2,i), 'uint', 'csr'), 'csr')
-            #                 for j in range(n_spin):
-            #                     if i == j:
-            #                         Lx[i] = sps.kron(Lx[i], sig_x, format='csr')
-            #                         Ly[i] = sps.kron(Ly[i], sig_y, format='csr')
-            #                         Lz[i] = sps.kron(Lz[i], sig_z, format='csr')
-            #                     else:
-            #                         Lx[i] = sps.kron(Lx[i], unit, format='csr')
-            #                         Ly[i] = sps.kron(Ly[i], unit, format='csr')
-            #                         Lz[i] = sps.kron(Lz[i], unit, format='csr')
-            #
-            #             return Lx, Ly, Lz, T
-            #
-            #         self.spinopsL = [0]*len(self.chshQD)
-            #         self.spinopsJ = [0]*len(self.jcplQD)
-            #         Lx, Ly, Lz, self.TM = spinop(n_spin)       # Cartesian spin operators used to construct the Hamiltonian and the Transition matrix
-            #         for i in range(n_spin):
-            #             self.spinopsL[self.chshAsgn[i]-1] += Lz[i]
-            #             if self.jcplAsgn is not None:
-            #                 for j in range(n_spin):
-            #                     if self.jcplAsgn[i][j] != 0:
-            #                         self.spinopsJ[self.jcplAsgn[i][j]-1] += (Lx[i].dot(Lx[j]) + Ly[i].dot(Ly[j]) + Lz[i].dot(Lz[j]))
-            #         self.spinopsL = [sps.dia_matrix(m) for m in self.spinopsL]
-            #         self.spinopsJ = [sps.dia_matrix(m) for m in self.spinopsJ]
-            #
-            #         for chsh, spinop in zip(chshQD, self.spinopsL):
-            #             H -= chsh * spinop
-            #         for jcpl, spinop in zip(jcplQD, self.spinopsJ):
-            #             H += jcpl * spinop
-            #
-            #     # 5. Compute the matrix of states. Determine the quantum number for each state (0-alpha, 1-beta)
-            #     states = np.array([state for state in itertools.product([0, 1], repeat=n_spin)])
-            #     # Sort the states according to the order of ALL chemical shifts (with repeats)
-            #     indx = ind2pos(np.argsort( chshQD[np.array(self.chshAsgn)-1] )[::-1])           # chshAll = chshQD[np.array(self.chshAsgn)-1]
-            #     states = states[states[:, indx].dot(2**np.arange(0, n_spin)[::-1]), :]
-            #
-            #     #print("H", np.linalg.matrix_rank(H), H.shape)
-            #     # print(self.chshAsgn)
-            #     # print(self.jcplAsgn)
-            #     omega, intn = QDsims(H, self.TM, states)
-            #     #print(H.shape)
-            #     #return omega, intn
-            #
-            #     # 9. Add the transitions to the arrays of their closest resonances
-            #     freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
-            #     indMin = np.argmin(abs(omega.reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
-            #     for i in range(len(chshQD)):
-            #         indx = np.where(indMin == i)
-            #         if len(indx) == 0:
-            #             print('No peaks in this group.')
-            #         freqQPeaks[i] = omega[indx]
-            #         intnQPeaks[i] = intn[indx]
-            # else:
-            #     # All spins have the same chemical shift
-            #     freqQPeaks, intnQPeaks = [[chshQD[0]]], [np.array([n_spin])]
+            freqQPeaks, intnQPeaks = compute_transitions(chshQD, jcplQD, self.chshAsgn, self.jcplAsgn)
 
             # Aggregate poles and assign them to different chemical shifts and update the corresponding child node
             for i, chld in enumerate(self.children()):
@@ -2164,6 +2147,18 @@ def ind2pos(ind):
     return pos
 
 # ----------------------------- Chemical Library ------------------------------
+
+def array2parsSpec(arr):
+    """Converts 2D arrays of min and max values to the array of parsRange namedtuples."""
+    ans = arr
+    if arr is not None:
+        ans = [parsSpec(min=v[0], max=v[1], label=v[2] if len(v)>2 else '') for v in arr]
+    else: ans = []
+    return ans
+
+def parsSpec2array(par):
+    """Converts arrays of parsSpec namedtuples to 2D arrays of min and max values."""
+    return [(v.min, v.max) for v in par]
 
 def readChemDB(fname='chemDB.json'):
     """Reads a chemDB in JSON or .cdb format and convers it to a dictionary of chemSpec class objects."""
