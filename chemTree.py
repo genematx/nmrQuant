@@ -264,13 +264,13 @@ freqSpec.__str__ = lambda self : '{:.2f} ... {:.2f}'.format(self.min, self.max) 
 #freqSpec.indxFreq = lambda self, f : np.flatnonzero((f<=self.max)*(f>=self.min))    # Indices of the frequency vector f that fall into the current range
 # freqSpec.bF = lambda self, nf : create_baselines(self, nf)
 
-# def rel2abs(parsSpec, rel=0):
-#     """Converts between relative and absolute values of a parameter given its range in parsSpec."""
-#     return (parsSpec.max-parsSpec.min)*(rel+1)/2 + parsSpec.min
-#
-# def abs2rel(parsSpec, arg=0):
-#     """Converts from absolute to relative values of a parameter given its range in parsSpec."""
-#     return (arg-parsSpec.min)/(parsSpec.max-parsSpec.min)*2 - 1
+def rel2abs(parsSpec, rel=0):
+    """Converts between relative and absolute values of a parameter given its range in parsSpec."""
+    return (parsSpec.max-parsSpec.min)*(rel+1)/2 + parsSpec.min
+
+def abs2rel(parsSpec, arg=0):
+    """Converts from absolute to relative values of a parameter given its range in parsSpec."""
+    return (arg-parsSpec.min)/(parsSpec.max-parsSpec.min)*2 - 1
 
 def priorProb(parsSpec, arg=0):
     """Computes the values of the (log) prior distribution at the relative argument arg."""
