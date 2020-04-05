@@ -22,11 +22,11 @@ To set up the software to be run from the code:
 
 1. Install Anaconda, https://www.anaconda.com/. It makes managing Python packages and the associate software tools so much easier.
 
-2. Import the python environment from a .yml file that lists all packages on my machine. For this, in the Anaconda navigator go to Environments -> Import and select the desired file (e.g. py35.yml -- the newest version is available in the repository on GitHub). This will download (almost) all necessary packages and install them on your system. When you will be running the code, please make sure that the correct Environment is selected on the Home page in Anaconda Navigator.
+2. Import the python environment from a .yml file that lists all packages on my machine. For this, in the Anaconda navigator go to Environments -> Import and select the desired file (e.g. py35.yml -- the newest version is available in the repository on GitHub. You may need to change the prefix parameter in the .yml file to reflect the path on your system, but sometimes it works even without doing that). This will download (almost) all necessary packages and install them on your system. When you will be running the code, please make sure that the correct Environment is selected on the Home page in Anaconda Navigator.
 
 3. You may want to install Git Desktop if you'd like, and clone the repository from there, but likely all you need is to update the code periodically, for which working in the terminal should suffice.
 
-4. After you've imported the .yml file, a new entry should appear on the Environments tab in Anaconda. Left click on the triangle and Open the Terminal.
+4. After you've imported the .yml file, a new entry should appear on the Environments tab in Anaconda. Left click on the triangle and Open the Terminal -- it is advised to use this Terminal window, instead of opening one from a windows folder; Anaconda terminal has some additional useful commands for working with the Environments.
 
 5. Create a new folder where you'd like to keep the code, e.g. C:\Users\yma80\AnacondaProjects\nmrQuant on my machine, and navigate there in the Terminal (using the 'cd' command). This should download the latest version of the code from the server. When you'd like to update the local repository, run 'git pull'.
 
