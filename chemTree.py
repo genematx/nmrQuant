@@ -244,8 +244,8 @@ class chemSpec:
 
 parsSpec = namedtuple('parsSpec', 'min, max, label, distr, p1, p2, dval')
 parsSpec.__new__.__defaults__ = (-np.inf, np.inf, '', 'Uniform', None, None, None)     # 'mode' specifies the location of the distribution maximum value
-# parsSpec.rel = lambda self, arg : abs2rel(self, arg)
-# parsSpec.abs = lambda self, arg : rel2abs(self, arg)
+parsSpec.rel = lambda self, arg : abs2rel(self, arg)
+parsSpec.abs = lambda self, arg : rel2abs(self, arg)
 parsSpec.evalPrior = lambda self, arg : priorProb(self, arg)
 parsSpec.dflt = lambda self : (self.min + self.max) / 2 if self.dval is None else self.dval
 
