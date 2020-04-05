@@ -13,6 +13,7 @@ import itertools
 import numexpr as ne
 import copy
 from operator import itemgetter
+import networkx as nx
 
 # Ordered set class to store children of a node
 import collections
@@ -306,7 +307,6 @@ def priorProb(parsSpec, arg=0):
                 beta = parsSpec.p2
                 return alpha*np.log(beta) - np.log(scipy.special.gamma(alpha)) - (alpha+1)*np.log(arg) - beta/arg
 
-
 # Graph of magnetically inequivalent spins
 spinVert = namedtuple('spinVert', 'indxChsh, nspin')             # indxChsh - position in the chshQD array corresponding to the given vertex
 spinEdge = namedtuple('spinEdge', 'indxJcpl, indxVert')          # indxVert is a set of two MEq spin indices (indices of vertices)
@@ -347,6 +347,29 @@ def meqv2asgn(spins, links):
 
     return chshAsgn, jcplAsgn
 
+def get_spinGraph(chshQD, jcplQD, meqSpins, meqLinks):
+    """Create a graph to represent the spin system."""
+
+    G = nx.Graph()
+
+    G.add_nodes_from(meqSpins)
+
+    for link in meqLinks:
+        p, q = link.indxVert
+        weight = np.abs( jcplQD[link.indxJcpl] / (chshQD[meqSpins[p].indxChsh] - chshQD[meqSpins[q].indxChsh]))
+        G.add_edge(meqSpins[p], meqSpins[q], weight=weight, indxJcpl=link.indxJcpl)
+
+    return G
+
+def spinGraph2meqv(G):
+    """Converts a spin graph representation to the meqv representation of a spin system."""
+    meqSpins = [node for node in G.nodes]
+    meqLinks = [spinEdge( indxJcpl=edge[2]['indxJcpl'], indxVert=(meqSpins.index(edge[0]), meqSpins.index(edge[1])) )
+                for edge in G.edges(data=True)]
+
+    return meqSpins, meqLinks
+
+# Sampling
 def smplSpec_from_data(data):
     """Returns the statistics of the 1D np.array of samples, data, in the form of smplSpec."""
     data = data.ravel()
@@ -1179,59 +1202,69 @@ def QTrans3X(chshQD, jcplQD, chshAsgn, jcplAsgn):
 
 def QTransPairs(chshQD, jcplQD, chshAsgn, jcplAsgn):
     """Simulates large spin system by splitting them in pairs of coupled spins"""
-    # TODO 1: Need to check magnetically inequivalent spins
-    # TODO 2: Use triplets and/or higher multiplets
-    # Deetrmine all groups of magnetically inequivalent spins and represent them as vertices of a graph; coupling between them -- as edges.
+    # TODO: Use triplets and/or higher multiplets
 
-    if False:
-        # # Find groups of equivalent spins. Most of the time, they will be corresponding to spins with the same chemical shift, but is some cases, spins with the same chsh may be coupled with different coupling constants to different spins (e.g. in the ring).
-        # jcplAsgn_full = np.array(jcplAsgn).T + jcplAsgn         # Complete double-sided J-couplingassignment matrix
-        # similarity_matrix = np.vstack([jcplAsgn_full, chshAsgn])   # Similar columns in this matrix should be groupped together
-        # print(similarity_matrix)
-        pass
-    else:
-        indx_meq = [chshAsgn.index(i+1) for i in range(len(chshQD))]    # List of representative indices of equivalence classes of spins
-        nspin_meq = [chshAsgn.count(i+1) for i in range(len(indx_meq))]
-        chsh_meq = chshQD
+    # Determine all groups of magnetically inequivalent spins and represent them as vertices of a graph; coupling between them -- as edges.
+    meqSpins, meqLinks = asgn2meqv(chshAsgn, jcplAsgn)
 
-    jcpl_meq = np.array( [[jcplQD[jcplAsgn[i][j]-1] if jcplAsgn[i][j] != 0 else np.inf for j in indx_meq] for i in indx_meq] ) #
-
-    # Determine all pairs of coupled equivalent spins
-    pairs = [(i, j) for i, j in zip( *np.where(np.logical_not(np.isinf(jcpl_meq))) )]
+    # Find lists of lists of np arrays of freq/intn for each meq spin.
+    # The second level of lists corresponds to the meq spin being involved in different subgraphs within the spin system. After all subgraphs are computed, their peaks will be convolved with each other.
+    freq_meq, intn_meq = [[] for _ in range(len(meqSpins))], [[] for _ in range(len(meqSpins))]
 
     # Simulate each pair as an AmBn system
-    freq_meq, intn_meq = [[] for _ in range(len(indx_meq))], [[] for _ in range(len(indx_meq))]     # Each element is a list of np arrays of freq/intn of peaks corresponding to different groups of magnetically equivalent spins
-    for p, q in pairs:
-        freq, intn = QTransAB( (chsh_meq[p], chsh_meq[q]), jcpl_meq[p][q], n_spin=(nspin_meq[p], nspin_meq[q]) )
+    for edge in meqLinks:
+        p, q = edge.indxVert           # Indices fo coupled spins
+        freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
+                                jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
         freq_meq[p].append(freq[0])
         freq_meq[q].append(freq[1])
         intn_meq[p].append(intn[0])
         intn_meq[q].append(intn[1])
 
-    # Convolve the multiplets for each equivalent spin
-    for i in range(len(indx_meq)):
-        freq_meq[i], intn_meq[i] = convolve_multiplets(freq_meq[i], intn_meq[i], chsh_meq[i], nspin_meq[i])
+    # Convolve the multiplets for each equivalent spin and save them in the subarray corresponding to a specific chshQD
+    freqQPeaks, intnQPeaks = [[] for _ in chshQD], [[] for _ in chshQD]
+    for i, vert in enumerate(meqSpins):
+        freq_meq[i], intn_meq[i] = convolve_multiplets(freq_meq[i], intn_meq[i], chshQD[vert.indxChsh], vert.nspin)
+        freqQPeaks[vert.indxChsh].extend(freq_meq[i])
+        intnQPeaks[vert.indxChsh].extend(intn_meq[i])
 
-    # Distribute the equivalent spins among the distinct chemical shifts (some chsh may be assigned multiple equivalent groups)
-    if len(freq_meq) > len(chshQD):
-        # This check is only to save time
-        freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)
-        for i in len(chshQD):
-            pass
-    else: freqQPeaks, intnQPeaks = freq_meq, intn_meq
+    freqQPeaks, intnQPeaks = [np.array(x) for x in freqQPeaks], [np.array(x) for x in intnQPeaks]
 
-    # # Build the connection matrix (0 - no coupling, 1+ - strong coupling)
-    # df = np.abs( chshQD[np.array(chshAsgn)-1].reshape(-1,1) - chshQD[np.array(chshAsgn)-1].reshape(1,-1) )      # Pairwise difference in chemical shifts (in Hz)
-    # dj = np.where(jcplAsgn, jcplQD[np.array(jcplAsgn)-1], 0)
-    # dj += dj.T       # Make symmetric
-    # C = np.divide(dj, df, out=np.zeros((n_spin, n_spin), dtype='float'), where=(df!=0) )
-    #
-    # # Cluster the spin system
+    return freqQPeaks, intnQPeaks
+
+def QTransClusters(chshQD, jcplQD, chshAsgn, jcplAsgn):
+    """Simulates large spin system by splitting them in overlapping clusters of coupled spins"""
+
+    # Determine all groups of magnetically inequivalent spins and represent them as vertices of a graph; coupling between them -- as edges.
+    meqSpins, meqLinks = asgn2meqv(chshAsgn, jcplAsgn)
+
+    # Find lists of lists of np arrays of freq/intn for each meq spin.
+    # The second level of lists corresponds to the meq spin being involved in different subgraphs within the spin system. After all subgraphs are computed, their peaks will be convolved with each other.
+    freq_meq, intn_meq = [[] for _ in range(len(meqSpins))], [[] for _ in range(len(meqSpins))]
+
+    # Simulate each pair as an AmBn system
+    for edge in meqLinks:
+        p, q = edge.indxVert           # Indices fo coupled spins
+        freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
+                                jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
+        freq_meq[p].append(freq[0])
+        freq_meq[q].append(freq[1])
+        intn_meq[p].append(intn[0])
+        intn_meq[q].append(intn[1])
+
+    # Convolve the multiplets for each equivalent spin and save them in the subarray corresponding to a specific chshQD
+    freqQPeaks, intnQPeaks = [[] for _ in chshQD], [[] for _ in chshQD]
+    for i, vert in enumerate(meqSpins):
+        freq_meq[i], intn_meq[i] = convolve_multiplets(freq_meq[i], intn_meq[i], chshQD[vert.indxChsh], vert.nspin)
+        freqQPeaks[vert.indxChsh].extend(freq_meq[i])
+        intnQPeaks[vert.indxChsh].extend(intn_meq[i])
+
+    freqQPeaks, intnQPeaks = [np.array(x) for x in freqQPeaks], [np.array(x) for x in intnQPeaks]
 
     return freqQPeaks, intnQPeaks
 
 def convolve_multiplets(freqs, intns, freq_offs, n_spin=None):
-    """Convolves peaks of two multiplets. freqs and intns are lists of np arrays of frequencies and intensities corresponding to each transition peak."""
+    """Convolves peaks of a meq group of spins. freqs and intns are lists of np arrays computd if the spins are included in different subgraphs in the spin system."""
     if n_spin is None:
         n_spin = np.mean([np.sum(x) for x in intns])
 
