@@ -3345,7 +3345,7 @@ class PeakPickingWidget(QWidget):
         f = stepClass.f
         yFph = stepClass.yFph
         pos, ids, width, amps = ng.analysis.peakpick.pick(yFph.real, pthres = self.pthres, algorithm='downward', cluster='False', table=False)      # , algorithm='connected'
-        stepClass.pckdPeaks = [peakSpec(chsh=f[p[0]], intn = a, fwhm=w[0] / np.pi) for p, w, a in zip(pos, width, amps) if w[0] > 0]
+        stepClass.pckdPeaks = [peakSpec(freq=f[p[0]], intn = a, fwhm=w[0] / np.pi) for p, w, a in zip(pos, width, amps) if w[0] > 0]
         self.startPlotting()
 
     def startPlotting(self):
@@ -3430,7 +3430,7 @@ class PeakPickingWidget(QWidget):
         f = stepClass.f
         yFph = stepClass.yFph
         pos, ids, width, amps = ng.analysis.peakpick.pick(yFph.real, pthres = self.pthres, algorithm='downward', cluster='False', table=False)      # , algorithm='connected'
-        stepClass.pckdPeaks = [peakSpec(chsh=f[p[0]], intn = a, fwhm=w[0] / np.pi) for p, w, a in zip(pos, width, amps) if w[0] > 0]
+        stepClass.pckdPeaks = [peakSpec(freq=f[p[0]], intn = a, fwhm=w[0] / np.pi) for p, w, a in zip(pos, width, amps) if w[0] > 0]
 
         self.plot()
 

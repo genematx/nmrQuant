@@ -28,7 +28,7 @@ To set up the software to be run from the code:
 
 4. After you've imported the .yml file, a new entry should appear on the Environments tab in Anaconda. Left click on the triangle and Open the Terminal -- it is advised to use this Terminal window, instead of opening one from a windows folder; Anaconda terminal has some additional useful commands for working with the Environments.
 
-5. Create a new folder where you'd like to keep the code, e.g. C:\Users\yma80\AnacondaProjects\nmrQuant on my machine, and navigate there in the Terminal (using the 'cd' command). Run 'git clone'. This should download the latest version of the code from the server. When you'd like to update the local repository, run 'git pull'.
+5. Create a new folder where you'd like to keep the code, e.g. C:\Users\yma80\AnacondaProjects\nmrQuant on my machine, and navigate there in the Terminal (using the 'cd' command). Run 'git clone https://github.com/genematx/nmrQuant.git'. This should download the latest version of the code from the server. When you'd like to update the local repository, run 'git pull'.
 
 6. Install nmrglue. This is a Python package that implements standard NMR algorithms (i.e. phase and baseline correction). Since I've modified it for my own purposes (e.g. to be able to open Spinsolve files), we need to install 'my' version manually. Simply copy the attached nmrglue folder to the parent folder of your project (e.g. C:\Users\yma80\AnacondaProjects, or anywhere else you'd like) and the run 'pip install -e C:\path_where_you_saved_nmrglue\nmrglue' in the Terminal.
 
