@@ -456,7 +456,7 @@ class Workspace():
             if config.OPTIM_nvalLinearSearch > 0:
                 if len(initVals) == 1:
                     initVals[0] = self._search(lambda x : costFuncOpti(np.array([x])), bounds[0], initVals[0])
-                    
+
                 elif len(initVals) == 2:
                     initVals[0] = self._search(lambda x : costFuncOpti(np.array([x, initVals[1]])), bounds[0], initVals[0])
                     initVals[1] = self._search(lambda x : costFuncOpti(np.array([initVals[0], x])), bounds[1], initVals[1])
@@ -2829,7 +2829,7 @@ class Datum():
                 stems_i = {}
                 for stemKey, val in mdldPeaks[name].items():   # Loop over the leaves
                     parsKey = peakName2parsKey(stemKey)
-                    freq = [pk.chsh - dref_chsh for pk in val]
+                    freq = [pk.freq - dref_chsh for pk in val]
                     intn = [np.abs(pk.intn) for pk in val]
                     stems_i[parsKey] = (self.getCrntVal(key=parsKey), freq, intn)
                 allStems.append(stems_i)
