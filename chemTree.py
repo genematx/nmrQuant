@@ -252,7 +252,7 @@ parsSpec.dflt = lambda self : (self.min + self.max) / 2 if self.dval is None els
 smplSpec = namedtuple('smplSpec', 'min, max, mean, median, var, q1, q3, p5, p95, hpd5')     # Specification of MCMC samples
 smplSpec.__new__.__defaults__ = (-np.inf, np.inf, None, None, None, None, None, None, None, None)
 
-peakSpec = namedtuple('peakSpec', 'chsh, intn, fwhm')
+peakSpec = namedtuple('peakSpec', 'freq, intn, fwhm')
 peakSpec.__new__.__defaults__ = (0, 1, None)     #
 
 spsySpec = namedtuple('spsySpec', 'chsh, jcpl, chshAsgn, jcplAsgn, mult')
@@ -464,7 +464,7 @@ def hpd(x, alpha=0.05):
         sx = np.sort(x)
         return np.array(calc_min_interval(sx, alpha))
 
-class SpinOpsDict(dict):
+class spopDict(dict):
     """A dictionary of precomputed spin operators."""
     def __init__(self):
         super().__init__()
@@ -530,7 +530,14 @@ class SpinOpsDict(dict):
             return super().__getitem__(key)
 
 global spinops
-spinops = SpinOpsDict()
+spinops = spopDict()
+
+class spinGroup():
+    """Represents a group of spins: either an entire spin system, or a part of it."""
+
+    def __init__(self, meqSpins, meqLinks):
+        self.meqSpins = meqSpins
+        self.meqLinks = meqLinks
 
 def get_hamiltonian(chshQD, jcplQD, chshAsgn, jcplAsgn):
     """Computes teh Hamiltonian and the transition matrix."""
@@ -725,10 +732,14 @@ def QTransFull(chshQD, jcplQD, chshAsgn, jcplAsgn, tol=0.0001):
     H, TM = get_hamiltonian(chshQD, jcplQD, chshAsgn, jcplAsgn)
 
     # Diagonalize the Hamiltonian
-    omega, intn = QDsims(H, TM)
+    freq, intn = QDsims(H, TM)
 
     # Split the transitions according to their closest chemical shifts (return n_spin arrays)
-    omega, intn = split_arrays(omega, intn, chsh=chshQD[np.array(chshAsgn)-1])
+    freq, intn = split_arrays(freq, intn, chsh=chshQD[np.array(chshAsgn)-1])
+
+    # # Split the transitions according to their closest chemical shifts (return n_spin arrays)
+    # freq, intn = split_arrays(freq, intn, chsh=chshQD[np.array(chshAsgn)-1])
+    # peaks_by_spin = [[peakSpec(freq=f, intn=i) for f, i in zip(ff, ii)] for ff, ii in zip(freq, intn)]       # Peaks assigned to each spin
 
     # if False:
     #     # 2. Compute the matrix of states.
@@ -750,14 +761,27 @@ def QTransFull(chshQD, jcplQD, chshAsgn, jcplAsgn, tol=0.0001):
     #         freqQPeaks[i] = np.concatenate( [omega[j] for j in indx_simple ] + [omega[-1][indx_combin]] )
     #         intnQPeaks[i] = np.concatenate( [ intn[j] for j in indx_simple ] + [ intn[-1][indx_combin]] )
 
+    # # Combine the peaks into arrays corresponding to each chemical shift
+    # freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
+    # # indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
+    # for i in range(len(chshQD)):
+    #     # indx_combin = np.where(indMin == i)[0]
+    #     indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
+    #     freqQPeaks[i] = np.concatenate( [freq[j] for j in indx_simple ] )
+    #     intnQPeaks[i] = np.concatenate( [intn[j] for j in indx_simple ] )
+
+    # peaks = [[] for _ in chshQD]
+    # for i, p in zip(chshAsgn, peaks_by_spin):
+    #     peaks[i+1] += p
+
     # Combine the peaks into arrays corresponding to each chemical shift
     freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
     # indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
     for i in range(len(chshQD)):
         # indx_combin = np.where(indMin == i)[0]
         indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
-        freqQPeaks[i] = np.concatenate( [omega[j] for j in indx_simple ] )
-        intnQPeaks[i] = np.concatenate( [ intn[j] for j in indx_simple ] )
+        freqQPeaks[i] = np.concatenate( [freq[j] for j in indx_simple ] )
+        intnQPeaks[i] = np.concatenate( [intn[j] for j in indx_simple ] )
 
     return freqQPeaks, intnQPeaks
 
@@ -1242,15 +1266,17 @@ def QTransClusters(chshQD, jcplQD, chshAsgn, jcplAsgn):
     # The second level of lists corresponds to the meq spin being involved in different subgraphs within the spin system. After all subgraphs are computed, their peaks will be convolved with each other.
     freq_meq, intn_meq = [[] for _ in range(len(meqSpins))], [[] for _ in range(len(meqSpins))]
 
-    # Simulate each pair as an AmBn system
-    for edge in meqLinks:
-        p, q = edge.indxVert           # Indices fo coupled spins
-        freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
-                                jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
-        freq_meq[p].append(freq[0])
-        freq_meq[q].append(freq[1])
-        intn_meq[p].append(intn[0])
-        intn_meq[q].append(intn[1])
+    # Simulate each cluster as a separate spin system
+
+    # # Simulate each pair as an AmBn system
+    # for edge in meqLinks:
+    #     p, q = edge.indxVert           # Indices fo coupled spins
+    #     freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
+    #                             jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
+    #     freq_meq[p].append(freq[0])
+    #     freq_meq[q].append(freq[1])
+    #     intn_meq[p].append(intn[0])
+    #     intn_meq[q].append(intn[1])
 
     # Convolve the multiplets for each equivalent spin and save them in the subarray corresponding to a specific chshQD
     freqQPeaks, intnQPeaks = [[] for _ in chshQD], [[] for _ in chshQD]
@@ -2106,9 +2132,9 @@ def collectPeaks(tree, c0, pars=None):
     # 3. Collect the poles
     allPeaks = {}
     for rep in repRoots:
-        allPeaks[rep.name] = {leaf.name : [peakSpec(chsh=pole.imag/(c0*np.pi*2), intn=leaf.qPolesIntn[i]*leaf.intn, fwhm=-pole.real/np.pi) for i, pole in enumerate(leaf.uPoles)] \
+        allPeaks[rep.name] = {leaf.name : [peakSpec(freq=pole.imag/(c0*np.pi*2), intn=leaf.qPolesIntn[i]*leaf.intn, fwhm=-pole.real/np.pi) for i, pole in enumerate(leaf.uPoles)] \
                               for leaf in rep.leaves() if leaf.uPoles.size > 0}
-        #allPeaks[rep.name] = [peakSpec(chsh=pole.imag/(c0*np.pi*2), intn=leaf.qPolesIntn[i]*leaf.intn, fwhm=-pole.real/np.pi) for leaf in rep.leaves() if leaf.uPoles.size > 0 for i, pole in enumerate(leaf.uPoles)]
+        #allPeaks[rep.name] = [peakSpec(freq=pole.imag/(c0*np.pi*2), intn=leaf.qPolesIntn[i]*leaf.intn, fwhm=-pole.real/np.pi) for leaf in rep.leaves() if leaf.uPoles.size > 0 for i, pole in enumerate(leaf.uPoles)]
 
     return allPeaks
 
