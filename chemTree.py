@@ -311,24 +311,30 @@ def priorProb(parsSpec, arg=0):
 spinVert = namedtuple('spinVert', 'indxChsh, nspin')             # indxChsh - position in the chshQD array corresponding to the given vertex
 spinEdge = namedtuple('spinEdge', 'indxJcpl, indxVert')          # indxVert is a set of two MEq spin indices (indices of vertices)
 
-def asgn2meqv(chshAsgn, jcplAsgn):
+def asgn2meqv(chshAsgn, jcplAsgn=None):
     """Converts the chshAsgn format to the array of magnetically inequivalent spins."""
 
-    # Find magnetically equivalent groups (same chemical shifts and same coupling patterns)
-    jcplAsgn_full = np.array(jcplAsgn).T + jcplAsgn         # Complete double-sided J-coupling assignment matrix
-    allAsgn = np.vstack([chshAsgn, jcplAsgn_full])
-    allAsgn = [tuple(x.ravel()) for x in np.hsplit(allAsgn, allAsgn.shape[1])]       # List of tuples, s.t. each tuple contains the number of chsh and assignemts of j-couplings
-    uniqAsgn = sorted(set(allAsgn))
+    if jcplAsgn is None:
+        spins = [spinVert(indxChsh = key, nspin = chshAsgn.count(key)) for key in sorted(set(chshAsgn))]
+        links = []
 
-    spins = [spinVert(indxChsh = key[0]-1, nspin = allAsgn.count(key)) for key in uniqAsgn]
+    else:
+        # Find magnetically equivalent groups (same chemical shifts and same coupling patterns)
+        jcplAsgn_full = np.array(jcplAsgn).T + jcplAsgn         # Complete double-sided J-coupling assignment matrix
+        allAsgn = np.vstack([chshAsgn, jcplAsgn_full])
+        allAsgn = [tuple(x.ravel()) for x in np.hsplit(allAsgn, allAsgn.shape[1])]       # List of tuples, s.t. each tuple contains the number of chsh and assignemts of j-couplings
 
-    indx_meq = [allAsgn.index(key) for key in uniqAsgn]              # List of representative indices of equivalence classes of spins
+        uniqAsgn = sorted(set(allAsgn))
 
-    links = [spinEdge(jcplAsgn[i][j]-1, set([ii, jj])) for jj, j in enumerate(indx_meq) for ii, i in enumerate(indx_meq) if jcplAsgn[i][j] != 0]
+        spins = [spinVert(indxChsh = key[0]-1, nspin = allAsgn.count(key)) for key in uniqAsgn]
+
+        indx_meq = [allAsgn.index(key) for key in uniqAsgn]              # List of representative indices of equivalence classes of spins
+
+        links = [spinEdge(jcplAsgn[i][j]-1, set([ii, jj])) for jj, j in enumerate(indx_meq) for ii, i in enumerate(indx_meq) if jcplAsgn[i][j] != 0]
 
     return spins, links
 
-def meqv2asgn(spins, links):
+def meqv2asgn(spins, links=[]):
     """Converts the spin system representation as a list of magnetically non-equivalent spins to the chshAsgn representation."""
     chshAsgn = [v.indxChsh+1 for v in spins for _ in range(v.nspin)]
     n_spin = len(chshAsgn)
@@ -538,6 +544,25 @@ class spinGroup():
     def __init__(self, meqSpins, meqLinks):
         self.meqSpins = meqSpins
         self.meqLinks = meqLinks
+
+    def n_chsh(self):
+        """Number of different chemical shift parameters (the length of the chshQD array that should be upplied to the system)."""
+        return len(set([spin.indxChsh for spin in self.meqSpins]))
+
+    def n_jcpl(self):
+        """Number of different J-coupling parameters (the length of the jcplQD array that should be upplied to the system)."""
+        return len(set([spin.indxJcpl for spin in self.meqLinks]))
+
+    def get_transitions(self, chshQD, jcplQD, indx=None):
+        """Computes transition peaks given arrays of chemical shifts and J-coupling values. The calculations can be restricted to certain spins with indices indx."""
+
+        if indx is not None:
+            # Restrict the computation
+            pass
+        else:
+            pass
+
+        return freqQPeaks, intnQPeaks
 
 def get_hamiltonian(chshQD, jcplQD, chshAsgn, jcplAsgn):
     """Computes teh Hamiltonian and the transition matrix."""
@@ -1224,12 +1249,8 @@ def QTrans3X(chshQD, jcplQD, chshAsgn, jcplAsgn):
 
     return freqQPeaks, intnQPeaks
 
-def QTransPairs(chshQD, jcplQD, chshAsgn, jcplAsgn):
+def QTransPairs(chshQD, jcplQD, meqSpins, meqLinks):
     """Simulates large spin system by splitting them in pairs of coupled spins"""
-    # TODO: Use triplets and/or higher multiplets
-
-    # Determine all groups of magnetically inequivalent spins and represent them as vertices of a graph; coupling between them -- as edges.
-    meqSpins, meqLinks = asgn2meqv(chshAsgn, jcplAsgn)
 
     # Find lists of lists of np arrays of freq/intn for each meq spin.
     # The second level of lists corresponds to the meq spin being involved in different subgraphs within the spin system. After all subgraphs are computed, their peaks will be convolved with each other.
@@ -1252,6 +1273,7 @@ def QTransPairs(chshQD, jcplQD, chshAsgn, jcplAsgn):
         freqQPeaks[vert.indxChsh].extend(freq_meq[i])
         intnQPeaks[vert.indxChsh].extend(intn_meq[i])
 
+    # Convert to np arrays
     freqQPeaks, intnQPeaks = [np.array(x) for x in freqQPeaks], [np.array(x) for x in intnQPeaks]
 
     return freqQPeaks, intnQPeaks
@@ -1308,12 +1330,12 @@ def convolve_multiplets(freqs, intns, freq_offs, n_spin=None):
     return freq_out, intn_out
 
 # @ profile
-def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn):
+def compute_transitions(chshQD, jcplQD, meqSpins, meqLinks):
     """Computes the transition lines for a spin system. Outputs the lists of np arrays corresponding to the freq and intn of the computed transition peaks. the lengths of the arrays equal the number of chshQD."""
 
-    n_spin = len(chshAsgn)        # Number of spins in the system
+    n_spin = sum([spin.nspin for spin in meqSpins])        # Number of spins in the system
 
-    if len(jcplQD) == 0:
+    if len(meqLinks) == 0:
         # Case 1. All spins have the same chemical shift
         freqQPeaks, intnQPeaks = [[chshQD[0]]], [np.array([n_spin])]
 
@@ -1323,11 +1345,12 @@ def compute_transitions(chshQD, jcplQD, chshAsgn, jcplAsgn):
 
     elif n_spin < 12:     # False: #
         # Case 2. Small spin system
+        chshAsgn, jcplAsgn = meqv2asgn(meqSpins, meqLinks)
         freqQPeaks, intnQPeaks = QTransFull(chshQD, jcplQD, chshAsgn, jcplAsgn)
 
     else:
         # Case 3. Combined spin system
-        freqQPeaks, intnQPeaks = QTransPairs(chshQD, jcplQD, chshAsgn, jcplAsgn)
+        freqQPeaks, intnQPeaks = QTransPairs(chshQD, jcplQD, meqSpins, meqLinks)
 
     return freqQPeaks, intnQPeaks
 
@@ -1846,7 +1869,8 @@ class chemNodeQD(chemNode):
                                           or ( any( abs(self.oldParsQD["chsh"] - chshQD) > min(config.QD_RerunQDchshThreshold*c0, 0.5*mind_chshQD) ) \
                                                and self.jcplQD != []):
 
-            freqQPeaks, intnQPeaks = compute_transitions(chshQD, jcplQD, self.chshAsgn, self.jcplAsgn)
+            meqSpins, meqLinks = asgn2meqv(self.chshAsgn, self.jcplAsgn)
+            freqQPeaks, intnQPeaks = compute_transitions(chshQD, jcplQD, meqSpins, meqLinks)
 
             # Aggregate poles and assign them to different chemical shifts and update the corresponding child node
             for i, chld in enumerate(self.children()):
