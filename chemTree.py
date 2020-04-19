@@ -560,7 +560,7 @@ class spinGroup():
             # Restrict the computation
             pass
         else:
-            pass
+            freqQPeaks, intnQPeaks = compute_transitions(chshQD, jcplQD, self.meqSpins, self.meqLinks)
 
         return freqQPeaks, intnQPeaks
 
@@ -705,7 +705,7 @@ def QDsims(H, T, tol=0.0001):
 
     return omega, intn
 
-def QTransFull(chshQD, jcplQD, chshAsgn, jcplAsgn, tol=0.0001):
+def QTransFull(chshQD, jcplQD, meqSpins, meqLinks, tol=0.0001):
     """Use general QD simulations to compute the transition peak frequencies and intensities."""
 
     def split_arrays(omega, intn, chsh):
@@ -751,6 +751,7 @@ def QTransFull(chshQD, jcplQD, chshAsgn, jcplAsgn, tol=0.0001):
 
         return omega, intn
 
+    chshAsgn, jcplAsgn = meqv2asgn(meqSpins, meqLinks)
     n_spin = len(chshAsgn)        # Number of spins in the system
 
     # Obtain the Hamiltonian
@@ -1278,27 +1279,22 @@ def QTransPairs(chshQD, jcplQD, meqSpins, meqLinks):
 
     return freqQPeaks, intnQPeaks
 
-def QTransClusters(chshQD, jcplQD, chshAsgn, jcplAsgn):
+def QTransClusters(chshQD, jcplQD, meqSpins, meqLinks):
     """Simulates large spin system by splitting them in overlapping clusters of coupled spins"""
-
-    # Determine all groups of magnetically inequivalent spins and represent them as vertices of a graph; coupling between them -- as edges.
-    meqSpins, meqLinks = asgn2meqv(chshAsgn, jcplAsgn)
 
     # Find lists of lists of np arrays of freq/intn for each meq spin.
     # The second level of lists corresponds to the meq spin being involved in different subgraphs within the spin system. After all subgraphs are computed, their peaks will be convolved with each other.
     freq_meq, intn_meq = [[] for _ in range(len(meqSpins))], [[] for _ in range(len(meqSpins))]
 
-    # Simulate each cluster as a separate spin system
-
-    # # Simulate each pair as an AmBn system
-    # for edge in meqLinks:
-    #     p, q = edge.indxVert           # Indices fo coupled spins
-    #     freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
-    #                             jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
-    #     freq_meq[p].append(freq[0])
-    #     freq_meq[q].append(freq[1])
-    #     intn_meq[p].append(intn[0])
-    #     intn_meq[q].append(intn[1])
+    # Simulate each pair as an AmBn system
+    for edge in meqLinks:
+        p, q = edge.indxVert           # Indices fo coupled spins
+        freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
+                                jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
+        freq_meq[p].append(freq[0])
+        freq_meq[q].append(freq[1])
+        intn_meq[p].append(intn[0])
+        intn_meq[q].append(intn[1])
 
     # Convolve the multiplets for each equivalent spin and save them in the subarray corresponding to a specific chshQD
     freqQPeaks, intnQPeaks = [[] for _ in chshQD], [[] for _ in chshQD]
@@ -1307,6 +1303,7 @@ def QTransClusters(chshQD, jcplQD, chshAsgn, jcplAsgn):
         freqQPeaks[vert.indxChsh].extend(freq_meq[i])
         intnQPeaks[vert.indxChsh].extend(intn_meq[i])
 
+    # Convert to np arrays
     freqQPeaks, intnQPeaks = [np.array(x) for x in freqQPeaks], [np.array(x) for x in intnQPeaks]
 
     return freqQPeaks, intnQPeaks
@@ -1345,8 +1342,7 @@ def compute_transitions(chshQD, jcplQD, meqSpins, meqLinks):
 
     elif n_spin < 12:     # False: #
         # Case 2. Small spin system
-        chshAsgn, jcplAsgn = meqv2asgn(meqSpins, meqLinks)
-        freqQPeaks, intnQPeaks = QTransFull(chshQD, jcplQD, chshAsgn, jcplAsgn)
+        freqQPeaks, intnQPeaks = QTransFull(chshQD, jcplQD, meqSpins, meqLinks)
 
     else:
         # Case 3. Combined spin system
@@ -1802,16 +1798,10 @@ class chemNodeQD(chemNode):
         self.jcplQD = spsy.jcpl
         self.intn = spsy.mult
         self.alphQD = alphQD if alphQD is not None else [parsSpec(min=-5.0, max=25.0, label=c.label, dval=0) for c in self.chshQD]
-        self.chshAsgn = spsy.chshAsgn
-        self.jcplAsgn = spsy.jcplAsgn
+        self.spinTopo = spinGroup(*asgn2meqv(spsy.chshAsgn, spsy.jcplAsgn))
         self.oldParsQD = {"chsh":None, "jcpl":None}
         self.qPoles = [None]*len(self.chshQD)                # QD poles excluding the effects of line-broadedning although including any linebroadening due to peak aggregation
         self.qPolesIntn = [None]*len(self.chshQD)
-
-        # Create spin operators
-        """# Assign chemical shifts and j coupling values to spins in the system
-        freqSpin = [chshQD[i-1] for i in self.chshAsgn]       # Frequencies of each spin after assignment
-        jcplSpin = [[jcplQD[i-1] if i>0 else 0 for i in self.jcplAsgn[j]] for j in range(len(self.jcplAsgn))] if len(jcplQD)>0 else None"""
 
     def addChild(self, child):
         """Add a terminal node and keep the value of its chemical shift."""
@@ -1869,8 +1859,7 @@ class chemNodeQD(chemNode):
                                           or ( any( abs(self.oldParsQD["chsh"] - chshQD) > min(config.QD_RerunQDchshThreshold*c0, 0.5*mind_chshQD) ) \
                                                and self.jcplQD != []):
 
-            meqSpins, meqLinks = asgn2meqv(self.chshAsgn, self.jcplAsgn)
-            freqQPeaks, intnQPeaks = compute_transitions(chshQD, jcplQD, meqSpins, meqLinks)
+            freqQPeaks, intnQPeaks = self.spinTopo.get_transitions(chshQD, jcplQD)
 
             # Aggregate poles and assign them to different chemical shifts and update the corresponding child node
             for i, chld in enumerate(self.children()):
