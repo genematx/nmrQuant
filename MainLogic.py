@@ -705,10 +705,11 @@ class Workspace():
         T = packed['T']
         if T is not None:
             T.setTreeBook()
-        # Make sure that each node in the tree has an ampl and a phase attributes
+        # Compatibility check: Make sure that each node in the tree has an ampl and a phase attributes
         for node in T.items():
             if not hasattr(node, 'ampl'): node.ampl = [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=1.0)]
             if not hasattr(node, 'phase'): node.phase = [parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)]
+            if isinstance(node, chemNodeQD) and not hasattr(node, 'spinTopo'): node.spinTopo = spinGroup(*asgn2meqv(node.chshAsgn, node.jcplAsgn))
         #self.repRootNames = [node.name for node in self.T.repRoots()]    # Need to set the repRootNames before to refer to them later in the _updateParameters function
         self.setTree(T, packed['parsSpecDict'])
         for ser in packed['series']:
@@ -2758,6 +2759,7 @@ class Datum():
             ax_main.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
 
         # Plot optimization limits
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
         if showRanges:
             for i, blk in enumerate(self.freqBlocks):
                 if showRanges == 'all':
