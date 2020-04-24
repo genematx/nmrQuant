@@ -2759,6 +2759,7 @@ class Datum():
             ax_main.set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
 
         # Plot optimization limits
+        dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
         if showRanges:
             for i, blk in enumerate(self.freqBlocks):
                 if showRanges == 'all':

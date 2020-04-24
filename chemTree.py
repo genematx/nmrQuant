@@ -83,19 +83,40 @@ class OrderedSet(collections.MutableSet):
 class chemSpec:
     """Class for database entires."""
 
-    def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, Mw=None, **kwargs):
+    def __init__(self, name='', chshH=None, chshC=None, nSpinH=None, jcplHH=None, pairHH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, meqSpins=None, meqLinks=None, Mw=None, **kwargs):
         self.name = name
         self.chshH = chshH if chshH is not None else []       # List of chshH parsSpec's
         self.chshC = chshC if chshC is not None else []
-        self.nSpinH = nSpinH if nSpinH is not None else [1]*len(self.chshH)    # List of int 1..3 indicating the number of spins for each chshH
         self.jcplHH = jcplHH if jcplHH is not None else []    # List of jcplHH parsSpec's
-        self.pairHH = pairHH if pairHH is not None else [None]*len(self.jcplHH)     # List of tuples; each tuple contains indices of coupled protons
 
-        # Find multiplicities for different spin systems
-        self._spsyAsgnH, self._nSpsyH = [], 0   # list of size 1 x nSpinH; each entry is the index of spin system to which this proton is assigned
-        self.assignSpsy()      # Compute assignment of spins to spin systems
-        self.multH = multH if multH is not None or [] else [1]*self._nSpsyH       # Multiplicities of different spin systems (uncoupled, but with the same chemical shifts)
-        self.multC = multC if multC is not None or [] else [1]*len(self.chshC)
+        if meqSpins is None:
+            # Old format
+            self.nSpinH = nSpinH if nSpinH is not None else [1]*len(self.chshH)    # List of int 1..3 indicating the number of spins for each chshH
+            self.pairHH = pairHH if pairHH is not None else [None]*len(self.jcplHH)     # List of tuples; each tuple contains indices of coupled protons
+
+            # Find multiplicities for different spin systems
+            self._spsyAsgnH, self._nSpsyH = [], 0   # list of size 1 x nSpinH; each entry is the index of spin system to which this proton is assigned
+            self.assignSpsy()      # Compute assignment of spins to spin systems
+            self.multH = multH if multH is not None or [] else [1]*self._nSpsyH       # Multiplicities of different spin systems (uncoupled, but with the same chemical shifts)
+            self.multC = multC if multC is not None or [] else [1]*len(self.chshC)
+
+
+            self.meqSpins = None #[spinVert(indx, n_spin) for indx, n_spin in enumerate(self.nSpinH)]
+            self.meqLinks = None #[spinEdge(indx, (pair[0], pair[1])) for indx, pair in enumerate(self.pairHH)] if pairHH is not None else []
+
+        else:
+            # New format
+            self.meqSpins = meqSpins
+            self.meqLinks = meqLinks if meqLinks is not None else []
+
+
+            # Old format
+            self.nSpinH = [1]*len(self.chshH)    # List of int 1..3 indicating the number of spins for each chshH
+            self.pairHH = [None]*len(self.jcplHH)     # List of tuples; each tuple contains indices of coupled protons
+            self._spsyAsgnH = []   # list of size 1 x nSpinH; each entry is the index of spin system to which this proton is assigned
+            self._nSpsyH = 1
+            self.multH = [1]*self._nSpsyH       # Multiplicities of different spin systems (uncoupled, but with the same chemical shifts)
+            self.multC = [1]*len(self.chshC)
 
         self.Mw = Mw                                                            # Molar weight
 
@@ -192,39 +213,52 @@ class chemSpec:
 
     def getSpSy(self, mode='1H'):
         """Returns a list of spin systems."""
-        if mode == '1H':
-            chsh = self.chshH
-            jcpl = self.jcplHH
-            pair = self.pairHH
-            nSpin = self.nSpinH         # Number of spins
-            mult = self.multH           # Number of spin systems
-        elif mode == '13C':
-            chsh = self.chshC
-            jcpl = []
-            pair = []
-            nSpin = [1]*len(chsh)
-            mult = self.multC
+        if self.meqSpins is None:
+            # Old format
 
-        # Create an assignment matrix for chsh
-        chshAsgn = []
-        for i, n in enumerate(nSpin):
-            chshAsgn.extend([i+1]*n)
+            if mode == '1H':
+                chsh = self.chshH
+                jcpl = self.jcplHH
+                pair = self.pairHH
+                nSpin = self.nSpinH         # Number of spins
+                mult = self.multH           # Number of spin systems
+            elif mode == '13C':
+                chsh = self.chshC
+                jcpl = []
+                pair = []
+                nSpin = [1]*len(chsh)
+                mult = self.multC
 
-        # Create an assignment matrix for jcpl
-        if mode == '1H':
-            jcplAsgn = np.zeros((len(chshAsgn), len(chshAsgn)), 'int32')
-            for row in range(len(jcpl)):
-                if pair[row][1] < pair[row][0]: pair[row].reverse()      # Make sure the order of the chemical shifts is right
-                for i, m in enumerate(chshAsgn):
-                    for j, n in enumerate(chshAsgn):
-                        if pair[row][0] == m-1 and pair[row][1] == n-1 and j > i:
-                            if (pair[row][-1] == 'skip_odd' and (i+j)%2==0) or (pair[row][-1] == 'skip_even' and (i+j)%2==1): continue      # Skip the para-hydrogens
-                            jcplAsgn[i][j] = row+1
+            # Create an assignment matrix for chsh
+            chshAsgn = []
+            for i, n in enumerate(nSpin):
+                chshAsgn.extend([i+1]*n)
+
+            # Create an assignment matrix for jcpl
+            if mode == '1H':
+                jcplAsgn = np.zeros((len(chshAsgn), len(chshAsgn)), 'int32')
+                for row in range(len(jcpl)):
+                    if pair[row][1] < pair[row][0]: pair[row].reverse()      # Make sure the order of the chemical shifts is right
+                    for i, m in enumerate(chshAsgn):
+                        for j, n in enumerate(chshAsgn):
+                            if pair[row][0] == m-1 and pair[row][1] == n-1 and j > i:
+                                if (pair[row][-1] == 'skip_odd' and (i+j)%2==0) or (pair[row][-1] == 'skip_even' and (i+j)%2==1): continue      # Skip the para-hydrogens
+                                jcplAsgn[i][j] = row+1
+
+            else:
+                jcplAsgn = None
+
+            spsyBig = spsySpec(chsh, jcpl, chshAsgn, jcplAsgn)
 
         else:
-            jcplAsgn = None
+            # New format
+            print('Creating a spin system using a new format.')
+            spsyBig = spsySpec(self.chshH, self.jcplHH, *meqv2asgn(self.meqSpins, self.meqLinks))
 
-        spsyBig = spsySpec(chsh, jcpl, chshAsgn, jcplAsgn)
+            # TODO: Check spin system multiplicities
+            mult = [1]
+
+        # Split the big spin system
         spsyAll = splitSpSy(spsyBig)
         for i, m in enumerate(mult):
             spsyAll[i] = spsyAll[i]._replace(mult=spsyAll[i].mult * m)
@@ -240,7 +274,9 @@ class chemSpec:
                 'multH': self.multH,
                 'multC': self.multC,
                 'jcplHH': self.jcplHH,
-                'pairHH': self.pairHH}
+                'pairHH': self.pairHH,
+                'meqSpins': self.meqSpins,
+                'meqLinks': self.meqLinks}
 
 parsSpec = namedtuple('parsSpec', 'min, max, label, distr, p1, p2, dval')
 parsSpec.__new__.__defaults__ = (-np.inf, np.inf, '', 'Uniform', None, None, None)     # 'mode' specifies the location of the distribution maximum value
@@ -2246,6 +2282,12 @@ def readChemDB(fname='chemDB.json'):
             return dict()
 
         for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
+            if 'meqSpins' in v.keys() and v['meqSpins'] is not None:
+                for i in range(len(v['meqSpins'])):
+                    v['meqSpins'][i] = spinVert(v['meqSpins'][i][0], v['meqSpins'][i][1])
+            if 'meqLinks' in v.keys() and v['meqLinks'] is not None:
+                for i in range(len(v['meqLinks'])):
+                    v['meqLinks'][i] = spinEdge(v['meqLinks'][i][0], set(v['meqLinks'][i][1]))
             for kk in ['chshH', 'chshC', 'jcplHH']:
                 v[kk] = array2parsSpec(v[kk])
             for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
@@ -2268,12 +2310,19 @@ def readChemDB(fname='chemDB.json'):
 
 def writeChemDB(chemDB, fname='result.json'):
     """Writes the chemDB in JSON format and stores it file name"""
+    print('Saving the chemDB database into file {:s}'.format(fname))
     root, ext = os.path.splitext(fname)
 
     if ext == '.json':
         # Save in JSON format
         chemDB = {k:v.asdict() for k,v in chemDB.items()}   # Convert namedtuples to dictionaries
         for k, v in chemDB.items():                   # Convert 2D arays of ranges to the namedtuple representation
+            # if kk == 'meqSpins':
+            #     for i in range(len(v[kk])):
+            #         v[kk][i] = spinVert(v[kk][i][0], v[kk][i][1])
+            # if kk == 'meqLinks':
+            #     for i in range(len(v[kk])):
+            #         v[kk][i] = spinEdge(v[kk][i][0], v[kk][i][1], v[kk][i][2])
             for kk in ['chshH', 'chshC', 'jcplHH']:
                 v[kk] = array2parsSpec(v[kk])
             for kk in ['nSpinH', 'multH', 'multC']:      # Make sure that all single numbers are stored within arrays
@@ -2333,9 +2382,9 @@ def loadChemLibrary(path=None):
         if os.path.isfile(fullpath):
             fname, ext = os.path.splitext(entry)
             if ext in ['.json', '.cdb']:
-                try:
-                    chemLib[fname] = readChemDB(fullpath)
-                except UnpicklingError: pass
+#                try:
+                chemLib[fname] = readChemDB(fullpath)
+#                except UnpicklingError: pass
 
     return chemLib
 

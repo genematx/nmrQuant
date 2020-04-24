@@ -507,11 +507,15 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         updateViews()
         p0.vb.sigResized.connect(updateViews)
 
-
         # self.layout().setSpacing(0.)
         self.setContentsMargins(0., 0., 0., 0.)
 
         self.ci.layout.setRowStretchFactor(0, 10)
+
+        # ----------- Phasing pivot -------------
+        self._phasingPivot = pg.InfiniteLine(pos=0.0, movable=True, pen=pg.mkPen(color=(0,0,255), width=3.0),
+                                             label='Phasing pivot', labelOpts={'angle':90, 'position':0.9, 'anchors':[(0.5, 0), (0.5, 1)] })
+        # self._phasingPivot.addMarker('<|>', position=0.5, size=10.0)
 
         # -------------- Crosshair --------------
         self._crossLines = {'v0' : pg.InfiniteLine(angle=90, movable=False),
@@ -646,7 +650,14 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
                     self._stems[key].sigStemsDragged.connect(lambda key, delta : self.sigStemsDragged.emit(key, delta))
                     self.p0r.addItem( self._stems[key] )
 
+        # Show the phasing pivot
+        p0.addItem(self._phasingPivot)
+
         self.updatePlot()
+
+    def replot_yF(self, yF):
+        """A slot to be called when the spectrum is being phased. Updates the original spectrum yF."""
+        self._yF.setData(y=yF)
 
     def _add_lr(self, lims, active=True):
         """Adds a linear region to show a frequency block with certain range."""
@@ -3490,7 +3501,7 @@ class PhasingWidget(QWidget):
 
         self.p0deg = 0.0     # Phasing parameters in degrees
         self.p1deg = 0.0
-        self.pivot = 0.0     # Pivot point for phasing, float in the range (0.0, 1.0)
+        self.pivot = 0.5     # Pivot point for phasing, float in the range (0.0, 1.0)
 
         self.sliderPh0, self.sliderPh1 = QSlider(), QSlider()
         self.sliderPh0.setMinimumHeight(120)
@@ -3537,6 +3548,10 @@ class PhasingWidget(QWidget):
         #self.resize(50, 200)
         self.setLayout(layout)
 
+    def setData(self, yF, xF):
+        self.yF = yF
+        self.xF = xF
+
     def setNewDatum(self, datum):
         self.datum = datum
         self.reset()
@@ -3545,6 +3560,7 @@ class PhasingWidget(QWidget):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph0_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
         self.p0deg = ph0_rel * 180.0
+        self.phased.emit(self.p0deg, self.p1deg)
 
         # self.plot()
 
