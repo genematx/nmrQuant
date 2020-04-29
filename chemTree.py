@@ -213,7 +213,7 @@ class chemSpec:
 
     def getSpSy(self, mode='1H'):
         """Returns a list of spin systems."""
-        if self.meqSpins is None:
+        if self.meqSpins is None or mode=='13C':
             # Old format
 
             if mode == '1H':
