@@ -3492,7 +3492,7 @@ class PhasingWidget(QWidget):
         super().__init__(parent)
         self.p0deg = 0.0     # Phasing parameters in degrees
         self.p1deg = 0.0
-        self.pivot = 0.0     # Pivot point for phasing, float in the range (0.0, 1.0)
+        self.pivot = 0.5     # Pivot point for phasing, float in the range (0.0, 1.0)
 
         self.sliderPh0, self.sliderPh1 = QSlider(), QSlider()
         self.sliderPh0.setRange(self.RANGE_MIN, self.RANGE_MAX)
