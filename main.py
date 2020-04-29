@@ -3579,7 +3579,7 @@ class PhasingWidget(QWidget):
     def onPh1SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph1_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
-        p1deg_new = ph1_rel * 180.0
+        p1deg_new = ph1_rel * 90.0
 
         if self.pivot != 0.0:
             self.sliderPh0.blockSignals(True)
