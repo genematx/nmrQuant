@@ -1479,7 +1479,7 @@ class Datum():
         return self._flagAdapFreq
 
     def resetSignals(self, flagAdapFreq=None):
-        self._f = None
+        self._f = None         # Subsampled frequency array from the Series level that overwrites it for the specific Datum
         self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
         self.zF = None        # A matrix of component signals
         self.bF = None        # A baseline
@@ -1542,6 +1542,11 @@ class Datum():
         chshFrom = self.f[np.argmax(np.abs(self.yF))]
         df = (chshTo - chshFrom)*self.c0
         self.yT *= np.exp(2*np.pi*1j*df*self.t)
+        self.resetSignals()
+
+    def flipSpectrum(self):
+        """Reverses the spectrum."""
+        self.yT = self.yT.conj()
         self.resetSignals()
 
     def fittableParsKeys(self, frqBlkIds=None, inRange=None, customPriors=None, node_name=None, considerRange=False):
@@ -2227,29 +2232,9 @@ class Datum():
 
     def auto_phase(self):
         """Run the autophasing algorithm."""
-
-        def deg2tau(dt, nf, p0deg, p1deg):
-            """Converts the phasing parameters from degrees to their tau and theta representations."""
-            fmin, fmax = flims(dt, nf)
-            df = (fmax-fmin)/(nf-1)     # The same as f[1]-f[0]
-
-            theta = np.asscalar( p0deg - p1deg*fmin/df/nf )*np.pi/180.0
-            tau = np.asscalar( p1deg / df / 360. / nf )
-
-            return theta, tau
-
-        def tau2deg(dt, nf, theta, tau):
-            """Converts from theta/tau representation to phase angles in degrees."""
-            _, fmax = flims(dt, nf)
-
-            p0deg = theta * 180.0 / np.pi
-            p1deg = tau*fmax*360.
-
-            return p0deg, p1deg
-
         # Get the spectrum (or compute it if the signal is too long and adaptive FFT has been used)
         dt = self.t[1]-self.t[0]
-        if self._f is None or len(self.yF) > 2**14:
+        if self._f is None or len(self.yF) < 2**14:
             yF = self.yF
             nf = len(yF)
         else:
@@ -2903,6 +2888,25 @@ class Datum():
                 'nF_opti' : sum( [len(self._get_indxFreq(i)) for i in self.steps[-1].frqBlkIds] )}   # Find the number of points in the active optimization ranges
 
 #### Utility functions #####
+
+def deg2tau(dt, nf, p0deg, p1deg):
+    """Converts the phasing parameters from degrees to their tau and theta representations."""
+    fmin, fmax = flims(dt, nf)
+    df = (fmax-fmin)/(nf-1)     # The same as f[1]-f[0]
+
+    theta = np.asscalar( p0deg - p1deg*fmin/df/nf )*np.pi/180.0
+    tau = np.asscalar( p1deg / df / 360. / nf )
+
+    return theta, tau
+
+def tau2deg(dt, nf, theta, tau):
+    """Converts from theta/tau representation to phase angles in degrees."""
+    _, fmax = flims(dt, nf)
+
+    p0deg = theta * 180.0 / np.pi
+    p1deg = tau*fmax*360.
+
+    return p0deg, p1deg
 
 def gmm_pdf(x, m, S, w=None):
     """Returns an analytical fucntion for a mixture of Gaussians (nd<=2)

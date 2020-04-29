@@ -71,8 +71,30 @@
     2,
     1
   ],
-  "chshC": [],
-  "multC": [],
+  "chshC": [
+    [
+      63.1,
+      63.3,
+      "C1,3",
+      "Uniform",
+      null,
+      null,
+      63.21
+    ],
+    [
+      72.75,
+      72.95,
+      "C2",
+      "Uniform",
+      null,
+      null,
+      72.84
+    ]
+  ],
+  "multC": [
+    2,
+    1
+  ],
   "name": "Glycerol",
   "multH": [
     1
@@ -220,8 +242,60 @@
     1,
     3
   ],
-  "chshC": [],
-  "multC": [],
+  "chshC": [
+    [
+      63.0,
+      63.2,
+      "C1",
+      "Uniform",
+      null,
+      null,
+      63.11
+    ],
+    [
+      70.3,
+      70.5,
+      "C2",
+      "Uniform",
+      null,
+      null,
+      70.41
+    ],
+    [
+      65.5,
+      65.7,
+      "C3",
+      "Uniform",
+      null,
+      null,
+      65.57
+    ],
+    [
+      172.8,
+      173.0,
+      "C_Ace (C=O)",
+      "Uniform",
+      null,
+      null,
+      172.94
+    ],
+    [
+      20.2,
+      20.4,
+      "C_Ace (CH3)",
+      "Uniform",
+      null,
+      null,
+      20.30
+    ]
+  ],
+  "multC": [
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
   "name": "Glycerol_Acetate-1",
   "multH": [
     1
@@ -426,8 +500,50 @@
     1,
     3
   ],
-  "chshC": [],
-  "multC": [],
+  "chshC": [
+    [
+      60.8,
+      61.0,
+      "C1,3",
+      "Uniform",
+      null,
+      null,
+      60.92
+    ],
+    [
+      75.35,
+      75.55,
+      "C2",
+      "Uniform",
+      null,
+      null,
+      75.44
+    ],
+    [
+      172.7,
+      172.9,
+      "C_Ace (C=O)",
+      "Uniform",
+      null,
+      null,
+      172.78
+    ],
+    [
+      20.6,
+      20.7,
+      "C_Ace (CH3)",
+      "Uniform",
+      null,
+      null,
+      20.62
+    ]
+  ],
+  "multC": [
+    2,
+    1,
+    2,
+    2
+  ],
   "name": "Glycerol_Acetate-2",
   "multH": [
     1
@@ -592,8 +708,80 @@
     3,
     3
   ],
-  "chshC": [],
-  "multC": [],
+  "chshC": [
+    [
+      60.65,
+      60.85,
+      "C1",
+      "Uniform",
+      null,
+      null,
+      60.76
+    ],
+    [
+      72.55,
+      72.75,
+      "C2",
+      "Uniform",
+      null,
+      null,
+      72.66
+    ],
+    [
+      62.95,
+      63.15,
+      "C3",
+      "Uniform",
+      null,
+      null,
+      63.05
+    ],
+    [
+      172.2,
+      172.4,
+      "C_Ace-1 (C=O)",
+      "Uniform",
+      null,
+      null,
+      172.31
+    ],
+    [
+      172.45,
+      172.65,
+      "C_Ace-2 (C=O)",
+      "Uniform",
+      null,
+      null,
+      172.54
+    ],
+    [
+      20.1,
+      20.3,
+      "C_Ace-1 (CH3)",
+      "Uniform",
+      null,
+      null,
+      20.19
+    ],
+    [
+      20.4,
+      20.6,
+      "C_Ace-2 (CH3)",
+      "Uniform",
+      null,
+      null,
+      20.49
+    ]
+  ],
+  "multC": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
   "name": "Glycerol_Acetate-1,2",
   "multH": [
     1
@@ -812,8 +1000,50 @@
     3,
     3
   ],
-  "chshC": [],
-  "multC": [],
+  "chshC": [
+    [
+      65.05,
+      65.25,
+      "C1,3",
+      "Uniform",
+      null,
+      null,
+      65.14
+    ],
+    [
+      67.8,
+      68.0,
+      "C2",
+      "Uniform",
+      null,
+      null,
+      67.91
+    ],
+    [
+      172.65,
+      172.85,
+      "C_Ace (C=O)",
+      "Uniform",
+      null,
+      null,
+      172.74
+    ],
+    [
+      20.15,
+      20.35,
+      "C_Ace (CH3)",
+      "Uniform",
+      null,
+      null,
+      20.27
+    ]
+  ],
+  "multC": [
+    2,
+    1,
+    2,
+    2
+  ],
   "name": "Glycerol_Acetate-1,3",
   "multH": [
     1
@@ -980,8 +1210,70 @@
     3,
     3
   ],
-  "chshC": [],
-  "multC": [],
+  "chshC": [
+    [
+      62.75,
+      62.95,
+      "C1,3",
+      "Uniform",
+      null,
+      null,
+      62.83
+    ],
+    [
+      69.75,
+      69.95,
+      "C2",
+      "Uniform",
+      null,
+      null,
+      69.85
+    ],
+    [
+      172.2,
+      172.4,
+      "C_Ace-1,3 (C=O)",
+      "Uniform",
+      null,
+      null,
+      172.31
+    ],
+    [
+      171.75,
+      171.95,
+      "C_Ace-2 (C=O)",
+      "Uniform",
+      null,
+      null,
+      171.83
+    ],
+    [
+      20.25,
+      20.45,
+      "C_Ace-1,3 (CH3)",
+      "Uniform",
+      null,
+      null,
+      20.35
+    ],
+    [
+      20.05,
+      20.25,
+      "C_Ace-2 (CH3)",
+      "Uniform",
+      null,
+      null,
+      20.14
+    ]
+  ],
+  "multC": [
+    2,
+    1,
+    2,
+    1,
+    2,
+    1
+  ],
   "name": "Glycerol_Acetate-1,2,3",
   "multH": [
     1

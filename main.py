@@ -8,7 +8,7 @@ import config
 
 from PyQt4 import QtGui, QtCore, uic
 from PyQt4.QtGui import QAction, QActionGroup, QApplication, QBrush, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QIcon, QInputDialog, QItemSelectionModel, QItemDelegate, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QMainWindow, QPalette, QPen, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget, QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
-from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread
+from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
 from matplotlib import rc, rcParams, gridspec
@@ -452,6 +452,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
     sigMouseClicked = pyqtSignal(object)               # Returns the position where the click has occured in the main view (x value is in ppm)
     sigStemsClicked = pyqtSignal(object)
     sigStemsDragged = pyqtSignal(object, float)
+    sigPivotDragged = pyqtSignal(float)
 
     def __init__(self, parent=None, title=None):
         super().__init__(parent)
@@ -516,6 +517,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self._phasingPivot = pg.InfiniteLine(pos=0.0, movable=True, pen=pg.mkPen(color=(0,0,255), width=3.0),
                                              label='Phasing pivot', labelOpts={'angle':90, 'position':0.9, 'anchors':[(0.5, 0), (0.5, 1)] })
         # self._phasingPivot.addMarker('<|>', position=0.5, size=10.0)
+        self._phasingPivot.sigPositionChangeFinished.connect(self.onPivotDragged)
 
         # -------------- Crosshair --------------
         self._crossLines = {'v0' : pg.InfiniteLine(angle=90, movable=False),
@@ -634,7 +636,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             if indx_colr is None: indx_colr = list(range(len(stems)))
             for i, st in enumerate(stems):
                 # Loop over the reported nodes
-                scale = np.concatenate([np.array(val[2]) for _, val in st.items()]).max()    # To scale the inensities
+                scale = np.concatenate([np.array(val[2]) for _, val in st.items()]).max()    # To scale the intensities
                 for key, val in st.items():
                     chsh_origin = val[0]
                     chsh_stems=np.array(val[1])
@@ -651,13 +653,18 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
                     self.p0r.addItem( self._stems[key] )
 
         # Show the phasing pivot
+        pos = self._phasingPivot.getXPos()
+        if pos > max(f) or pos < min(f):
+            pos = (max(f) + min(f))/2
+            self._phasingPivot.setPos(pos)
+            self.sigPivotDragged.emit(pos)     # Notify that the pivot has changed
         p0.addItem(self._phasingPivot)
 
         self.updatePlot()
 
     def replot_yF(self, yF):
         """A slot to be called when the spectrum is being phased. Updates the original spectrum yF."""
-        self._yF.setData(y=yF)
+        self._yF.setData(x=self._yF.xData, y=yF.ravel().real)
 
     def _add_lr(self, lims, active=True):
         """Adds a linear region to show a frequency block with certain range."""
@@ -839,6 +846,10 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             self.getItem(0,0).scene().sigMouseMoved.disconnect()
             for key, val in self._crossLines.items():
                 val.hide()
+
+    def onPivotDragged(self, pivot):
+        """Called when the pivot is being dragged."""
+        self.sigPivotDragged.emit(pivot.p[0])      # Returns the position along the x axis
 
     def showResidual(self, flag=True):
         if flag:
@@ -3473,39 +3484,17 @@ class PhasingWidget(QWidget):
 
     RANGE_MAX = 64
     RANGE_MIN = -64
-    phased = pyqtSignal(float, float)        # Emmited when phasing is completed; outputs the values of ph0 and ph1 in degrees
-
-    def deg2tau(self, p0deg, p1deg):
-        """Converts the phasing parameters from degrees to their tau and theta representations."""
-        f_Hz = self.datum.f*self.datum.c0 - self.datum.f0
-
-        theta = np.asscalar(p0deg*np.pi/180.0 - p1deg*np.pi/180.0*(f_Hz[0])/(f_Hz[1]-f_Hz[0])/len(f_Hz))
-        tau = np.asscalar( p1deg / (f_Hz[1]-f_Hz[0]) / 360. / len(f_Hz) )
-        return theta, tau
-
-    def tau2deg(self, theta, tau):
-        """Converts from theta/tau representation to phase angles in degrees."""
-        f_Hz = self.datum.f*self.datum.c0 - self.datum.f0
-
-        return p0deg, p1deg
+    sigPhasingProgress = pyqtSignal(object)
+    sigPhasingComplete = pyqtSignal(float, float)          # Emmited when phasing is completed; outputs the values of ph0 and ph1 in degrees
 
     def __init__(self, orientation='Vertical', parent=None):
 
         super().__init__(parent)
-
-        #print(self.__dict__)
-        #self.sliderPh0 = self.ui.findChild(QtGui.QSlider, "sliderPh0")
-        # self.datum = datum
-        # self.canvas = canvas
-        # self.ax = self.canvas.figure.get_axes()
-
         self.p0deg = 0.0     # Phasing parameters in degrees
         self.p1deg = 0.0
-        self.pivot = 0.5     # Pivot point for phasing, float in the range (0.0, 1.0)
+        self.pivot = 0.0     # Pivot point for phasing, float in the range (0.0, 1.0)
 
         self.sliderPh0, self.sliderPh1 = QSlider(), QSlider()
-        self.sliderPh0.setMinimumHeight(120)
-        self.sliderPh1.setMinimumHeight(120)
         self.sliderPh0.setRange(self.RANGE_MIN, self.RANGE_MAX)
         self.sliderPh1.setRange(self.RANGE_MIN, self.RANGE_MAX)
         self.sliderPh0.setValue(0)
@@ -3514,17 +3503,16 @@ class PhasingWidget(QWidget):
         self.sliderPh1.valueChanged.connect(self.onPh1SliderChanged)
         self.sliderPh0.sliderReleased.connect(self.phasingComplete)
         self.sliderPh1.sliderReleased.connect(self.phasingComplete)
-        # self.sliderPh0.sliderPressed.connect(self.startPlotting)
-        # self.sliderPh1.sliderPressed.connect(self.startPlotting)
         self.bttnSetPivot = QPushButton('Pivot')
-        self.bttnSetPivot.clicked.connect(self.setPivot)
         self.bttnAutoPhase = QPushButton('Auto')
-        self.bttnAutoPhase.clicked.connect(self.autoPhase)
+#        self.bttnAutoPhase.clicked.connect(self.autoPhase)
         layout = QGridLayout()
         if orientation == 'Vertical':
             layout.setVerticalSpacing(0)
             self.sliderPh0.setOrientation(Qt.Vertical)
             self.sliderPh1.setOrientation(Qt.Vertical)
+            self.sliderPh0.setMinimumHeight(120)
+            self.sliderPh1.setMinimumHeight(120)
             layout.addWidget(QLabel("Phasing"), 0, 0, 1, 2, Qt.AlignCenter|Qt.AlignTop)
             layout.addWidget(QLabel("ph0"), 1, 0, Qt.AlignCenter|Qt.AlignTop)
             layout.addWidget(QLabel("ph1"), 1, 1, Qt.AlignCenter|Qt.AlignTop)
@@ -3533,41 +3521,66 @@ class PhasingWidget(QWidget):
             #layout.addWidget(self.bttnSetPivot, 3, 0, 1, 2, Qt.AlignCenter)
             layout.addWidget(self.bttnAutoPhase, 4, 0, 1, 2, Qt.AlignCenter)
             self.setMaximumWidth(80)
+            self.setMaximumHeight(250)
         else:
             self.sliderPh0.setOrientation(Qt.Horizontal)
             self.sliderPh1.setOrientation(Qt.Horizontal)
+            self.sliderPh0.setMinimumWidth(120)
+            self.sliderPh1.setMinimumWidth(120)
             layout.addWidget(QLabel("Phasing"), 0, 0, 1, 2, Qt.AlignCenter|Qt.AlignTop)
             layout.addWidget(QLabel("ph0"), 1, 0, Qt.AlignCenter)
             layout.addWidget(QLabel("ph1"), 2, 0, Qt.AlignCenter)
             layout.addWidget(self.sliderPh0, 1, 1, Qt.AlignCenter)
             layout.addWidget(self.sliderPh1, 2, 1,  Qt.AlignCenter)
-            layout.addWidget(self.bttnSetPivot, 2, 2, Qt.AlignCenter)
-            layout.addWidget(self.bttnAutoPhase, 1, 2, Qt.AlignCenter)
+            # layout.addWidget(self.bttnSetPivot, 2, 2, Qt.AlignCenter)
+            # layout.addWidget(self.bttnAutoPhase, 1, 2, Qt.AlignCenter)
+            self.setMaximumHeight(100)
 
-        self.setMaximumHeight(250)
-        #self.resize(50, 200)
+        # Set event filters on the sliders to disallow scrolling with the mouse wheel
+        class scrollEventFilter(QObject):
+
+            def __init__(self, parent=None):
+                super().__init__(parent)
+
+            def eventFilter(self, source, event):
+                if event.type() == QEvent.Wheel:
+                    return True    # True will not propagate the event to the source widget
+
+                return super().eventFilter(source, event)
+
+        self.scrollEventFilterInstance = scrollEventFilter()
+        self.sliderPh0.installEventFilter(self.scrollEventFilterInstance)
+        self.sliderPh1.installEventFilter(self.scrollEventFilterInstance)
+
         self.setLayout(layout)
 
-    def setData(self, yF, xF):
+    def setData(self, f, yF, xF, freqBlocks, frange=None, pivot=None):
+        """freBlocks is a list of tuples (min, max, bool), where the last position indicates whether the range is active (fitted) or not."""
         self.yF = yF
         self.xF = xF
+        self._frange = (min(f), max(f)) if frange is None else frange
+        self.f_norm = (f - self._frange[0]) / (self._frange[1] - self._frange[0])    # Frequency scale normalized to [0, 1]
 
-    def setNewDatum(self, datum):
-        self.datum = datum
-        self.reset()
+        if pivot is not None:
+            self.setPivot(pivot)
+
+    def setPivot(self, val):
+        """Sets a pivoting point for phase correction."""
+        self.pivot = np.asscalar( (val - self._frange[0]) / (self._frange[1] - self._frange[0]) )
 
     def onPh0SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph0_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
-        self.p0deg = ph0_rel * 180.0
-        self.phased.emit(self.p0deg, self.p1deg)
+        self.p0deg = ph0_rel * 45.0
 
-        # self.plot()
+        yFph = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
+        self.sigPhasingProgress.emit(yFph)
 
     def onPh1SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph1_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
         p1deg_new = ph1_rel * 180.0
+
         if self.pivot != 0.0:
             self.sliderPh0.blockSignals(True)
             self.p0deg += self.pivot*(self.p1deg - p1deg_new)     # find the new ph0 value given the current non-zero pivoting point
@@ -3576,94 +3589,61 @@ class PhasingWidget(QWidget):
             self.sliderPh0.blockSignals(False)
         self.p1deg = p1deg_new
 
-        # self.plot()
+        yFph = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
+        self.sigPhasingProgress.emit(yFph)
 
-    def setPivot(self):
-        """Sets a pivoting point for phase correction."""
-        self.pivot = 0.5
+    # def reset(self):
+    #     """Resets the sliders to display the phasing parameters for the currently open file/step."""
+    #     try:
+    #         theta = self.datum.getCrntVal(('.', 'theta', 0))
+    #         tau = self.datum.getCrntVal(('.', 'tau', 0))
+    #     except AttributeError:
+    #         theta, tau = 0., 0.             # If the datum is the entire Workspace
+    #
+    #     self.pivot = 0.0
+    #     self.p0deg = 180 * theta / np.pi
+    #     try:
+    #         self.p1deg = np.asscalar( tau*(self.datum.f[-1]*self.datum.c0-self.datum.f0)*360. )
+    #     except (IndexError, AttributeError) as e:      # If self.datum.f == []
+    #         self.p1deg = 0.
+    #
+    #     # Set the sliders
+    #     self.sliderPh0.blockSignals(True)
+    #     self.sliderPh1.blockSignals(True)
+    #     self.sliderPh0.setValue((self.p0deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
+    #     self.sliderPh1.setValue((self.p1deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
+    #     self.sliderPh0.blockSignals(False)
+    #     self.sliderPh1.blockSignals(False)
 
-    def reset(self):
-        """Resets the sliders to display the phasing parameters for the currently open file/step."""
-        try:
-            theta = self.datum.getCrntVal(('.', 'theta', 0))
-            tau = self.datum.getCrntVal(('.', 'tau', 0))
-        except AttributeError:
-            theta, tau = 0., 0.             # If the datum is the entire Workspace
-
-        self.pivot = 0.0
-        self.p0deg = 180 * theta / np.pi
-        try:
-            self.p1deg = np.asscalar( tau*(self.datum.f[-1]*self.datum.c0-self.datum.f0)*360. )
-        except (IndexError, AttributeError) as e:      # If self.datum.f == []
-            self.p1deg = 0.
-
-        # Set the sliders
-        self.sliderPh0.blockSignals(True)
-        self.sliderPh1.blockSignals(True)
-        self.sliderPh0.setValue((self.p0deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
-        self.sliderPh1.setValue((self.p1deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
-        self.sliderPh0.blockSignals(False)
-        self.sliderPh1.blockSignals(False)
-
-    def startPlotting(self):
-        self.f = self.datum.f
-        self.yF = self.datum.yF
-        # remember the axis settings
-        if settings["ax0Limits"] is not None:
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-            indxPlot = np.flatnonzero((self.datum.f<=max(settings["ax0Limits"]["xlim"]))*(self.datum.f>=min(settings["ax0Limits"]["xlim"])))
-            supsRatio = math.ceil(indxPlot.size / (2**13))   # Subsampling ratio; plot no more than 2^12 points
-            indxPlot = np.append(indxPlot[:-1:supsRatio], indxPlot[-1])  # Make sure that the first and the last indices of each group are included
-            self.f = self.f[indxPlot]
-            self.yF = self.yF[indxPlot]
-
-        self.plot()
-
-    def plot(self):
-        """Plots the phased spectrum"""
-        self.ax[0].clear()     # discards the old graph
-
-        theta, tau = self.deg2tau(self.p0deg, self.p1deg)
-        ph = np.exp(-1j*2*np.pi * tau * (self.f*self.datum.c0-self.datum.f0) - 1j*theta ).reshape((-1,1))
-        yFph = self.yF * ph
-        self.ax[0].plot(self.f, yFph.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
-
-        self.ax[0].legend(loc=0)
-
-        # Set the updated limits
-        if settings["ax0Limits"] is not None:
-            self.ax[0].set_xlim(settings["ax0Limits"]["xlim"])
-            self.ax[0].set_ylim(settings["ax0Limits"]["ylim"])
-        else:
-            self.ax[0].relim()    # recompute the ax.dataLim
-            self.ax[0].margins(0, 0.05)    # x and y margins in percentages
-            self.ax[0].autoscale()    # update ax.viewLim using the new dataLim
-            #self.ax[0].autoscale_view(tight=True, scalex=True, scaley=True)
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-        self.ax[0].ticklabel_format(scilimits=(-3,3))
-        self.ax[0].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-
-        self.canvas.draw()    # refresh canvas
-        return 0
-
-    def autoPhase(self):
-        """Autophasing"""
-        p0, p1 = ng.process.proc_autophase.automatic_ps(self.datum.yF.ravel(), 'acme', p0=-self.p0deg, p1=-self.p1deg)     # 'peak_minima'
-        self.p0deg, self.p1deg = -p0, -p1
-        self.p0deg = (self.p0deg + 180.0) % 360.0 - 180.0     # make sure the phase stays in the (-180.0, 180.0) interval
-        self.pivot = 0.0
-        print(self.p0deg, self.p1deg)
-
-        theta, tau = self.deg2tau(self.p0deg, self.p1deg)
-        print(theta, tau)
-
-        self.startPlotting()
-        self.phasingComplete()
+    # def autoPhase(self):
+    #     """Autophasing"""
+    #     p0, p1 = ng.process.proc_autophase.automatic_ps(self.datum.yF.ravel(), 'acme', p0=-self.p0deg, p1=-self.p1deg)     # 'peak_minima'
+    #     self.p0deg, self.p1deg = -p0, -p1
+    #     self.p0deg = (self.p0deg + 180.0) % 360.0 - 180.0     # make sure the phase stays in the (-180.0, 180.0) interval
+    #     self.pivot = 0.0
+    #     print(self.p0deg, self.p1deg)
+    #
+    #     theta, tau = self.deg2tau(self.p0deg, self.p1deg)
+    #     print(theta, tau)
+    #
+    #     self.phasingComplete()
 
     def phasingComplete(self):
-        print("Phasing complete:", self.p0deg, self.p1deg)
-        # theta, tau = self.deg2tau(self.p0deg, self.p1deg)
-        self.phased.emit(self.p0deg, self.p1deg) # self.phased.emit(self.p0deg, self.p1deg)
+        # print("Phasing complete:", self.p0deg, self.p1deg)
+        self.sigPhasingComplete.emit(self.p0deg, self.p1deg)
+
+        returnToZero = True
+        if returnToZero:
+            self.sliderPh0.blockSignals(True)
+            self.sliderPh0.setValue(0)
+            self.sliderPh0.blockSignals(False)
+            self.sliderPh1.blockSignals(True)
+            self.sliderPh1.setValue(0)
+            self.sliderPh1.blockSignals(False)
+
+            self.yF = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
+
+            self.p0deg, self.p1deg = 0.0, 0.0
 
 class PreprocessingWidget(QWidget):
     """Handles basic preprocessing operations, e.g. zero-filling and apodization."""
@@ -3895,7 +3875,6 @@ class MainView(QMainWindow):
                         "startFromPars" : "current",          # Starting values of parameters when fitting multiple files (current, previous, default) - will be copied from crntParsH of this file, previous file or dfltParsH
                         "autoPhase" : False,
                         "autoPick" : False})
-        self.fittingQueueFiles, self.fittingqueueActns = [], []    # List of file indices to be fitted in that order from last to first; if [], the current file will be fitted
 
         # initialize the main window
         super(MainView, self).__init__(parent)
@@ -4051,15 +4030,41 @@ class MainView(QMainWindow):
         self.preprocTool = PreprocessingWidget()
         self.preprocTool.parsChanged.connect(lambda x : self.resetSignals(**x))
         # self.phasingTool = PhasingWidget(self._crnt, self.canvas, orientation='Horizontal') # set to 'Horizontal' if displayed on the right
-        # self.phasingTool.phased.connect(self.onPhased)
+        # self.phasingTool.sigPhasingProgress.connect(self.onPhased)
+
+        # Add Phasing tool
+        self.mainPhasingWidget = PhasingWidget(orientation='Horizontal')
+
+        self.mainFigureWidget.sigPivotDragged.connect(self.mainPhasingWidget.setPivot)
+        self.mainPhasingWidget.sigPhasingProgress.connect(self.mainFigureWidget.replot_yF)
+        self.mainPhasingWidget.sigPhasingComplete.connect(self.onPhased)
 
         # Set up the tab
         tabSettings = QWidget()
         laySettings = QVBoxLayout()
         tabSettings.setLayout(laySettings)
         laySettings.addWidget(self.freqTableView)
+        laySettings.addWidget(self.mainPhasingWidget)
         laySettings.addWidget(self.preprocTool)
 
+        # # ----------------------------------------------------------------------
+        # #                            Phasing tab
+        # # ----------------------------------------------------------------------
+        # self.mainPhasingWidget = PhasingWidget(orientation='Horizontal')
+        #
+        # self.mainFigureWidget.sigPivotDragged.connect(self.mainPhasingWidget.setPivot)
+        # self.mainPhasingWidget.sigPhasingProgress.connect(self.mainFigureWidget.replot_yF)
+        # self.mainPhasingWidget.sigPhasingComplete.connect(self.onPhased)
+        #
+        # # Set up the tab
+        # tabPhasing = QWidget()
+        # layPhasing = QVBoxLayout()
+        # tabPhasing.setLayout(layPhasing)
+        # layPhasing.addWidget(self.mainPhasingWidget)
+        # # layNavi.addWidget(self.pieCanvas)
+        # # layNavi.setContentsMargins(1,1,1,1)
+
+        # ---------------------------- Actions ---------------------------------
         self.setupActions(menubar, tbMain, tbTree)
 
         # --------------- Left --------------------
@@ -4070,6 +4075,7 @@ class MainView(QMainWindow):
         widgetLeft.setTabPosition(QTabWidget.North)
         widgetLeft.addTab(tabNavi, 'Navigation')
         widgetLeft.addTab(tabSettings, 'Settings')
+        # widgetLeft.addTab(tabPhasing, 'Phasing')
         widgetLeft.setCurrentIndex(0)
 
         # -------------- Center -------------------
@@ -4547,17 +4553,6 @@ class MainView(QMainWindow):
         self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
         self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
 
-    def onPhased(self, theta, tau):
-        """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
-        # Update current parameter; convert phases from degrees to radians for ph0 (theta) and sec for ph1 (tau)
-        # theta = ph0*np.pi/180.
-        # tau = np.asscalar( ph1/(self._crnt.f[-1]*self._crnt.c0-self._crnt.f0)/360. )
-        self._crnt.setCrntVal(('.', 'theta', 0), theta)
-        self._crnt.setCrntVal(('.', 'tau', 0), tau)
-
-        self.treeModel.notifyDataChanged()
-        self.plotCurrent(autoRange=False)
-
     def showSettingsDialog(self):
         """Shows an input dialog and updates settings"""
         accepted, newSettings = SettingsDialog.run(oldSettings={'HCmode': self.wsp.HCmode})
@@ -4611,7 +4606,7 @@ class MainView(QMainWindow):
     # ------------------ Working with the fitting thread -----------------------
 
     def startThread(self, queueFiles=None, queueActns=None, pushUndo=True):
-        """Fits the files in the self.fittingQueueFiles list. Must be called only when appropriate self.fittingQueueFiles is set."""
+        """Fits the files in the queueFiles list."""
         # Disable controls that can start fitting
         self.actnFitAllSteps.setDisabled(True)
         self.actnFitAllFiles.setDisabled(True)
@@ -4733,6 +4728,23 @@ class MainView(QMainWindow):
             self._undoStack.append([ [self._crnt], [{key : oldVal}] ])
             self._redoStack.clear()
             self._crnt.setCrntVal(key, val)
+
+        self.startThread(pushUndo=False)
+
+    def onPhased(self, p0deg, p1deg):
+        """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
+        nf = next_pow_of_2( 2**self._crnt.zff * len(self._crnt.t) )     # Determine the number of samples in the FULL signal spectrum (possibly including zero-filling). zff and t are taken from the Series level
+        dt = self._crnt.t[1]-self._crnt.t[0]
+
+        d_theta, d_tau = deg2tau(dt, nf, p0deg, p1deg)
+        if not ( np.isclose(d_theta, 0) and np.isclose(d_tau, 0) ):
+            theta = self._crnt.getCrntVal(key=('.', 'theta', 0))
+            tau = self._crnt.getCrntVal(key=('.', 'tau', 0))
+
+            self._undoStack.append([ [self._crnt], [{('.', 'theta', 0):theta, ('.', 'tau', 0):tau}] ])
+            self._redoStack.clear()
+            self._crnt.setCrntVal(key=('.', 'theta', 0), val = (theta+d_theta + np.pi) % np.pi - np.pi )     # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
+            self._crnt.setCrntVal(key=('.', 'tau', 0), val = tau + d_tau)
 
         self.startThread(pushUndo=False)
 
@@ -4978,6 +4990,10 @@ class MainView(QMainWindow):
 
             # Output the found results
             self.plotPieChart()
+
+            # Update the phasing widget
+            self.mainPhasingWidget.setData(f, yFph, xF,
+                freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[-1].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)])
 
         else:
             self.mainFigureWidget.reset()
