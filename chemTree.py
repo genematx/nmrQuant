@@ -1322,15 +1322,17 @@ def QTransClusters(chshQD, jcplQD, meqSpins, meqLinks):
     # The second level of lists corresponds to the meq spin being involved in different subgraphs within the spin system. After all subgraphs are computed, their peaks will be convolved with each other.
     freq_meq, intn_meq = [[] for _ in range(len(meqSpins))], [[] for _ in range(len(meqSpins))]
 
-    # Simulate each pair as an AmBn system
-    for edge in meqLinks:
-        p, q = edge.indxVert           # Indices fo coupled spins
-        freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
-                                jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
-        freq_meq[p].append(freq[0])
-        freq_meq[q].append(freq[1])
-        intn_meq[p].append(intn[0])
-        intn_meq[q].append(intn[1])
+    # Simulate each cluster as a separate spin system
+
+    # # Simulate each pair as an AmBn system
+    # for edge in meqLinks:
+    #     p, q = edge.indxVert           # Indices fo coupled spins
+    #     freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
+    #                             jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
+    #     freq_meq[p].append(freq[0])
+    #     freq_meq[q].append(freq[1])
+    #     intn_meq[p].append(intn[0])
+    #     intn_meq[q].append(intn[1])
 
     # Convolve the multiplets for each equivalent spin and save them in the subarray corresponding to a specific chshQD
     freqQPeaks, intnQPeaks = [[] for _ in chshQD], [[] for _ in chshQD]
