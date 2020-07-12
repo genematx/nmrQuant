@@ -42,7 +42,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '1.1.0'
+version = '1.2.0'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
