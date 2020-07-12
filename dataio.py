@@ -107,11 +107,20 @@ def read_binary(filename, big=False):
     dic = {"FILE_SIZE": os.stat(filename).st_size}
 
     # Reshape the data according to the read sizes of array dimensions
-    if size[1] == 1:
-        t = data[:size.prod()]
-        data = (data[size.prod()::2] - 1j*data[size.prod()+1::2]).reshape(size[:2])
-    else:
-        data =  (data[::2] - 1j*data[1::2]).reshape(size[:2], order='F')
+    if data.size == 3*size.prod() and size[1] == 1:
+        # The dataset is saved in the format: [time points, real values, imaginary values], else [real values, imaginary values]
+        data = data[size.prod():]
+    # print(size)
+    # print(data.shape, data.size)
+    # if size[1] == 1:
+    #     t = data[:size.prod()]
+    #     print(t.shape)
+    #     data = (data[size.prod()::2] - 1j*data[size.prod()+1::2])
+    #     print(data.shape)
+    #     print(size)
+    #     # .reshape(size[:2])
+    # else:
+    data = (data[::2] - 1j*data[1::2]).reshape(size[:2], order='F')
 
     return dic, data
 
@@ -165,21 +174,26 @@ def read_spinsolve(path):
     # Make sure the path is a directory
     if os.path.isdir(path):
         dirName = os.path.abspath(path)
+        binFile = None
     elif os.path.isfile(path):
         dirName = os.path.dirname(os.path.abspath(path))
+        binFile = os.path.basename(path)
     else:
         raise FileNotFoundError(None, None, 'Invalid directory')
 
     # Look for the data.1d or data.2d file in the directory
-    try:
-        # dic, yT = ng.fileio.spinsolve.read(dirName, bin_file='data.1d')
-        dic, yT = read(dirName, bin_file='data.1d')
-    except FileNotFoundError:
+    if binFile is not None:
+        dic, yT = read(dirName, bin_file=binFile)
+    else:
         try:
-            # dic, yT = ng.fileio.spinsolve.read(dirName, bin_file='data.2d')
-            dic, yT = read(dirName, bin_file='data.2d')
+            # dic, yT = ng.fileio.spinsolve.read(dirName, bin_file='data.1d')
+            dic, yT = read(dirName, bin_file='data.1d')
         except FileNotFoundError:
-            raise FileNotFoundError(None, None, 'Neither data.1d nor data.2d file is found in the directory')
+            try:
+                # dic, yT = ng.fileio.spinsolve.read(dirName, bin_file='data.2d')
+                dic, yT = read(dirName, bin_file='data.2d')
+            except FileNotFoundError:
+                raise FileNotFoundError(None, None, 'Neither data.1d nor data.2d file is found in the directory')
 
     dt = dic['dwellTime'] * 1e-6
 

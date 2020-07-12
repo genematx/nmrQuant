@@ -1418,7 +1418,7 @@ class treeNode:
         self.name = name
         self.alias = alias
         self._parent = None
-        self._children = OrderedSet()
+        self._children = []
         self._treeBook = weakref.WeakValueDictionary({self.name:self})    # References to other nodes in the tree; the same dictionary is shared by all nodes
 
     def __str__(self):
@@ -1472,7 +1472,7 @@ class treeNode:
         return self._parent
 
     def child(self, pos):
-        return list(self._children)[pos]
+        return self._children[pos]
 
     def children(self):
         yield from self._children
@@ -1480,16 +1480,19 @@ class treeNode:
     def siblID(self):
         """Position of the node among its siblings; 0 if there are no siblings."""
         if self._parent is not None:
-            return list(self._parent._children).index(self)
+            return self._parent._children.index(self)
         else: return 0
 
-    def addChild(self, child):
+    def addChild(self, child, pos=-1):
         if child._parent is None:
             # Check for potential name conflicts
             commonNames = set([node.name for node in child.items()]).intersection([node.name for node in self.items()])
             if not commonNames:
                 child._parent = self
-                self._children.add(child)
+                if pos >= 0 and pos < len(self._children):
+                    self._children.insert(pos, child)
+                else:
+                    self._children.append(child)
                 # Share the references to all other nodes in the tree
                 self._treeBook.update(child._treeBook)
                 child._treeBook = self._treeBook
@@ -1505,7 +1508,7 @@ class treeNode:
         """if pos < 0 or pos > len(self._children):
             return False
 
-        self._children.insert(position, child)
+        self._children.insert(pos, child)
         child._parent = self
         return True"""
 
@@ -1521,7 +1524,7 @@ class treeNode:
 
     def removeChild(self, child):
         """Removes a child."""
-        self._children.discard(child)
+        self._children.remove(child)
         self.setTreeBook()     # Update the tree book
         child._parent = None
         child.setTreeBook()
@@ -1759,8 +1762,8 @@ class chemNode(treeNode):
             yield root
         # repRoots = [v for v in root.iterDepth('in-order') if v.isReported() and not v.parent().isReported()] if not root.isReported() else [root]
 
-    def addChild(self, child):
-        treeNode.addChild(self, child)
+    def addChild(self, child, pos=-1):
+        treeNode.addChild(self, child, pos)
         self.setReported(self._reported)    # Update the reported flags (e.g. if self._reported was True, but child._reported is false, need to set child._reported to True)
 
     def insertChild(self, child, pos):
@@ -1841,12 +1844,12 @@ class chemNodeQD(chemNode):
         self.qPoles = [None]*len(self.chshQD)                # QD poles excluding the effects of line-broadedning although including any linebroadening due to peak aggregation
         self.qPolesIntn = [None]*len(self.chshQD)
 
-    def addChild(self, child):
+    def addChild(self, child, pos=-1):
         """Add a terminal node and keep the value of its chemical shift."""
         if type(child) is not chemNodeT:
             raise RuntimeError("Only terminal nodes can be added to a chemQD node.")
         else:
-            chemNode.addChild(self, child)
+            chemNode.addChild(self, child, pos)
             child.reset()
 
     def insertChild(self, child, pos):
@@ -1973,7 +1976,7 @@ class chemNodeT(chemNode):
         "Computes the poles"
         pass
 
-    def addChild(self, child):
+    def addChild(self, child, pos=-1):
         """Terminal nodes can not have children."""
         raise RuntimeError("Children can not be added to terminal nodes.")
 
@@ -2237,6 +2240,13 @@ def loadTree(fname):
         if isinstance(data, dict):
             T = data["tree"]
         else: T = data
+
+        # Compatibility check: Make sure that each node in the tree has an ampl and a phase attributes
+        for node in T.items():
+            if not hasattr(node, 'ampl'): node.ampl = [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=1.0)]
+            if not hasattr(node, 'phase'): node.phase = [parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)]
+            if isinstance(node, chemNodeQD) and not hasattr(node, 'spinTopo'): node.spinTopo = spinGroup(*asgn2meqv(node.chshAsgn, node.jcplAsgn))
+            node._children = list(node._children)
 
         T.setTreeBook()
 
