@@ -2355,7 +2355,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             jcpl = [parsSpec()]
             chshAsgn = [1, 2]
             jcplAsgn = [[0, 1], [0, 0]]"""
-            chsh = [parsSpec()]*1
+            chsh = [parsSpec(min=-1.0, max=1.0, dval=0.0)]*1
             jcpl = []
             chshAsgn = [1]
             jcplAsgn = None
@@ -2754,7 +2754,7 @@ class ChemTreeView(QTreeView):
                 # Define parameter setting actions
                 actnScaleToRef = QAction(QIcon('icons\icon_none.png'), 'Set reference', self)
                 actnScaleToRef.setStatusTip('Reset all chemical shifts in the model to the reference')
-                actnScaleToRef.triggered.connect( self.model().datum.scaleToRef )
+                actnScaleToRef.triggered.connect( lambda _ : self.model().datum.shiftToRef(diffChsh=None) )
 
                 actnPromotePriors = QAction(QIcon('icons\icon_globalPriors.png'), 'Set prior as global' if len(slctdKeys) == 1 else 'Set priors as global', self)
                 actnPromotePriors.setStatusTip('Use this prior for all datasets in the Workspace')
@@ -3571,7 +3571,7 @@ class PhasingWidget(QWidget):
     def onPh0SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph0_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
-        self.p0deg = ph0_rel * 45.0
+        self.p0deg = ph0_rel * 5.0
 
         yFph = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
         self.sigPhasingProgress.emit(yFph)
@@ -3579,7 +3579,7 @@ class PhasingWidget(QWidget):
     def onPh1SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph1_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
-        p1deg_new = ph1_rel * 90.0
+        p1deg_new = ph1_rel * 30.0
 
         if self.pivot != 0.0:
             self.sliderPh0.blockSignals(True)
