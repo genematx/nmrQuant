@@ -465,8 +465,9 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self._stems = {}
         self._freqBlocks = []         # List of linearRegionItems that indicate the frequency blocks
 
-        self._selector_flag = False
+        self._state = None
         self._stemDragging_flag = False
+        self._globalChsh_flag = False              # Set TRUE when the global chemical shift is being set by dragging
 
         # Create the main plot for the spectrum
         p0 = SpectrumPlotItem()
@@ -532,7 +533,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             val.hide()
 
         # --- MouseDrag Event in ViewBox of p0 ---
-        p0.vb.mouseDragEvent = self._onMouseDragEvent        ## get the viewbox from the plot item andset its mouseDragEvent
+        p0.vb.mouseDragEvent = self._onMouseDragEvent        ## get the viewbox from the plot item and set its mouseDragEvent
 
         # Connect mouse signals
         # self.getItem(0,0).scene().sigMouseHover.connect(self._onMouseHover)
@@ -746,12 +747,17 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         for lr in self._freqBlocks[indx]:
             lr.setBrush(color)
 
-    def toggleSelectorFlag(self):
-        self._selector_flag = not(self._selector_flag)
-
     def setSelectorFlag(self, flag=True):
         """If the flag is set, MouseDrag event with pressed left button will be interpreted as the frequency region selection (used to add new block)."""
-        self._selector_flag = flag
+        self.setState(state = 'selectRange' if flag else None)
+
+    def setState(self, state=None):
+        """Sets the state of the MainSpectrumWidget. If state is None - return to the default (display) state.
+        Possible states include:
+         - 'selectRange', in this state, MouseDrag event with pressed left button will be interpreted as the frequency region selection (used to add new block).
+         - 'dragSpectrum'
+         """
+        self._state = state
 
     def toggleMovableFreqBlocks(self):
         """Enables/disables changes to be made to frequency blocks with mouse events."""
@@ -802,7 +808,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
         vb = self.getItem(0,0).vb
 
-        if self._selector_flag and (evt.button() == QtCore.Qt.LeftButton):   # and (ev.modifiers() & QtCore.Qt.ControlModifier):
+        if self._state == 'selectRange' and (evt.button() == QtCore.Qt.LeftButton):   # and (ev.modifiers() & QtCore.Qt.ControlModifier):
             # Adding a new frequency range
             evt.accept()
 
@@ -823,6 +829,11 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         elif self._stemDragging_flag:
             # Dragging a group of stems. Will be handled by the corresponding PlotStemsItem
             pass
+        elif self._state == 'dragSpectrum' and (evt.button() == QtCore.Qt.LeftButton):
+            # Moving the experimental spectrum to set a new global chemical shift
+            print('Setting global chemical shift')
+            evt.accept()
+            print(evt)
         else:
             pg.ViewBox.mouseDragEvent(vb, evt, axis)       # Use the standard method
 
@@ -974,7 +985,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self._stems.clear()
         self._freqBlocks.clear()
 
-        self._selector_flag = False
+        self.setState()
 
 class QCheckableComboBox(QComboBox):
     """Checkable ComboBox"""
@@ -4398,6 +4409,13 @@ class MainView(QMainWindow):
             self.mainFigureWidget.setCursor(mode='hand')
 
         self.actnGroupFreqBlocks._previuosAction = actn
+
+    # -------------------- Processing keyboard interactions --------------------
+
+    def keyPressEvent(self, ev):
+        # self.scene().keyPressEvent(ev)
+        # self.sigKeyPress.emit(ev)
+        print('Key pressed ', ev.key())
 
     # ------------------------- Other utility methods --------------------------
 

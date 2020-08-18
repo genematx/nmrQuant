@@ -692,7 +692,6 @@ def tobin(x,n):
     """Converts an integer x into its binary representation in form of a list with n bits."""
     return [(x>>k)&1 for k in range(n-1,-1,-1)]     # Use range(0, n) for MSB first
 
-# @profile
 def QDsims(H, T, tol=0.0001):
     """Simulates a QD system based on the spin frequencies and j couplings in Hz. See, e.g., http://www.users.csbsju.edu/~frioux/nmr/Speclab4.htm"""
     n_spin = int(math.log2(T.shape[0]))
@@ -741,6 +740,7 @@ def QDsims(H, T, tol=0.0001):
 
     return omega, intn
 
+# @profile
 def QTransFull(chshQD, jcplQD, meqSpins, meqLinks, tol=0.0001):
     """Use general QD simulations to compute the transition peak frequencies and intensities."""
 
