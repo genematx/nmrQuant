@@ -42,7 +42,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '1.2.0'
+version = '2.0.0'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -271,7 +271,7 @@ class SettingsDialog(QDialog):
         groupLayout = QFormLayout()
         groupLayout.addRow("Nucleus", self.cmboxHCSelector)
         groupLayout.addRow("Merge resonances closer than, Hz", self.editAggregateThreshold)
-        groupLayout.addRow("Update if chsh changed by, ppm", self.editRerunThreshold)
+        groupLayout.addRow("Update if chsh changed by, Hz", self.editRerunThreshold)
         qdConfigGroup = QGroupBox("QD settings")
         qdConfigGroup.setLayout(groupLayout)
 
@@ -1709,22 +1709,56 @@ class NavigationTreeDelegate(QItemDelegate):
 
 def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
     """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
-    P = viewNode(T.name, nodeType='chemNodeDB' if isinstance(T, chemNodeDB) else 'chemNode')
+    P = viewNode(T.name, nodeType='chemNodeDB' if type(T) in [chemNodeDB, chemNodeQM] else 'chemNode')
     #P.addChild(viewNode(name = tuple([T.name] + ['intn'] + [None]), nodeType='intn', alias='intn' ))
-    if type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
+    if type(T) is chemNodeQM:
+        P.nodeType = 'chemNodeQM'
         P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
 
         if T.childCount() > 1:  # Several chemical shifts; add global parameters
             P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
             P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
 
-        for node in [T]:
-            for par, val in node.default_pars().items():
-                for i in range(len(val)):
-                    if not isinstance(getattr(node, par)[i].label, str):
-                        old = getattr(node, par)
-                        old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
-                        setattr(node, par, old)
+        # Add nodes that can become parents for parameters (combinations of spin systems if any and the QM node itself)
+        prntNodes = [None] * len(T.spsyComb) + [P]
+        parsLists = [[] for _ in range(len(T.spsyComb)+1)]
+        for i_comb, comb in enumerate(T.spsyComb):
+            prntNodes[i_comb] = viewNode(name=(T.name+'-COMB'+str(i_comb+1)), nodeType='chemNode', alias=comb.name)
+            prntNodes[i_comb].addChild(viewNode(name=(T.name+'-COMB'+str(i_comb+1), 'ampl', 0), nodeType='param', alias='intn' ))
+            P.addChild(prntNodes[i_comb])
+
+        # Loop over spin systems and collect all parameters that affect it
+        for i_spsy in range(len(T.spinTopo)):
+            i_comb = -1      # Index to which combination belongs this spin system (the first occurence). Default - the chemNodeQM itself
+            for j, comb in enumerate(T.spsyComb):
+                if i_spsy in comb.indxSpsy: i_comb = j
+
+            # Add new parameters to the list for each combination
+            parsLists[i_comb].extend( [(T.name, 'chshQD', i_parm, T.chshQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
+            parsLists[i_comb].extend( [(T.name, 'alphQD', i_parm, T.alphQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
+            parsLists[i_comb].extend( [(T.name, 'jcplQD', i_parm, T.jcplQD[i_parm].label) for i_parm in T._indxJcpl_by_spsy[i_spsy]] )
+
+        # Add intensity/amplitude parameters and add the nodes to the tree
+        for prnt, parsList_for_prnt in zip(prntNodes, parsLists):
+            parsList_for_prnt.extend( [(chld.name, 'ampl', 0, chld.alias) for chld in T[prnt.name].children() if isinstance(chld, chemNodeQT)] )
+            for pars in sorted(parsList_for_prnt, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
+                try:
+                    prnt.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))
+                except RuntimeError: pass
+
+    elif type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
+        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+
+        if T.childCount() > 1:  # Several chemical shifts; add global parameters
+            P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+            P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+
+        for par, val in T.default_pars().items():
+            for i in range(len(val)):
+                if not isinstance(getattr(T, par)[i].label, str):
+                    old = getattr(T, par)
+                    old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
+                    setattr(T, par, old)
 
         newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in [T] for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
         newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
@@ -1748,7 +1782,7 @@ def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
         P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
         P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
 
-        # Fix faulty labels of parameters and alaises of the terminal nodes
+        # Fix faulty labels of parameters and alises of the terminal nodes
         for node in T.children():
             for par, val in node.default_pars().items():
                 for i in range(len(val)):
@@ -1764,20 +1798,6 @@ def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
         for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):     # Loop over the list of tuples
             P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
     return P
-
-    """
-    # Full parameter tree
-    P = treeNode(T.name)
-    # add the parameters nodes
-    for par, val in sorted(T.default_pars().items(), key = lambda par : [i for i, x in enumerate(myOrder) if x in par[0]][-1] ):
-        print(par, val)
-        for i in range(len(val)):
-            P.addChild(treeNode(name = tuple([T.name] + [par] + [i]) ))
-    # add the children nodes
-    for node in T.children():
-        P.addChild(getDisplayTree(node))
-    return P
-    """
 
 class ChemTreeModel(QtCore.QAbstractItemModel):
     """A treeView representation class"""
@@ -2030,7 +2050,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if clmn == 0 and role == QtCore.Qt.FontRole:
             font = QtGui.QFont()    # Default font
 
-            if node.nodeType in ['chemNode', 'chemNodeDB']:     # Chemical node
+            if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:     # Chemical node
                 if not self.datum.T[node.name].isReported():
                     font.setStyle(QtGui.QFont.StyleItalic)
                 elif node.name in self.datum.repRootNames:
@@ -2079,7 +2099,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 else:
                     pass
 
-            elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
                 if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                     crntVal = self.datum.T[node.name].intn
 
@@ -2148,7 +2168,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 return result | QtCore.Qt.ItemIsSelectable
             elif node.nodeType == 'chemNode':
                 return result | QtCore.Qt.ItemIsEditable # | QtCore.Qt.ItemIsUserCheckable
-            elif node.nodeType == 'chemNodeDB':
+            elif node.nodeType in ['chemNodeDB', 'chemNodeQM']:
                 return result # | QtCore.Qt.ItemIsUserCheckable
             else:
                 return result
@@ -2157,11 +2177,11 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         elif clmn == 4:
             if node.nodeType == 'lshape':
                 return result
-            elif node.nodeType in ['chemNode', 'chemNodeDB']:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:
                 return result | QtCore.Qt.ItemIsEditable
             else:
                 return result | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable
-            """elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4:
+            """elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
             if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                 return QtCore.Qt.ItemIsEditable | result"""
 
@@ -2209,7 +2229,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     # self.dataChanged.emit(index, index)
                     # except: return False
 
-            elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                 # self.datum.T[node.name].set_intn(float(value))
                 self.requestParameterChange.emit((node.name, 'intn', 0), float(value))
                 # self.dataChanged.emit(index, index)
@@ -2357,7 +2377,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         elif source == 'DB':
             newName, QDpars, accepted = ChooseFromDBDialog.run( forbidden_names=list(self.datum.T.keys()) )
             if accepted:
-                X = chemNodeDB(newName, QDpars=QDpars)
+                X = chemNodeQM(newName, QDpars=QDpars)      # X = chemNodeDB(newName, QDpars=QDpars)
             else:
                 return 0
         elif source == 'spsy':
@@ -2436,7 +2456,7 @@ class ChemTreeView(QTreeView):
 
     changedParsList = pyqtSignal(int)              # Signalizes to update the parameters list widget and carries the index of the active step
     changedSelected = pyqtSignal(object, object)           # Emits names of the current and previously selected nodes
-    requestAdjustment = pyqtSignal(object)         # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhA'
+    requestAdjustment = pyqtSignal(object)         # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhX'
 
     class ParsSpecDialog(QDialog):
         """A dialog to set specification for a parameter."""
@@ -2691,7 +2711,7 @@ class ChemTreeView(QTreeView):
             clmn = index.column()
             row = index.row()
 
-            if node.nodeType in ['chemNode', 'chemNodeDB']:       # Chemical node
+            if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:       # Chemical node
                 key = node.name
 
                 # Add/remove node actions
@@ -3825,7 +3845,7 @@ class FittingThread(QThread):
         else:
             step = self._evalStep
 
-            if actnToRun in ['Ph0', 'Ph1', 'PhA']:
+            if actnToRun in ['Ph0', 'Ph1', 'PhX']:
                 # Adjust the phasing parameters
                 fileToFit.adjust_phase(frqBlkIds=step.frqBlkIds, mode=actnToRun)
                 # Re-evaluate the step to update the (marginalized) amplitudes and the signals to be plotted
@@ -3845,7 +3865,7 @@ class FittingThread(QThread):
             elif actnToRun == 'Evl':
                 # Only evaluatethe last step
                 fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
-            elif actnToRun == 'AuP':
+            elif actnToRun == 'PhA':
                 # Autophasing
                 fileToFit.auto_phase()
 
@@ -4214,7 +4234,7 @@ class MainView(QMainWindow):
         # Autophase
         self.actnAutoPhase = QAction(self._icon('icon_autoPhase.png'), 'Autophase', self)
         self.actnAutoPhase.setStatusTip('Apply a phase correction algorithm')
-        self.actnAutoPhase.triggered.connect( lambda : self.startThread(queueActns=['AuP']) )
+        self.actnAutoPhase.triggered.connect( lambda : self.startThread(queueActns=['PhA']) )
         # Set custom lineshape
         self.actnSetLshape = QAction(self._icon('icon_customShape.png'), 'Set custom lineshape', self)
         self.actnSetLshape.setStatusTip('Apply a custom lineshape derived by deconvolution')
@@ -4415,7 +4435,8 @@ class MainView(QMainWindow):
     def keyPressEvent(self, ev):
         # self.scene().keyPressEvent(ev)
         # self.sigKeyPress.emit(ev)
-        print('Key pressed ', ev.key())
+        # print('Key pressed ', ev.key())
+        pass
 
     # ------------------------- Other utility methods --------------------------
 
@@ -4770,7 +4791,7 @@ class MainView(QMainWindow):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
         # Form the list of steps to Fit
         s = self.stepsEdit.toPlainText()
-        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhA)|(Rsd)|(Lsh)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
+        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhX)|(Rsd)|(Lsh)|(PhA)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
         s = "A ".join(re.split("A", s ))      # Prevent any consecutive A's from occuring in the string; separate them with spaces
         while s.find('(') != -1:    # Randomize all elements in all parentheses
             beg, end = s.find('('), s.find(')')

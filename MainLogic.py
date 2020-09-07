@@ -202,7 +202,7 @@ class Workspace():
         if self.T is not None:
             # add QD nodes to the tree based on the mode of the current workspace
             for node in self.T.items():
-                if isinstance(node, chemNodeDB) and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
+                if type(node) in [chemNodeDB, chemNodeQM] and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
 
             self._updateParameters()    # Also sets self.repRootNames
 
@@ -243,8 +243,7 @@ class Workspace():
 
         # add QD nodes to the tree based on the mode of the current workspace
         for node in T.items():
-            #if isinstance(node, chemNodeDB): node.dendrolize(self.HCmode)
-            if isinstance(node, chemNodeDB) and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
+            if type(node) in [chemNodeDB, chemNodeQM] and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
 
         self._updateParameters()
 
@@ -329,7 +328,7 @@ class Workspace():
         # Dendrolize nodes if necessary
         for node in X.items():
             #print(self.HCmode, node.HCmode)
-            if type(node) is chemNodeDB and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
+            if type(node) in [chemNodeDB, chemNodeQM] and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
 
         # Insert the node
         #try:
@@ -687,7 +686,7 @@ class Workspace():
                                                     'sF' : dat.sF,
                                                     'sT' : dat.sT,
                                                     'jointPrior' : dat._joint,
-                                                    '_refKey' : dat._refKey,
+                                                    '_refKey' : dat._refKey if dat._refKey in dat.allParsKeys(parsKind=['chshQD']) else None,
                                                     'flagAdapFreq' : dat._flagAdapFreq,
                                                     'xclRootNames' : dat.xclRootNames
                                                     })
@@ -2289,10 +2288,10 @@ class Datum():
         self.setCrntVal(key = ('.', 'theta', 0), val = theta)
         self.setCrntVal(key = ('.', 'tau', 0), val = tau)
 
-    def adjust_phase(self, evalParsH=None, frqBlkIds=None, freqMask=None, mode='PhA', mw=512, cfun='LS', nhop=0, verbose=True):
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, freqMask=None, mode='PhX', mw=512, cfun='LS', nhop=0, verbose=True):
         """Phase correction by adjusting the residual.
         Inputs:
-        mode - choose which phase parameters to adjust ('PhA', 'Ph0', 'Ph1')
+        mode - choose which phase parameters to adjust ('PhX', 'Ph0', 'Ph1')
         """
 
         if verbose:
@@ -2327,7 +2326,7 @@ class Datum():
         costFuncPhase = lambda x : ph_cost(yF=self.yF[indxInRange]*ph, xF=xF, \
                         ph0=x[0], ph1=x[1], mw=mw, \
                         f=(self.f[indxInRange]*self.c0-self.f0)*dt, cfun=cfun )         # Frequency scale in fractions of the sampling frequrncy
-        if mode == 'PhA':
+        if mode == 'PhX':
             costFuncOpti = lambda x : costFuncPhase(x)[0]
             bounds, initVals = ((-0.5, 0.5), (-0.5, 0.5)), [0.0, 0.0]
         elif mode == 'Ph0':
@@ -2341,7 +2340,7 @@ class Datum():
         res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=False, verbose=verbose)
 
         # Interpret the results
-        if mode == 'PhA':
+        if mode == 'PhX':
             ph0, ph1 = res.x
         elif mode == 'Ph0':
             ph0, ph1 = res.x[0], 0.0
@@ -2916,7 +2915,7 @@ class Datum():
             if name not in self.xclRootNames:
                 stems_i = {}
                 for stemKey, val in mdldPeaks[name].items():   # Loop over the leaves
-                    parsKey = peakName2parsKey(stemKey)
+                    parsKey = self.T[stemKey].get_parKey()
                     freq = [pk.freq - dref_chsh for pk in val]
                     intn = [np.abs(pk.intn) for pk in val]
                     stems_i[parsKey] = (self.getCrntVal(key=parsKey), freq, intn)
