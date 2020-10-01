@@ -42,7 +42,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '2.0.0'
+version = '2.0.1'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -155,6 +155,7 @@ class ChooseFromDBDialog(QDialog):
 
         # Add widgets for entering parameters
         self.cmboxLibs, self.cmboxChem = QComboBox(), QComboBox()
+        self.cmboxLibs.addItem('All species')
         self.cmboxLibs.addItems( sorted([k for k, _ in chemLib.items()]) )
         self.cmboxLibs.currentIndexChanged.connect(self.onLibrarySelected)
         self.cmboxChem.currentIndexChanged.connect(self.onChemicalSelected)
@@ -176,13 +177,18 @@ class ChooseFromDBDialog(QDialog):
 
         # Initialize the comboboxes
         # self.onLibrarySelected(0)
-        self.cmboxLibs.setCurrentIndex( self.cmboxLibs.findText('Built-in models') )    # Find the index of the built-in DB
+        self.cmboxLibs.setCurrentIndex( self.cmboxLibs.findText('All species') )    # Find the index of the built-in DB
+        self.onLibrarySelected(0)
 
     def onLibrarySelected(self, indx):
         """Sets the items fro the second combo box."""
         self.cmboxChem.clear()
         lib_key = self.cmboxLibs.itemText(indx)
-        keysDB = sorted([key for key, val in chemLib[lib_key].items()])
+        try:
+            keysDB = sorted([key for key, val in chemLib[lib_key].items()])
+        except KeyError:
+            # List all species
+            keysDB = sorted(list(set([key for lib_key in chemLib.keys() for key in chemLib[lib_key].keys()])))
         self.cmboxChem.addItems(keysDB)
 
     def onChemicalSelected(self, indx):
@@ -218,7 +224,10 @@ class ChooseFromDBDialog(QDialog):
         libsName = self.cmboxLibs.currentText()
         chemName = self.cmboxChem.currentText()
 
-        return displayName, copy.deepcopy(chemLib[libsName][chemName])
+        try:
+            return displayName, copy.deepcopy(chemLib[libsName][chemName])
+        except KeyError:
+            return displayName, copy.deepcopy([spec for lib_key in chemLib.keys() for key, spec in chemLib[lib_key].items() if key==chemName][0])
 
     # static method to create the dialog and return (name, QDpars, accepted)
     @staticmethod
@@ -1471,7 +1480,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
             # Form the arrays
             t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
-            yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
+            yT = (data[::2] + 1j*data[1::2]).reshape(-1,1)
 
             ## Subsample if the frequency range is too large
             #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm

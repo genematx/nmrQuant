@@ -2577,7 +2577,8 @@ def array2parsSpec(arr):
     """Converts 2D arrays of min and max values to the array of parsRange namedtuples."""
     ans = arr
     if arr is not None:
-        ans = [parsSpec(min=v[0], max=v[1], label=v[2] if len(v)>2 else '') for v in arr]
+        ans = [parsSpec(*v) for v in arr]
+        # ans = [parsSpec(min=v[0], max=v[1], label=v[2] if len(v)>2 else '', ) for v in arr]
     else: ans = []
     return ans
 
