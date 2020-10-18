@@ -1,1 +1,292 @@
-{"N-Isopropylbenzylamine": {"jcplH": [[4.5, 6, "H2-H_Me", "Uniform", null, null, null]], "meqSpins": [[0, 1], [1, 1], [2, 3], [2, 3]], "chshH": [[4.1, 4.3, "H1", "Uniform", null, null, null], [3.61, 3.65, "H2", "Uniform", null, null, null], [1.92, 1.96, "H_Me", "Uniform", null, null, null]], "meqLinks": [[0, [1, 2]], [0, [1, 3]]], "name": "N-Isopropylbenzylamine", "multH": [1, 1]}, "Phenethylamine": {"jcplH": [[5.0, 6.5, "H1-H2", "Uniform", null, null, null]], "meqSpins": [[0, 2], [1, 2]], "chshH": [[3.15, 3.35, "H1", "Uniform", null, null, null], [3.35, 3.55, "H2", "Uniform", null, null, null]], "meqLinks": [[0, [0, 1]]], "name": "Phenethylamine", "multH": [1]}, "Methylsulfonylmethane": {"chshH": [[3.41, 3.43, "H_Me", "Uniform", null, null, null]], "name": "Methylsulfonylmethane", "meqSpins": [[0, 3]], "multH": [2]}}
+{
+  "N-Isopropylbenzylamine": {
+    "jcplH": [
+      [
+        4.5,
+        6,
+        "H2-H_Me",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "meqSpins": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        3
+      ]
+    ],
+    "chshH": [
+      [
+        4.1,
+        4.3,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        3.61,
+        3.65,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        1.92,
+        1.96,
+        "H_Me",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "meqLinks": [
+      [
+        0,
+        [
+          1,
+          2
+        ]
+      ],
+      [
+        0,
+        [
+          1,
+          3
+        ]
+      ]
+    ],
+    "name": "N-Isopropylbenzylamine",
+    "multH": [
+      1,
+      1
+    ]
+  },
+  "Phenethylamine": {
+    "jcplH": [
+      [
+        5,
+        6.5,
+        "H1-H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "meqSpins": [
+      [
+        0,
+        2
+      ],
+      [
+        1,
+        2
+      ]
+    ],
+    "chshH": [
+      [
+        3.15,
+        3.35,
+        "H1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        3.35,
+        3.55,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "meqLinks": [
+      [
+        0,
+        [
+          0,
+          1
+        ]
+      ]
+    ],
+    "name": "Phenethylamine",
+    "multH": [
+      1
+    ]
+  },
+  "Methylsulfonylmethane": {
+    "chshH": [
+      [
+        3.41,
+        3.43,
+        "H_Me",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "name": "Methylsulfonylmethane",
+    "meqSpins": [
+      [
+        0,
+        3
+      ]
+    ],
+    "multH": [
+      2
+    ]
+  },
+  "Amino-2-propanol": {
+    "jcplH": [
+      [
+        -14.0,
+        -12.0,
+        "H1a-H1b",
+        "Uniform",
+        null,
+        null,
+        -13.27
+      ],
+      [
+        3.5,
+        5.5,
+        "H1a-H2",
+        "Uniform",
+        null,
+        null,
+        4.527
+      ],
+      [
+        6.0,
+        8.0,
+        "H1b-H2",
+        "Uniform",
+        null,
+        null,
+        7.075
+      ],
+      [
+        5.5,
+        7.5,
+        "H2-H3",
+        "Uniform",
+        null,
+        null,
+        6.459
+      ]
+    ],
+    "meqSpins": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        1
+      ],
+      [
+        3,
+        3
+      ]
+    ],
+    "chshH": [
+      [
+        2.43,
+        2.44,
+        "H1a",
+        "Uniform",
+        null,
+        null,
+        2.435
+      ],
+      [
+        2.377,
+        2.387,
+        "H1b",
+        "Uniform",
+        null,
+        null,
+        2.382
+      ],
+      [
+        3.595,
+        3.61,
+        "H2",
+        "Uniform",
+        null,
+        null,
+        3.604
+      ],
+      [
+        0.97,
+        0.98,
+        "H3",
+        "Uniform",
+        null,
+        null,
+        0.974
+      ]
+    ],
+    "meqLinks": [
+      [
+        0,
+        [
+          0,
+          1
+        ]
+      ],
+      [
+        1,
+        [
+          0,
+          2
+        ]
+      ],
+      [
+        2,
+        [
+          1,
+          2
+        ]
+      ],
+      [
+        3,
+        [
+          2,
+          3
+        ]
+      ]
+    ],
+    "name": "Amino-2-propanol",
+    "multH": [
+      1
+    ]
+  }
+}

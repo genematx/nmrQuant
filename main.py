@@ -1401,7 +1401,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             dic, data = ng.fileio.bruker.read(path[:-3])
 
             acqus = dic['acqus']
-            ntgrp = acqus['GRPDLY']    # Number of time samples of the Bruker filter response;
+            ntgrp = int(round(acqus['GRPDLY']))    # Number of time samples of the Bruker filter response;
             swh = acqus['SW_h']     # Spectral width in Hz
             f0 = acqus['O1']        # Offset in Hz
             c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
