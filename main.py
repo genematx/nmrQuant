@@ -42,7 +42,7 @@ try:
 except ImportError:
     figureoptions = None
 
-version = '1.1.0'
+version = '2.0.1'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -155,6 +155,7 @@ class ChooseFromDBDialog(QDialog):
 
         # Add widgets for entering parameters
         self.cmboxLibs, self.cmboxChem = QComboBox(), QComboBox()
+        self.cmboxLibs.addItem('All species')
         self.cmboxLibs.addItems( sorted([k for k, _ in chemLib.items()]) )
         self.cmboxLibs.currentIndexChanged.connect(self.onLibrarySelected)
         self.cmboxChem.currentIndexChanged.connect(self.onChemicalSelected)
@@ -176,13 +177,18 @@ class ChooseFromDBDialog(QDialog):
 
         # Initialize the comboboxes
         # self.onLibrarySelected(0)
-        self.cmboxLibs.setCurrentIndex( self.cmboxLibs.findText('Built-in models') )    # Find the index of the built-in DB
+        self.cmboxLibs.setCurrentIndex( self.cmboxLibs.findText('All species') )    # Find the index of the built-in DB
+        self.onLibrarySelected(0)
 
     def onLibrarySelected(self, indx):
         """Sets the items fro the second combo box."""
         self.cmboxChem.clear()
         lib_key = self.cmboxLibs.itemText(indx)
-        keysDB = sorted([key for key, val in chemLib[lib_key].items()])
+        try:
+            keysDB = sorted([key for key, val in chemLib[lib_key].items()])
+        except KeyError:
+            # List all species
+            keysDB = sorted(list(set([key for lib_key in chemLib.keys() for key in chemLib[lib_key].keys()])))
         self.cmboxChem.addItems(keysDB)
 
     def onChemicalSelected(self, indx):
@@ -218,7 +224,10 @@ class ChooseFromDBDialog(QDialog):
         libsName = self.cmboxLibs.currentText()
         chemName = self.cmboxChem.currentText()
 
-        return displayName, copy.deepcopy(chemLib[libsName][chemName])
+        try:
+            return displayName, copy.deepcopy(chemLib[libsName][chemName])
+        except KeyError:
+            return displayName, copy.deepcopy([spec for lib_key in chemLib.keys() for key, spec in chemLib[lib_key].items() if key==chemName][0])
 
     # static method to create the dialog and return (name, QDpars, accepted)
     @staticmethod
@@ -271,7 +280,7 @@ class SettingsDialog(QDialog):
         groupLayout = QFormLayout()
         groupLayout.addRow("Nucleus", self.cmboxHCSelector)
         groupLayout.addRow("Merge resonances closer than, Hz", self.editAggregateThreshold)
-        groupLayout.addRow("Update if chsh changed by, ppm", self.editRerunThreshold)
+        groupLayout.addRow("Update if chsh changed by, Hz", self.editRerunThreshold)
         qdConfigGroup = QGroupBox("QD settings")
         qdConfigGroup.setLayout(groupLayout)
 
@@ -465,8 +474,9 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self._stems = {}
         self._freqBlocks = []         # List of linearRegionItems that indicate the frequency blocks
 
-        self._selector_flag = False
+        self._state = None
         self._stemDragging_flag = False
+        self._globalChsh_flag = False              # Set TRUE when the global chemical shift is being set by dragging
 
         # Create the main plot for the spectrum
         p0 = SpectrumPlotItem()
@@ -532,7 +542,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             val.hide()
 
         # --- MouseDrag Event in ViewBox of p0 ---
-        p0.vb.mouseDragEvent = self._onMouseDragEvent        ## get the viewbox from the plot item andset its mouseDragEvent
+        p0.vb.mouseDragEvent = self._onMouseDragEvent        ## get the viewbox from the plot item and set its mouseDragEvent
 
         # Connect mouse signals
         # self.getItem(0,0).scene().sigMouseHover.connect(self._onMouseHover)
@@ -746,12 +756,17 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         for lr in self._freqBlocks[indx]:
             lr.setBrush(color)
 
-    def toggleSelectorFlag(self):
-        self._selector_flag = not(self._selector_flag)
-
     def setSelectorFlag(self, flag=True):
         """If the flag is set, MouseDrag event with pressed left button will be interpreted as the frequency region selection (used to add new block)."""
-        self._selector_flag = flag
+        self.setState(state = 'selectRange' if flag else None)
+
+    def setState(self, state=None):
+        """Sets the state of the MainSpectrumWidget. If state is None - return to the default (display) state.
+        Possible states include:
+         - 'selectRange', in this state, MouseDrag event with pressed left button will be interpreted as the frequency region selection (used to add new block).
+         - 'dragSpectrum'
+         """
+        self._state = state
 
     def toggleMovableFreqBlocks(self):
         """Enables/disables changes to be made to frequency blocks with mouse events."""
@@ -802,7 +817,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
         vb = self.getItem(0,0).vb
 
-        if self._selector_flag and (evt.button() == QtCore.Qt.LeftButton):   # and (ev.modifiers() & QtCore.Qt.ControlModifier):
+        if self._state == 'selectRange' and (evt.button() == QtCore.Qt.LeftButton):   # and (ev.modifiers() & QtCore.Qt.ControlModifier):
             # Adding a new frequency range
             evt.accept()
 
@@ -823,6 +838,11 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         elif self._stemDragging_flag:
             # Dragging a group of stems. Will be handled by the corresponding PlotStemsItem
             pass
+        elif self._state == 'dragSpectrum' and (evt.button() == QtCore.Qt.LeftButton):
+            # Moving the experimental spectrum to set a new global chemical shift
+            print('Setting global chemical shift')
+            evt.accept()
+            print(evt)
         else:
             pg.ViewBox.mouseDragEvent(vb, evt, axis)       # Use the standard method
 
@@ -974,7 +994,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self._stems.clear()
         self._freqBlocks.clear()
 
-        self._selector_flag = False
+        self.setState()
 
 class QCheckableComboBox(QComboBox):
     """Checkable ComboBox"""
@@ -1381,7 +1401,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
             dic, data = ng.fileio.bruker.read(path[:-3])
 
             acqus = dic['acqus']
-            ntgrp = acqus['GRPDLY']    # Number of time samples of the Bruker filter response;
+            ntgrp = int(round(acqus['GRPDLY']))    # Number of time samples of the Bruker filter response;
             swh = acqus['SW_h']     # Spectral width in Hz
             f0 = acqus['O1']        # Offset in Hz
             c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
@@ -1460,7 +1480,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
             # Form the arrays
             t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
-            yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
+            yT = (data[::2] + 1j*data[1::2]).reshape(-1,1)
 
             ## Subsample if the frequency range is too large
             #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
@@ -1698,22 +1718,56 @@ class NavigationTreeDelegate(QItemDelegate):
 
 def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
     """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
-    P = viewNode(T.name, nodeType='chemNodeDB' if isinstance(T, chemNodeDB) else 'chemNode')
+    P = viewNode(T.name, nodeType='chemNodeDB' if type(T) in [chemNodeDB, chemNodeQM] else 'chemNode')
     #P.addChild(viewNode(name = tuple([T.name] + ['intn'] + [None]), nodeType='intn', alias='intn' ))
-    if type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
+    if type(T) is chemNodeQM:
+        P.nodeType = 'chemNodeQM'
         P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
 
         if T.childCount() > 1:  # Several chemical shifts; add global parameters
             P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
             P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
 
-        for node in [T]:
-            for par, val in node.default_pars().items():
-                for i in range(len(val)):
-                    if not isinstance(getattr(node, par)[i].label, str):
-                        old = getattr(node, par)
-                        old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
-                        setattr(node, par, old)
+        # Add nodes that can become parents for parameters (combinations of spin systems if any and the QM node itself)
+        prntNodes = [None] * len(T.spsyComb) + [P]
+        parsLists = [[] for _ in range(len(T.spsyComb)+1)]
+        for i_comb, comb in enumerate(T.spsyComb):
+            prntNodes[i_comb] = viewNode(name=(T.name+'-COMB'+str(i_comb+1)), nodeType='chemNode', alias=comb.name)
+            prntNodes[i_comb].addChild(viewNode(name=(T.name+'-COMB'+str(i_comb+1), 'ampl', 0), nodeType='param', alias='intn' ))
+            P.addChild(prntNodes[i_comb])
+
+        # Loop over spin systems and collect all parameters that affect it
+        for i_spsy in range(len(T.spinTopo)):
+            i_comb = -1      # Index to which combination belongs this spin system (the first occurence). Default - the chemNodeQM itself
+            for j, comb in enumerate(T.spsyComb):
+                if i_spsy in comb.indxSpsy: i_comb = j
+
+            # Add new parameters to the list for each combination
+            parsLists[i_comb].extend( [(T.name, 'chshQD', i_parm, T.chshQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
+            parsLists[i_comb].extend( [(T.name, 'alphQD', i_parm, T.alphQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
+            parsLists[i_comb].extend( [(T.name, 'jcplQD', i_parm, T.jcplQD[i_parm].label) for i_parm in T._indxJcpl_by_spsy[i_spsy]] )
+
+        # Add intensity/amplitude parameters and add the nodes to the tree
+        for prnt, parsList_for_prnt in zip(prntNodes, parsLists):
+            parsList_for_prnt.extend( [(chld.name, 'ampl', 0, chld.alias) for chld in T[prnt.name].children() if isinstance(chld, chemNodeQT)] )
+            for pars in sorted(parsList_for_prnt, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
+                try:
+                    prnt.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))
+                except RuntimeError: pass
+
+    elif type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
+        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+
+        if T.childCount() > 1:  # Several chemical shifts; add global parameters
+            P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+            P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+
+        for par, val in T.default_pars().items():
+            for i in range(len(val)):
+                if not isinstance(getattr(T, par)[i].label, str):
+                    old = getattr(T, par)
+                    old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
+                    setattr(T, par, old)
 
         newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in [T] for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
         newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
@@ -1737,7 +1791,7 @@ def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
         P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
         P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
 
-        # Fix faulty labels of parameters and alaises of the terminal nodes
+        # Fix faulty labels of parameters and alises of the terminal nodes
         for node in T.children():
             for par, val in node.default_pars().items():
                 for i in range(len(val)):
@@ -1753,20 +1807,6 @@ def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
         for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):     # Loop over the list of tuples
             P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
     return P
-
-    """
-    # Full parameter tree
-    P = treeNode(T.name)
-    # add the parameters nodes
-    for par, val in sorted(T.default_pars().items(), key = lambda par : [i for i, x in enumerate(myOrder) if x in par[0]][-1] ):
-        print(par, val)
-        for i in range(len(val)):
-            P.addChild(treeNode(name = tuple([T.name] + [par] + [i]) ))
-    # add the children nodes
-    for node in T.children():
-        P.addChild(getDisplayTree(node))
-    return P
-    """
 
 class ChemTreeModel(QtCore.QAbstractItemModel):
     """A treeView representation class"""
@@ -2019,7 +2059,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if clmn == 0 and role == QtCore.Qt.FontRole:
             font = QtGui.QFont()    # Default font
 
-            if node.nodeType in ['chemNode', 'chemNodeDB']:     # Chemical node
+            if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:     # Chemical node
                 if not self.datum.T[node.name].isReported():
                     font.setStyle(QtGui.QFont.StyleItalic)
                 elif node.name in self.datum.repRootNames:
@@ -2068,7 +2108,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 else:
                     pass
 
-            elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
                 if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                     crntVal = self.datum.T[node.name].intn
 
@@ -2137,7 +2177,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 return result | QtCore.Qt.ItemIsSelectable
             elif node.nodeType == 'chemNode':
                 return result | QtCore.Qt.ItemIsEditable # | QtCore.Qt.ItemIsUserCheckable
-            elif node.nodeType == 'chemNodeDB':
+            elif node.nodeType in ['chemNodeDB', 'chemNodeQM']:
                 return result # | QtCore.Qt.ItemIsUserCheckable
             else:
                 return result
@@ -2146,11 +2186,11 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         elif clmn == 4:
             if node.nodeType == 'lshape':
                 return result
-            elif node.nodeType in ['chemNode', 'chemNodeDB']:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:
                 return result | QtCore.Qt.ItemIsEditable
             else:
                 return result | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable
-            """elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4:
+            """elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
             if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                 return QtCore.Qt.ItemIsEditable | result"""
 
@@ -2198,7 +2238,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     # self.dataChanged.emit(index, index)
                     # except: return False
 
-            elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                 # self.datum.T[node.name].set_intn(float(value))
                 self.requestParameterChange.emit((node.name, 'intn', 0), float(value))
                 # self.dataChanged.emit(index, index)
@@ -2346,7 +2386,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         elif source == 'DB':
             newName, QDpars, accepted = ChooseFromDBDialog.run( forbidden_names=list(self.datum.T.keys()) )
             if accepted:
-                X = chemNodeDB(newName, QDpars=QDpars)
+                X = chemNodeQM(newName, QDpars=QDpars)      # X = chemNodeDB(newName, QDpars=QDpars)
             else:
                 return 0
         elif source == 'spsy':
@@ -2355,7 +2395,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             jcpl = [parsSpec()]
             chshAsgn = [1, 2]
             jcplAsgn = [[0, 1], [0, 0]]"""
-            chsh = [parsSpec()]*1
+            chsh = [parsSpec(min=-1.0, max=1.0, dval=0.0)]*1
             jcpl = []
             chshAsgn = [1]
             jcplAsgn = None
@@ -2425,7 +2465,7 @@ class ChemTreeView(QTreeView):
 
     changedParsList = pyqtSignal(int)              # Signalizes to update the parameters list widget and carries the index of the active step
     changedSelected = pyqtSignal(object, object)           # Emits names of the current and previously selected nodes
-    requestAdjustment = pyqtSignal(object)         # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhA'
+    requestAdjustment = pyqtSignal(object)         # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhX'
 
     class ParsSpecDialog(QDialog):
         """A dialog to set specification for a parameter."""
@@ -2680,7 +2720,7 @@ class ChemTreeView(QTreeView):
             clmn = index.column()
             row = index.row()
 
-            if node.nodeType in ['chemNode', 'chemNodeDB']:       # Chemical node
+            if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:       # Chemical node
                 key = node.name
 
                 # Add/remove node actions
@@ -2754,7 +2794,7 @@ class ChemTreeView(QTreeView):
                 # Define parameter setting actions
                 actnScaleToRef = QAction(QIcon('icons\icon_none.png'), 'Set reference', self)
                 actnScaleToRef.setStatusTip('Reset all chemical shifts in the model to the reference')
-                actnScaleToRef.triggered.connect( self.model().datum.scaleToRef )
+                actnScaleToRef.triggered.connect( lambda _ : self.model().datum.shiftToRef(diffChsh=None) )
 
                 actnPromotePriors = QAction(QIcon('icons\icon_globalPriors.png'), 'Set prior as global' if len(slctdKeys) == 1 else 'Set priors as global', self)
                 actnPromotePriors.setStatusTip('Use this prior for all datasets in the Workspace')
@@ -3571,15 +3611,14 @@ class PhasingWidget(QWidget):
     def onPh0SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph0_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
-        self.p0deg = ph0_rel * 45.0
-
+        self.p0deg = ph0_rel * 5.0
         yFph = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
         self.sigPhasingProgress.emit(yFph)
 
     def onPh1SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph1_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
-        p1deg_new = ph1_rel * 90.0
+        p1deg_new = ph1_rel * 30.0
 
         if self.pivot != 0.0:
             self.sliderPh0.blockSignals(True)
@@ -3631,7 +3670,6 @@ class PhasingWidget(QWidget):
     def phasingComplete(self):
         # print("Phasing complete:", self.p0deg, self.p1deg)
         self.sigPhasingComplete.emit(self.p0deg, self.p1deg)
-
         returnToZero = True
         if returnToZero:
             self.sliderPh0.blockSignals(True)
@@ -3642,7 +3680,6 @@ class PhasingWidget(QWidget):
             self.sliderPh1.blockSignals(False)
 
             self.yF = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
-
             self.p0deg, self.p1deg = 0.0, 0.0
 
 class PreprocessingWidget(QWidget):
@@ -3814,7 +3851,7 @@ class FittingThread(QThread):
         else:
             step = self._evalStep
 
-            if actnToRun in ['Ph0', 'Ph1', 'PhA']:
+            if actnToRun in ['Ph0', 'Ph1', 'PhX']:
                 # Adjust the phasing parameters
                 fileToFit.adjust_phase(frqBlkIds=step.frqBlkIds, mode=actnToRun)
                 # Re-evaluate the step to update the (marginalized) amplitudes and the signals to be plotted
@@ -3834,7 +3871,7 @@ class FittingThread(QThread):
             elif actnToRun == 'Evl':
                 # Only evaluatethe last step
                 fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
-            elif actnToRun == 'AuP':
+            elif actnToRun == 'PhA':
                 # Autophasing
                 fileToFit.auto_phase()
 
@@ -4203,7 +4240,7 @@ class MainView(QMainWindow):
         # Autophase
         self.actnAutoPhase = QAction(self._icon('icon_autoPhase.png'), 'Autophase', self)
         self.actnAutoPhase.setStatusTip('Apply a phase correction algorithm')
-        self.actnAutoPhase.triggered.connect( lambda : self.startThread(queueActns=['AuP']) )
+        self.actnAutoPhase.triggered.connect( lambda : self.startThread(queueActns=['PhA']) )
         # Set custom lineshape
         self.actnSetLshape = QAction(self._icon('icon_customShape.png'), 'Set custom lineshape', self)
         self.actnSetLshape.setStatusTip('Apply a custom lineshape derived by deconvolution')
@@ -4398,6 +4435,14 @@ class MainView(QMainWindow):
             self.mainFigureWidget.setCursor(mode='hand')
 
         self.actnGroupFreqBlocks._previuosAction = actn
+
+    # -------------------- Processing keyboard interactions --------------------
+
+    def keyPressEvent(self, ev):
+        # self.scene().keyPressEvent(ev)
+        # self.sigKeyPress.emit(ev)
+        # print('Key pressed ', ev.key())
+        pass
 
     # ------------------------- Other utility methods --------------------------
 
@@ -4752,7 +4797,7 @@ class MainView(QMainWindow):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
         # Form the list of steps to Fit
         s = self.stepsEdit.toPlainText()
-        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhA)|(Rsd)|(Lsh)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
+        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhX)|(Rsd)|(Lsh)|(PhA)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
         s = "A ".join(re.split("A", s ))      # Prevent any consecutive A's from occuring in the string; separate them with spaces
         while s.find('(') != -1:    # Randomize all elements in all parentheses
             beg, end = s.find('('), s.find(')')

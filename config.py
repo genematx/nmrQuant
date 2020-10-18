@@ -1,6 +1,6 @@
 
 QD_AggregatePeaksThreshold = 0.5            # Maximum distance in Hz between two peaks for them to be aggregated in the QD simulations
-QD_RerunQDchshThreshold = 0.1               # Minimum difference in chemical shift (in ppm) w.r.t. to the previously used values to rerun QD simulations (all peaks will be simply moved othervise)
+QD_RerunQDchshThreshold = 10.0               # Minimum difference in chemical shift (in Hz) w.r.t. to the previously used values to rerun QD simulations (all peaks will be simply moved othervise)
 
 OPTIM_maxBasinhoppingSteps = 5             # Maximum number of basinhopping steps of the optimization algorithm
 OPTIM_niterSuccess = 5
