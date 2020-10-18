@@ -3612,7 +3612,6 @@ class PhasingWidget(QWidget):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph0_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
         self.p0deg = ph0_rel * 5.0
-
         yFph = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
         self.sigPhasingProgress.emit(yFph)
 
@@ -3671,7 +3670,6 @@ class PhasingWidget(QWidget):
     def phasingComplete(self):
         # print("Phasing complete:", self.p0deg, self.p1deg)
         self.sigPhasingComplete.emit(self.p0deg, self.p1deg)
-
         returnToZero = True
         if returnToZero:
             self.sliderPh0.blockSignals(True)
@@ -3682,7 +3680,6 @@ class PhasingWidget(QWidget):
             self.sliderPh1.blockSignals(False)
 
             self.yF = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
-
             self.p0deg, self.p1deg = 0.0, 0.0
 
 class PreprocessingWidget(QWidget):
