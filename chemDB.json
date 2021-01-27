@@ -2541,13 +2541,13 @@
   "Methanol": {
     "chshH": [
       [
-        3.25,
-        3.5,
+        3.34,
+        3.36,
         "",
         "Uniform",
         null,
         null,
-        null
+        3.351
       ]
     ],
     "name": "Methanol",

@@ -83,7 +83,7 @@ class OrderedSet(collections.MutableSet):
 class chemSpec:
     """Class for database entires."""
 
-    def __init__(self, name='', chshH=None, chshC=None, jcplH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, meqSpins=None, meqLinks=None, Mw=None, spsyCombH=None, spsyCombC=None, **kwargs):
+    def __init__(self, name='', chshH=None, chshC=None, jcplH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, meqSpins=None, meqLinks=None, Mw=None, nH_labile=0, spsyCombH=None, spsyCombC=None, **kwargs):
         self.name = name
         self.chshH = chshH if chshH is not None else []       # List of chshH parsSpec's
         self.chshC = chshC if chshC is not None else []
@@ -120,6 +120,7 @@ class chemSpec:
         self.multC = multC if multC is not None or [] else [1]*len(self.chshC)
 
         self.Mw = Mw                                                            # Molar weight
+        self.nH_labile = nH_labile                                              # Nunmber of labile protons
 
     def assignSpsy(self):
         """Determines spin systems based on coupling between meqSpins."""
@@ -578,7 +579,7 @@ class spinGroup():
 
                 # Check maybe the difference in all chemical shifts is the same, then all frequency peaks can be just shifted without running the simulations again
                 if len(freqQD)>1 and np.isclose(max(freq_diff), min(freq_diff)) and all(np.isclose(self._oldParsQD["jcpl"], jcplQD)):
-                    freqQPeaks, intnQPeaks = self._oldResult['freq'] + min(freq_diff), self._oldResult['intn']
+                    freqQPeaks, intnQPeaks = self._oldResult['freq'], self._oldResult['intn']
                 else:
                     freqQPeaks, intnQPeaks = compute_transitions(freqQD, jcplQD, self.meqSpins, self.meqLinks)
                     freqQPeaks = [f_arr - f0 for f_arr, f0 in zip(freqQPeaks, freqQD)]       # Subtract the cetral frequency from each freqQPeak for centering
@@ -698,12 +699,14 @@ def tobin(x,n):
     """Converts an integer x into its binary representation in form of a list with n bits."""
     return [(x>>k)&1 for k in range(n-1,-1,-1)]     # Use range(0, n) for MSB first
 
+# @profile
 def QDsims(H, T, tol=0.0001):
     """Simulates a QD system based on the spin frequencies and j couplings in Hz. See, e.g., http://www.users.csbsju.edu/~frioux/nmr/Speclab4.htm"""
     n_spin = int(math.log2(T.shape[0]))
 
     # Compute the eigenvalues/eigenvectors of the Hamiltonian
-    vH, uH = np.linalg.eigh(np.asarray(H))      # Need to make sure that the Hamiltonian is passed as an array, not a matrix      # vH, uH = scipy.linalg.eigh(H)              # Possibly faster in some cases???
+    # vH, uH = np.linalg.eigh(np.asarray(H))      # Need to make sure that the Hamiltonian is passed as an array, not a matrix      # vH, uH = scipy.linalg.eigh(H)              # Possibly faster in some cases???
+    vH, uH = scipy.linalg.eigh(np.asarray(H))
 
     # Find the intensities and transition frequencies
     intn = np.dot(uH.T, T.dot(uH))**2 / (2**(n_spin-1))     # Elementwise power!
@@ -777,12 +780,14 @@ def QTransFull(chshQD, jcplQD, meqSpins, meqLinks, tol=0.0001):
                 ind += 1     # Prevent repeating splits (and resulting empty arrays)
 
             if not np.isclose(chsh[i], chsh[i+1]):
-                while True:
-                    if omega[ind]-chsh[i] < chsh[i+1]-omega[ind]:
-                        ind += 1
-                    elif omega[ind-1]-chsh[i] > chsh[i+1]-omega[ind-1]:
-                        ind -= 1
-                    else: break
+                try:
+                    while True:
+                        if omega[ind]-chsh[i] < chsh[i+1]-omega[ind]:
+                            ind += 1
+                        elif omega[ind-1]-chsh[i] > chsh[i+1]-omega[ind-1]:
+                            ind -= 1
+                        else: break
+                except IndexError: break
 
             indx_split[i] = ind
 
@@ -1720,7 +1725,7 @@ class chemNode(treeNode):
         super().__init__(name, alias, **kwargs)
         self._reported = True
         self.chsh = chsh if chsh is not None else [parsSpec(min=-0.5, max=0.5)]
-        self.alph = alph if alph is not None else [parsSpec(min=-5., max=25., dval=0.0)]
+        self.alph = alph if alph is not None else [parsSpec(min=-1., max=5., dval=0.0)]
         self.ampl = ampl if ampl is not None else [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=1.0)]
         self.phase = phase if phase is not None else [parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)]
         self.intn = intn         # Global intensity
@@ -1730,6 +1735,8 @@ class chemNode(treeNode):
         self.sPole = 0.          # self-pole determined by alph and chsh
         self.uPoles = 0.         # Poles that includes the effect of all parents
         self._oldHash = None
+        self._oldLeafPoles = None    # Poles of all leaf nodes
+        self._t_shift = None         # Time samples array for shifting
 
     def set_intn(self, intn):
         """Sets a new intensity value for the tree node and updates its signals."""
@@ -1811,6 +1818,7 @@ class chemNode(treeNode):
         self.sT = []
         self.uF = []
         self._oldHash = None
+        self._oldLeafPoles = None
 
     def getPoles(self, c0, chsh=None, alph=None, **kwargs):
         """Computes the poles and returns 1 if they have changed, 0 otehrwise"""
@@ -1845,15 +1853,46 @@ class chemNode(treeNode):
 
             self._oldHash = newHash
 
-    def evalFreq(self, f, dt, df, c0, f0=0, tau=0):
+    # @profile
+    def evalFreq(self, f, dt, df, c0, f0=0, tau=0, allowShift=True):
         "Computes the node's response in the frequency domain assuming that all nodes have updated uPoles."
-        # # Check if the signal needs to be reevaluated
-        # if self.uF == []:
+        # # Check if the signal needs to be completely reevaluated
+        newHash = arrhash(f)
+        newLeafPoles = np.concatenate([np.array(leaf.uPoles) for leaf in self.leaves()]).ravel()      # New poles for all leaves
+
+        if allowShift and newHash == self._oldHash:
+            try:
+                diffLeafPoles = self._oldLeafPoles - newLeafPoles
+                # If all new poles are just shifted old poles, shift the resulting response
+                if np.isclose(max(diffLeafPoles.real), min(diffLeafPoles.real)) and np.isclose(max(diffLeafPoles.imag), min(diffLeafPoles.imag)):
+                    if self._t_shift is None or self.uT is None:
+                         nf_all = int(np.round(1/(dt*df*c0)))            # Length of the full (initial) spectrum
+                         nf_new = len(f)
+                         dt_new = dt / nf_new * nf_all                   # The equivalent sampling time for the reduced frequency range
+
+                         self._t_shift = np.fft.fftshift(np.linspace(-(nf_new+1)*dt_new/2, (nf_new-1)*dt_new/2, nf_new), axes=0).ravel()
+                         self.uT = np.fft.ifft(np.fft.ifftshift(self.uF, axes=0), axis=0)
+
+                    shift = -diffLeafPoles[0]
+                    sT = np.exp( 1j*shift.imag*self._t_shift + shift.real*np.abs(self._t_shift) )
+                    self.uT = self.uT * sT
+                    self.uF = np.fft.fftshift(np.fft.fft(self.uT, len(self.uT), axis=0), axes=0) # / np.sqrt(len(yTs))
+
+                    self._oldLeafPoles = newLeafPoles
+                    return None
+            except ValueError: pass
+
+        # Otherwise -- Full computations
         self.uF = np.zeros((len(f), 1), dtype='complex128').ravel()
         for chld in self.children():
-            chld.evalFreq(f, dt, df, c0, f0, tau)
+            chld.evalFreq(f, dt, df, c0, f0, tau, allowShift=allowShift)
             self.uF += chld.uF
         self.uF *= self.intn
+        self.uT, self._t_shift = None, None              # Reset the time-domain signal
+
+        # Update saved hash and poles
+        self._oldHash = newHash
+        self._oldLeafPoles = newLeafPoles
 
 class chemNodeQD(chemNode):
 
@@ -2021,7 +2060,7 @@ class chemNodeT(chemNode):
             uPolePrnt = 0. if self.isRoot() else self._parent.uPoles     # Set the offset pole to the uPole of the parent
         newPoles = self.sPole + uPolePrnt + self.qPoles
         if not np.array_equal(self.uPoles, newPoles):
-            self.uPoles = newPoles
+            self.uPoles = 1j*newPoles.imag + np.minimum(newPoles.real, 0.0)
             self.uF = []    # Reset the output in the frequency domain
 
     def reset(self):
@@ -2030,7 +2069,7 @@ class chemNodeT(chemNode):
 
     # @njit
     # @profile
-    def evalFreq(self, f, dt, df, c0, f0=0, tau=0):
+    def evalFreq(self, f, dt, df, c0, f0=0, tau=0, allowShift=True):
         "Computes the node's response in the frequency domain assuming that all ancestors have updated uPoles."
         # Check if the signal needs to be reevaluated
         newHash = arrhash(f)
@@ -2287,7 +2326,7 @@ class chemNodeQM(chemNode, chemSpec):
 
     # @profile
     def getPoles(self, c0, chsh=[], alph=[], chshQD=[], alphQD=[], jcplQD=[], **kwargs):
-        """Computes the poles for all peaks including QD simulations if needed."""
+        """Computes the poles for all peaks and all children, running QD simulations if needed."""
         super().getPoles(c0, chsh, alph)     # Compute sPole
 
         ## Values of the QD parameters
@@ -2365,7 +2404,7 @@ class chemNodeQT(chemNode):
             uPolePrnt = 0. if self.isRoot() else self._parent.uPoles     # Set the offset pole to the uPole of the parent
         newPoles = self.sPole + uPolePrnt + self.qPoles
         if not np.array_equal(self.uPoles, newPoles):
-            self.uPoles = newPoles
+            self.uPoles = 1j*newPoles.imag + np.minimum(newPoles.real, 0.0)
             self.uF = []    # Reset the output in the frequency domain
 
     def reset(self):
@@ -2374,7 +2413,7 @@ class chemNodeQT(chemNode):
 
     # @njit
     # @profile
-    def evalFreq(self, f, dt, df, c0, f0=0, tau=0):
+    def evalFreq(self, f, dt, df, c0, f0=0, tau=0, allowShift=True):
         "Computes the node's response in the frequency domain assuming that all ancestors have updated uPoles."
         # Check if the signal needs to be reevaluated
         newHash = arrhash(f)
@@ -2456,8 +2495,11 @@ def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
     return Z, [i.name for i in repRoots]
 
 # @profile
-def evalTreeF(tree, f, dt, df, c0, f0=0, pars=None, xclRootNames=None):
+def evalTreeF(tree, f, dt, df, c0, f0=0, pars=None, xclRootNames=None, allowShift=False):
     """Evaluates the entire tree of chemNodes and returns a model spectrum directly in the frequency domain. Tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
+    if pars is None:
+        pars = defaultTreePars(tree)
+
     tau = 0     #    or use
     #tau = -pars['.']['tau'][0]
     if xclRootNames is None:
@@ -2473,7 +2515,7 @@ def evalTreeF(tree, f, dt, df, c0, f0=0, pars=None, xclRootNames=None):
 
     # 3. Collect the childrens' responses, starting from the bottom
     for rep in repRoots:
-        rep.evalFreq(f, dt, df, c0, f0, tau)
+        rep.evalFreq(f, dt, df, c0, f0, tau, allowShift=allowShift)
 
     # 4. Put all responses together
     Z = np.ones((len(f), len(repRoots)), float) + 1j*np.zeros((len(f), len(repRoots)), float)
@@ -2548,6 +2590,9 @@ def loadTree(fname):
         # Compatibility check: Make sure that each node in the tree has an ampl and a phase attributes
         for node in T.items():
             if not hasattr(node, 'ampl'): node.ampl = [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=1.0)]
+            if not hasattr(node, '_oldHash'): node._oldHash = None
+            if not hasattr(node, '_oldLeafPoles'): node._oldLeafPoles = None
+            if not hasattr(node, '_t_shift'): node._t_shift = None
             if not hasattr(node, 'phase'): node.phase = [parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)]
             if isinstance(node, chemNodeQD) and not hasattr(node, 'spinTopo'): node.spinTopo = spinGroup(*asgn2meqv(node.chshAsgn, node.jcplAsgn))
             # if isinstance(node, chemNodeQM): node._setSpinTopo()
