@@ -219,7 +219,6 @@ class chemSpec:
         if mode == '13C':
             spsyBig = spsySpec(chsh=self.chshC, jcpl=[], chshAsgn=list(range(1,len(self.chshC)+1)), jcplAsgn = None)
             mult = self.multC
-
         elif mode == '1H':
             print(self.meqSpins, self.meqLinks)
             spsyBig = spsySpec(self.chshH, self.jcplH, *meqv2asgn(self.meqSpins, self.meqLinks))
