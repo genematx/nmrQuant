@@ -135,6 +135,9 @@ class Step():
             self.autoKeys.add(('.', 'theta', 0))
 
     def run(self, DDD):
+        # TODO! Check for convergence of parameters and don't fiit extra repetitions
+        # pars_start = DDD.getCrntVals(self.parsKeys)
+
         for _ in range(self.nrep):
             if self.script is not None:
                 self.script(DDD)
@@ -1886,8 +1889,7 @@ class Datum():
 
     # @profile
     def _get_signals_in_freq(self, evalParsH, frqBlkIds=None, freqMask=None, wnd=None, numberField=None, allowShift=False, shiftingRange=0.1):
-        """Returns a matrix of modelled signals and the y vector in frequency domain. shiftingRange - maximum allowed deviation of chemical shift (on each side) before the spectrum is recomputed."""
-
+        """Returns a matrix of modelled signals and the y vector in frequency domain. shiftingRange - maximum allowed deviation of chemical shift in ppm (on each side) before the spectrum is recomputed."""
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
         if numberField is None:
@@ -1924,9 +1926,9 @@ class Datum():
 
             # Expand the region to include pow2 samples; merge disjoing blocks
             if allowShift:
-                pad = int(self.c0*shiftingRange / (self.f[1]-self.f[0]))     # Minimum number of spectral points to pad on each side (related to maximum change in chemical shift)
+                pad = int(shiftingRange / (self.f[1]-self.f[0]))     # Minimum number of spectral points to pad on each side (related to maximum change in chemical shift)
                 valid_length = min_max_indxFreqPaddedMerged[0].max-min_max_indxFreqPaddedMerged[0].min
-                extra_padding = next_pow_of_2(valid_length+2*pad) - valid_length
+                extra_padding = min( next_pow_of_2(valid_length+2*pad), len(self._f_shifted()) ) - valid_length
                 pad_l, pad_r = math.floor(extra_padding/2), math.ceil(extra_padding/2)
                 min_max_indxFreqPaddedMerged[0] = minmaxTuple(min_max_indxFreqPaddedMerged[0].min-pad_l, min_max_indxFreqPaddedMerged[0].max+pad_r)
 
@@ -2224,7 +2226,7 @@ class Datum():
 
             # Define the spectrum shifting range for faster computations
             allowShift = any([key[1] in ['chsh', 'alph'] for key in parsKeys])
-            shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])
+            shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])            # Maximum range width of any chemical shift parameter
 
             costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=False, allowShift=allowShift, shiftingRange=shiftingRange)[0]
 

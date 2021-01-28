@@ -34,7 +34,7 @@ pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 pg.setConfigOptions(antialias=True)       # Enable antialiasing for prettier plots
 
-version = '0.0.1'
+version = '0.0.2'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -115,9 +115,12 @@ def start_fit(DDD):
     # Reset the definitions of the extra parameters
     DDD.extra.update({'mass_frac_MalAc':0.0, 'masses_au': {}, 'mass_total_au':0.0, 'density':1000.0, 'fitted':False})
 
+    # Clear priors set in the Datum, if any
+    DDD.parsSpecDict.clear()
+
     # Reset the current parameters to their default values
     for key in DDD.allParsKeys():
-        val = DDD.getPrior(key).dflt()    # Default parameter value
+        val = DDD.getPrior(key).dflt()    # Default parameter value from the prior
         DDD.setCrntVal(key, val)
 
     # Reset all intensities
@@ -135,7 +138,7 @@ def fit_global_chsh(DDD):
         autoKeys.append((name, 'ampl', 0))
 
     # Use apodization
-    DDD.resetFreqs(apod=10.0)
+    DDD.resetFreqs(apod=10.0, zff=0)
     DDD.setCrntVal(key=('Mixture', 'alph', 0), val=12.0)
 
     # Adjust the global chemical shift
@@ -149,7 +152,7 @@ def fit_global_chsh(DDD):
         DDD.optimize(parsKeys=[('Mixture', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[4])
 
     # Reset apodization
-    DDD.resetFreqs(apod=00.0)
+    DDD.resetFreqs(apod=00.0, zff=1)
     DDD.setCrntVal(key=('Mixture', 'alph', 0), val=2.0)
 
 def fit_ethanol_CH3(DDD):
@@ -363,25 +366,35 @@ def init_Steps_autoWine(SSS):
     SSS.steps.append(Step(script=fit_global_chsh))
     SSS.steps.append(Step(script=fit_ethanol_CH3))
     SSS.steps.append(Step(parsKeys=[('Water', 'chshQD', 0), ('Water', 'alphQD', 0)],
-                          autoKeys = [('.', 'sigma2', 0), ('Water', 'ampl', 0)], frqBlkIds=[1], fitEach=True))     # Fit water
+                          autoKeys = [('.', 'sigma2', 0), ('Water', 'ampl', 0)], frqBlkIds=[1], nrep=3, fitEach=True))     # Fit water
     SSS.steps.append(Step(parsKeys=[('Maleic acid', 'chshQD', 0), ('Maleic acid', 'alphQD', 0)],
-                          autoKeys = [('.', 'sigma2', 0), ('Maleic acid', 'ampl', 0)], frqBlkIds=[2], fitEach=True))
+                          autoKeys = [('.', 'sigma2', 0), ('Maleic acid', 'ampl', 0)], frqBlkIds=[2], nrep=3, fitEach=True))
     # Set up and fit the acids
     SSS.steps.append(Step(script=fit_acids))
     SSS.steps.append(Step(parsKeys=[('Acetic acid', 'chshQD', 0), ('Acetic acid', 'alphQD', 0)],
-                          autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0)], frqBlkIds=[7], fitEach=True))     # Fit acetic acid
+                          autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0)], frqBlkIds=[7], nrep=3, fitEach=True))     # Fit acetic acid
     SSS.steps.append(Step(parsKeys=[('Succinic acid', 'chshQD', 0), ('Succinic acid', 'alphQD', 0)],
-                         autoKeys = [('.', 'sigma2', 0), ('Succinic acid', 'ampl', 0)], frqBlkIds=[6], fitEach=True))     # Fit succinic acid
+                         autoKeys = [('.', 'sigma2', 0), ('Succinic acid', 'ampl', 0)], frqBlkIds=[6], nrep=3, fitEach=True))     # Fit succinic acid
     SSS.steps.append(Step(script=fit_lactic))        # Fits lactic acid and alanine
-    SSS.steps.append(Step(parsKeys=[('Acids', 'alph', 0)],
-                          autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
-    # Fit the sugars
+    # SSS.steps.append(Step(parsKeys=[('Acids', 'alph', 0)],
+    #                       autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
+    # # Fit the sugars
     SSS.steps.append(Step(script=fit_sugars))
     # Fit methanol and butanediol
     SSS.steps.append(Step(parsKeys=[('Methanol', 'chshQD', 0), ('Methanol', 'alphQD', 0)],
-                         autoKeys = [('.', 'sigma2', 0), ('Methanol', 'ampl', 0)], frqBlkIds=[9], fitEach=True))     # Fit methanol
-    SSS.steps.append(Step(parsKeys=[('2,3-Butanediol', 'chsh', 0), ('2,3-Butanediol', 'alph', 0)],
-                         autoKeys = [('.', 'sigma2', 0), ('2,3-Butanediol', 'ampl', 0)], frqBlkIds=[10], fitEach=True))     # Fit butanediol
+                         autoKeys = [('.', 'sigma2', 0), ('Methanol', 'ampl', 0)], frqBlkIds=[9], nrep=3, fitEach=True))     # Fit methanol
+    # SSS.steps.append(Step(parsKeys=[('2,3-Butanediol', 'chsh', 0), ('2,3-Butanediol', 'alph', 0)],
+    #                      autoKeys = [('.', 'sigma2', 0), ('2,3-Butanediol', 'ampl', 0)], frqBlkIds=[10], fitEach=True))     # Fit butanediol
+
+    # Fit unidentified peaks
+    SSS.steps.append(Step(parsKeys=[('Unidentified', 'chsh', 0), ('Unidentified', 'alph', 0)],
+                         autoKeys = [('.', 'sigma2', 0), ('Peak 1', 'ampl', 0), ('Peak 2', 'ampl', 0)], frqBlkIds=[10], nrep=2, fitEach=True))
+    SSS.steps.append(Step(parsKeys=[('Peak 1', 'chshQD', 0), ('Peak 1', 'alphQD', 0)],
+                         autoKeys = [('.', 'sigma2', 0), ('Peak 1', 'ampl', 0)], frqBlkIds=[10], nrep=2, fitEach=True))
+    SSS.steps.append(Step(parsKeys=[('Peak 2', 'chshQD', 0), ('Peak 2', 'alphQD', 0)],
+                         autoKeys = [('.', 'sigma2', 0), ('Peak 2', 'ampl', 0)], frqBlkIds=[10], nrep=2, fitEach=True))
+    SSS.steps.append(Step(parsKeys=[('Unidentified', 'chsh', 0), ('Unidentified', 'alph', 0)],
+                         autoKeys = [('.', 'sigma2', 0), ('Peak 1', 'ampl', 0), ('Peak 2', 'ampl', 0)], frqBlkIds=[10], nrep=2, fitEach=True))
 
     SSS.steps.append(Step(script=finish_fit))
     SSS.steps.append(Step(parsKeys=[], autoKeys = [('.', 'sigma2', 0)], frqBlkIds=[1, 3, 4, 5, 6, 7, 8, 9, 10]))   # The last step to evaluate and plot the result # Add an empty step (no autofitting for amplitudes is selected)
@@ -546,6 +559,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
 
     config.QD_AggregatePeaksThreshold = 0.0
     config.QD_RerunQDchshThreshold = 0.0
+    config.OPTIM_startFrom = "default"
     wsp.extra['autoWine'] = True
     wsp.saveResults = MethodType(saveResults_wine, wsp)      # Update the saving function
 
@@ -934,7 +948,7 @@ class MainView(QMainWindow):
         self.actnFitAllFiles.setStatusTip('Fit all steps for this file')
         self.actnFitAllFiles.triggered.connect(self.fitAllFiles)
         # Reset the fit but keep the files
-        self.actnResetFit = QAction(self._icon('icon_resetFit.png'), 'Reset the fit', self)
+        self.actnResetFit = QAction(self._icon('icon_magic.png'), 'Reset the fit', self)
         self.actnResetFit.setStatusTip('Resets the fitted parameters to default values but keeps loaded spectra in the workspace')
         self.actnResetFit.triggered.connect(lambda _ : init_autoWine(self.wsp, resetSeries=False))
         # Stop fitting action
