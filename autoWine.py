@@ -388,7 +388,6 @@ def init_Steps_autoWine(SSS):
 
 def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, resetSteps=True):
     """Initializes the workspace wsp for beverage analysis."""
-    print('Initializing autoWine.')
 
     def saveResults_wine(self, filename='results.xlsx', parsKeys=None):
         """Saves the reults to an excel file."""
@@ -561,20 +560,20 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
         T = loadTree('autoWineTree.ctr')
         wsp.setTree(T)
 
-        # Set distributions' parameters (to be done in the tree)
-        # TODO: Update in the tree
-        wsp.setGlobalPrior(key=('Mixture', 'chsh', 0), min=-0.35, max=0.35)
-        wsp.setGlobalPrior(key=('Acids', 'alph', 0), min=-1.0, max=7.5, dval=0.00)
-        wsp.setGlobalPrior(key=('Succinic acid', 'chshQD', 0), min=2.625, max=2.675, dval=2.655)
-        wsp.setGlobalPrior(key=('Succinic acid', 'alphQD', 0), min=-2.0, max=5.0, dval=0.0)
-        wsp.setGlobalPrior(key=('Acetic acid', 'chshQD', 0), min=2.05, max=2.1, dval=2.08)
-        wsp.setGlobalPrior(key=('Acetic acid', 'alphQD', 0), min=-2.5, max=5.0, dval=0.0)
-        wsp.setGlobalPrior(key=('Lactic acid', 'chshQD', 0), min=1.365, max=1.39, dval=1.381)
-        wsp.setGlobalPrior(key=('Lactic acid', 'alph', 0), min=-2.0, max=5.0, dval=0.00)
-        wsp.setGlobalPrior(key=('Alanine', 'alph', 0), min=-1.0, max=5.0, dval=0.00)
-        wsp.setGlobalPrior(key=('2,3-Butanediol', 'alph', 0), min=-2.0, max=5.0, dval=0.0)
-        wsp.setGlobalPrior(key=('Ethanol', 'chshQD', 0), min=1.165, max=1.19, dval=1.177)
-        wsp.setGlobalPrior(key=('Maleic acid', 'chshQD', 0), min=6.30, max=6.41, dval=6.390)
+        # # Set distributions' parameters (to be done in the tree)
+        # # TODO: Update in the tree
+        # wsp.setGlobalPrior(key=('Mixture', 'chsh', 0), min=-0.35, max=0.35)
+        # wsp.setGlobalPrior(key=('Acids', 'alph', 0), min=-1.0, max=7.5, dval=0.00)
+        # wsp.setGlobalPrior(key=('Succinic acid', 'chshQD', 0), min=2.625, max=2.675, dval=2.655)
+        # wsp.setGlobalPrior(key=('Succinic acid', 'alphQD', 0), min=-2.0, max=5.0, dval=0.0)
+        # wsp.setGlobalPrior(key=('Acetic acid', 'chshQD', 0), min=2.05, max=2.1, dval=2.08)
+        # wsp.setGlobalPrior(key=('Acetic acid', 'alphQD', 0), min=-2.5, max=5.0, dval=0.0)
+        # wsp.setGlobalPrior(key=('Lactic acid', 'chshQD', 0), min=1.365, max=1.39, dval=1.381)
+        # wsp.setGlobalPrior(key=('Lactic acid', 'alph', 0), min=-2.0, max=5.0, dval=0.00)
+        # wsp.setGlobalPrior(key=('Alanine', 'alph', 0), min=-1.0, max=5.0, dval=0.00)
+        # wsp.setGlobalPrior(key=('2,3-Butanediol', 'alph', 0), min=-2.0, max=5.0, dval=0.0)
+        # wsp.setGlobalPrior(key=('Ethanol', 'chshQD', 0), min=1.165, max=1.19, dval=1.177)
+        # wsp.setGlobalPrior(key=('Maleic acid', 'chshQD', 0), min=6.30, max=6.41, dval=6.390)
 
     # Set the frequency blocks
     if resetFreqBlks:
@@ -934,6 +933,10 @@ class MainView(QMainWindow):
         self.actnFitAllFiles = QAction(self._icon('icon_fitAllFiles.png'), 'Fit all files', self)
         self.actnFitAllFiles.setStatusTip('Fit all steps for this file')
         self.actnFitAllFiles.triggered.connect(self.fitAllFiles)
+        # Reset the fit but keep the files
+        self.actnResetFit = QAction(self._icon('icon_resetFit.png'), 'Reset the fit', self)
+        self.actnResetFit.setStatusTip('Resets the fitted parameters to default values but keeps loaded spectra in the workspace')
+        self.actnResetFit.triggered.connect(lambda _ : init_autoWine(self.wsp, resetSeries=False))
         # Stop fitting action
         actnstopThread = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
         actnstopThread.setStatusTip('Stop fitting')
@@ -945,6 +948,7 @@ class MainView(QMainWindow):
 
         # ------------------------- Set the toolbar ----------------------------
         tbMain.addAction(clearAction)
+        tbMain.addAction(self.actnResetFit)
         tbMain.addAction(actnImportData)
         tbMain.addAction(actnRemoveCurrent)
         tbMain.addSeparator()
@@ -1272,6 +1276,9 @@ class MainView(QMainWindow):
 
     def fitAllFiles(self):
         """Fits all steps for all Files in the current Series. The starting values on the next step are copied from the current found values. Starting values for each file are determined by the settings and are set by the FittingThread."""
+
+        # Reset the workspace/current parameters without resetting the data in the series
+        init_autoWine(self.wsp, resetSeries=False)
 
         if isinstance(self._crnt, Series):
             selectedFiles = [i for i in self._crnt.data]
