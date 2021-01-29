@@ -134,8 +134,10 @@ def fit_global_chsh(DDD):
     """Aligns the spectrum by adjusting its gloabl chemical shift."""
     # Turn on autofitting for some components
     autoKeys = [('.', 'sigma2', 0)]
-    for name in ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol']:
+    for name in ['Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol']:
         autoKeys.append((name, 'ampl', 0))
+    if 'DRY' not in DDD.name:
+        autoKeys.append( ('Ethanol', 'ampl', 0) )
 
     # Use apodization
     DDD.resetFreqs(apod=10.0, zff=0)
@@ -156,14 +158,21 @@ def fit_global_chsh(DDD):
     DDD.setCrntVal(key=('Mixture', 'alph', 0), val=2.0)
 
 def fit_ethanol_CH3(DDD):
-    autoKeys = [('.', 'sigma2', 0), ('Ethanol', 'ampl', 0)]
-    for _ in range(2):
-        DDD.optimize(parsKeys=[('Ethanol', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[4])
-        DDD.optimize(parsKeys=[('Ethanol', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[4])
+    if 'DRY' in DDD.name:
+        # Fit butanediol
+        autoKeys = [('.', 'sigma2', 0), ('2,3-Butanediol', 'ampl', 0)]
+        DDD.optimize(parsKeys=[('2,3-Butanediol', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[4])
+        DDD.optimize(parsKeys=[('2,3-Butanediol', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[4])
+    else:
+        # Fit ethanol
+        autoKeys = [('.', 'sigma2', 0), ('Ethanol', 'ampl', 0)]
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('Ethanol', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[4])
+            DDD.optimize(parsKeys=[('Ethanol', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[4])
 
-    # Use the CH3 peak as the reference (only if the estimated signal of ethanol is strong enough)
-    if DDD.getCrntVal(key=('Ethanol', 'ampl', 0)) > 0.5*DDD.extra['sigma_est']:
-        DDD.shiftToRef(refKey=('Ethanol', 'chshQD', 0), keepFitted=False)
+        # Use the CH3 peak as the reference (only if the estimated signal of ethanol is strong enough)
+        if DDD.getCrntVal(key=('Ethanol', 'ampl', 0)) > 0.5*DDD.extra['sigma_est']:
+            DDD.shiftToRef(refKey=('Ethanol', 'chshQD', 0), keepFitted=False)
 
 def fit_sugars(DDD):
     # Step 4. Fit Glucose and Sucrose using the anomeric peaks
@@ -212,11 +221,12 @@ def fit_acids(DDD):
         print('Maleic acid present, intensity = {:.4g}.'.format(ampl_MalAc))
         # Reset the parameters for the case when maleic acid is present
         DDD.altFreqBlock(indx=6, lims=(2.75, 3.05))
+        DDD.altFreqBlock(indx=11, lims=(4.65, 4.75))       # Tartaric acid
 
         # Shifts of individual acid peaks
         DDD.setCrntVals(parsF={('Citric acid', 'chshQD', 0):2.966, ('Citric acid', 'chshQD', 1):2.793,
-                               ('Malic acid', 'chshQD', 1):2.852, ('Malic acid', 'chshQD', 2):2.804,
-                               ('Lactic acid', 'chshQD', 0):1.415, ('Lactic acid', 'chshQD', 1):4.380})     # Reset the chemical shift values to defaults for the case of maleic acid present
+                               ('Malic acid', 'chshQD', 0): 4.595, ('Malic acid', 'chshQD', 1):2.852, ('Malic acid', 'chshQD', 2):2.804,
+                               ('Lactic acid', 'chshQD', 0):1.415, ('Lactic acid', 'chshQD', 1):4.358})     # Reset the chemical shift values to defaults for the case of maleic acid present
 
         # Global shift for the acids
         DDD.setPrior(key=('Acids', 'chsh', 0), min=-0.01, max=0.1, dval=0.00)
@@ -246,11 +256,31 @@ def fit_acids(DDD):
 
         DDD.optimize(parsKeys=[('Acids', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
 
+    # Return to the original frequency blocks
     DDD.altFreqBlock(indx=6, lims=(2.5, 3.1))     # Return to the original frequency block
+
+    # Fit tartaric acid, if possible
+    if ampl_MalAc > DDD.extra['sigma_est']:
+        # With maleic acid
+        DDD.setCrntVal(key=('Tartaric acid', 'chshQD', 0), val=4.671)
+        DDD.setPrior(key=('Tartaric acid', 'chshQD', 0), min=4.65, max=4.75)
+        frqBlkID_tartaric = 11
+    else:
+        # Without maleic acid
+        DDD.setCrntVals(parsF={('Tartaric acid', 'chshQD', 0):4.514})
+        DDD.setPrior(key=('Tartaric acid', 'chshQD', 0), min=4.45, max=4.6)
+        frqBlkID_tartaric = 12
+
+    if 'DRY' in DDD.name or 'PRESAT' in DDD.name:
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('Tartaric acid', 'chshQD', 0)], autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
+            DDD.optimize(parsKeys=[('Tartaric acid', 'chshQD', 0), ('Tartaric acid', 'alphQD', 0)], autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
+            DDD.optimize(parsKeys=[('Tartaric acid', 'alphQD', 0)], autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
 
 def fit_lactic(DDD):
     """Fits the region related to lactic acid peaks H3 (incl. lactic acid and alanine)."""
     DDD.setPrior(key=('Lactic acid', 'chshQD', 0), fromCurrent=True)        # Depends on presense/absense of Maleic acid in the sample
+    DDD.setPrior(key=('Lactic acid', 'chshQD', 1), fromCurrent=True)
     autoKeys=[('.', 'sigma2', 0), ('Lactic acid', 'ampl', 0), ('Alanine', 'ampl', 0)]
     for _ in range(2):
         DDD.optimize(parsKeys=[('Lactic acid', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[8])
@@ -260,6 +290,29 @@ def fit_lactic(DDD):
 
 def fit_autoPhase(DDD):
     DDD.auto_phase(fit_Ph1=False)
+
+def fit_volatile(DDD):
+    """Fits butanediol (non-volatile) in the DRY samples or unidentified volatile compounds in the usual samples."""
+    if 'DRY' in DDD.name:
+        # Fit 2,3-butanediol
+        pass
+    else:
+        # Fit unidentified peaks
+        autoKeys = [('.', 'sigma2', 0), ('Peak 1', 'ampl', 0), ('Peak 2', 'ampl', 0)]
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('Unidentified', 'chsh', 0), ('Unidentified', 'alph', 0)],
+                         autoKeys=autoKeys, frqBlkIds=[10])
+            DDD.optimize(parsKeys=[('Peak 1', 'chshQD', 0), ('Peak 1', 'alphQD', 0)],
+                         autoKeys=autoKeys, frqBlkIds=[10])
+            DDD.optimize(parsKeys=[('Peak 2', 'chshQD', 0), ('Peak 2', 'alphQD', 0)],
+                         autoKeys=autoKeys, frqBlkIds=[10])
+
+def fit_water_neighborhood(DDD):
+    """Adjust the peaks of malic and lactic acids that are close to water without reestimating their intensities"""
+    parsKeys = []
+    if DDD.getCrntVal(key=('Malic acid', 'ampl', 0)) > DDD.extra['sigma_est']: parsKeys.append(('Malic acid', 'chshQD', 0))
+    if DDD.getCrntVal(key=('Lactic acid', 'ampl', 0)) > DDD.extra['sigma_est']: parsKeys.append(('Lactic acid', 'chshQD', 1))
+    DDD.optimize(parsKeys=parsKeys, autoKeys=[], frqBlkIds=[12, 13])
 
 def finish_fit(DDD):
     """Finishing the fitting of a wine sample."""
@@ -350,14 +403,17 @@ def init_freqBlocks_autoWine(SSS):
     # Add new blocks
     SSS.addFreqBlock(lims=(-0.5, 7.0), select=True)           # Block 1. The main range (mainly for plotting)
     SSS.addFreqBlock(lims=(6.0, 6.8), select=False)            # Block 2. Maleic acid
-    SSS.addFreqBlock(lims=(3.1, 4.20), bslnOrder=(2,2), select=False)            # Block 3. Sugars
+    SSS.addFreqBlock(lims=(3.25, 4.20), bslnOrder=(1,1), select=False)            # Block 3. Sugars
     SSS.addFreqBlock(lims=(0.5, 1.75), select=False)           # Block 4. Ethanol CH3
     SSS.addFreqBlock(lims=(5.1, 5.55), bslnOrder=(5,5), select=False)           # Block 5. Anomeric protons of Glucose
     SSS.addFreqBlock(lims=(2.5, 3.1), bslnOrder=(3,3), select=False)           # Block 6. Citric/Malic acid
     SSS.addFreqBlock(lims=(2.0, 2.2), bslnOrder=(2,2), select=False)           # Block 7. Acetic acid
     SSS.addFreqBlock(lims=(1.33, 1.6), bslnOrder=(3,3), select=False)          # Block 8. Lactic acid/Alanine
     SSS.addFreqBlock(lims=(3.30, 3.40), bslnOrder=(2,2), select=False)         # Block 9. Methanol
-    SSS.addFreqBlock(lims=(0.75, .975), bslnOrder=(3,3), select=False)         # Block 10. Butanediol
+    SSS.addFreqBlock(lims=(0.75, .975), bslnOrder=(3,3), select=False)         # Block 10. Unidedentified volatile compounds
+    SSS.addFreqBlock(lims=(4.62, 4.75), bslnOrder=(2,2), select=False)         # Block 11. Tartaric acid _with_ maleic acid
+    SSS.addFreqBlock(lims=(4.45, 4.60), bslnOrder=(2,2), select=False)         # Block 12. Tartaric acid _without_ maleic acid
+    SSS.addFreqBlock(lims=(4.00, 4.62), select=False)                          # Block 13. Adjusting peaks of lactic acid and malic acid close to water -- without reestimating their concentrations
 
 def init_Steps_autoWine(SSS):
     SSS.steps.clear()
@@ -385,19 +441,11 @@ def init_Steps_autoWine(SSS):
                          autoKeys = [('.', 'sigma2', 0), ('Methanol', 'ampl', 0)], frqBlkIds=[9], nrep=3, fitEach=True))     # Fit methanol
     # SSS.steps.append(Step(parsKeys=[('2,3-Butanediol', 'chsh', 0), ('2,3-Butanediol', 'alph', 0)],
     #                      autoKeys = [('.', 'sigma2', 0), ('2,3-Butanediol', 'ampl', 0)], frqBlkIds=[10], fitEach=True))     # Fit butanediol
-
-    # Fit unidentified peaks
-    SSS.steps.append(Step(parsKeys=[('Unidentified', 'chsh', 0), ('Unidentified', 'alph', 0)],
-                         autoKeys = [('.', 'sigma2', 0), ('Peak 1', 'ampl', 0), ('Peak 2', 'ampl', 0)], frqBlkIds=[10], nrep=2, fitEach=True))
-    SSS.steps.append(Step(parsKeys=[('Peak 1', 'chshQD', 0), ('Peak 1', 'alphQD', 0)],
-                         autoKeys = [('.', 'sigma2', 0), ('Peak 1', 'ampl', 0)], frqBlkIds=[10], nrep=2, fitEach=True))
-    SSS.steps.append(Step(parsKeys=[('Peak 2', 'chshQD', 0), ('Peak 2', 'alphQD', 0)],
-                         autoKeys = [('.', 'sigma2', 0), ('Peak 2', 'ampl', 0)], frqBlkIds=[10], nrep=2, fitEach=True))
-    SSS.steps.append(Step(parsKeys=[('Unidentified', 'chsh', 0), ('Unidentified', 'alph', 0)],
-                         autoKeys = [('.', 'sigma2', 0), ('Peak 1', 'ampl', 0), ('Peak 2', 'ampl', 0)], frqBlkIds=[10], nrep=2, fitEach=True))
+    SSS.steps.append(Step(script=fit_volatile))
+    SSS.steps.append(Step(script=fit_water_neighborhood))
 
     SSS.steps.append(Step(script=finish_fit))
-    SSS.steps.append(Step(parsKeys=[], autoKeys = [('.', 'sigma2', 0)], frqBlkIds=[1, 3, 4, 5, 6, 7, 8, 9, 10]))   # The last step to evaluate and plot the result # Add an empty step (no autofitting for amplitudes is selected)
+    SSS.steps.append(Step(parsKeys=[], autoKeys = [('.', 'sigma2', 0)], frqBlkIds=[1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]))   # The last step to evaluate and plot the result # Add an empty step (no autofitting for amplitudes is selected)
 
 def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, resetSteps=True):
     """Initializes the workspace wsp for beverage analysis."""
@@ -577,7 +625,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
         # # Set distributions' parameters (to be done in the tree)
         # # TODO: Update in the tree
         # wsp.setGlobalPrior(key=('Mixture', 'chsh', 0), min=-0.35, max=0.35)
-        # wsp.setGlobalPrior(key=('Acids', 'alph', 0), min=-1.0, max=7.5, dval=0.00)
+        wsp.setGlobalPrior(key=('Acids', 'alph', 0), min=-1.0, max=5.0, dval=0.00)
         # wsp.setGlobalPrior(key=('Succinic acid', 'chshQD', 0), min=2.625, max=2.675, dval=2.655)
         # wsp.setGlobalPrior(key=('Succinic acid', 'alphQD', 0), min=-2.0, max=5.0, dval=0.0)
         # wsp.setGlobalPrior(key=('Acetic acid', 'chshQD', 0), min=2.05, max=2.1, dval=2.08)

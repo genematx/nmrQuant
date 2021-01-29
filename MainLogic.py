@@ -136,7 +136,7 @@ class Step():
 
     def run(self, DDD):
         # TODO! Check for convergence of parameters and don't fiit extra repetitions
-        # pars_start = DDD.getCrntVals(self.parsKeys)
+        pars_start = np.array([DDD.getCrntVal(key) for key in self.parsKeys]) if len(self.parsKeys) > 0 else 0.0
 
         for _ in range(self.nrep):
             if self.script is not None:
@@ -148,6 +148,12 @@ class Step():
                     for par in self.parsKeys:
                         DDD.optimize(parsKeys=[par], autoKeys=self.autoKeys, frqBlkIds=self.frqBlkIds, evaluatePriors=False)
                 DDD.optimize(parsKeys=self.parsKeys, autoKeys=self.autoKeys, frqBlkIds=self.frqBlkIds, evaluatePriors=False)
+
+            # Stop fitting if the relative change in the fitting parameters is below the OPTIM_convergenceEps threshold
+            if len(self.parsKeys) > 0:
+                pars_found = np.array([DDD.getCrntVal(key) for key in self.parsKeys])
+                if np.max(np.abs(pars_found-pars_start) / pars_start) < config.OPTIM_convergenceEps:
+                    break
 
 class Workspace():
 

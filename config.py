@@ -5,6 +5,7 @@ QD_RerunQDchshThreshold = 10.0               # Minimum difference in chemical sh
 OPTIM_maxBasinhoppingSteps = 5             # Maximum number of basinhopping steps of the optimization algorithm
 OPTIM_niterSuccess = 5
 OPTIM_nvalLinearSearch = 25                # Number of values in the linear search
+OPTIM_convergenceEps = 1e-06               # Convergence accuracy
 OPTIM_method = 'L-BFGS-B'
 OPTIM_startFrom = 'current'                # Initial values to start optimization in each file {'current', 'previous', 'default'}
 
@@ -44,6 +45,7 @@ def as_dict():
             'OPTIM_maxBasinhoppingSteps' : OPTIM_maxBasinhoppingSteps,
             'OPTIM_niterSuccess' : OPTIM_niterSuccess,
             'OPTIM_nvalLinearSearch' : OPTIM_nvalLinearSearch,
+            'OPTIM_convergenceEps' : OPTIM_convergenceEps,
             'OPTIM_method' : OPTIM_method,
             'OPTIM_startFrom' : OPTIM_startFrom,
 
@@ -67,6 +69,8 @@ def from_dict(self, D):
             self.OPTIM_niterSuccess = val
         elif key == 'OPTIM_nvalLinearSearch':
             self.OPTIM_nvalLinearSearch = val
+        elif key == 'OPTIM_convergenceEps':
+            self.OPTIM_convergenceEps = val
         elif key == 'OPTIM_method':
             self.OPTIM_method = val
         elif key == 'OPTIM_startFrom':
