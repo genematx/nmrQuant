@@ -62,22 +62,23 @@ from PyQt4.QtCore import Qt, QDateTime
 # Some definitions
 labels = ['Ethanol','Glucose','Fructose','Sucrose','Sorbitol',
         'Glycerol', 'Methanol', '2,3-Butanediol',
-        'Acetic acid', 'Citric acid', 'Lactic acid', 'Malic acid', 'Succinic acid']    # Ordred keys/labels
+        'Acetic acid', 'Citric acid', 'Lactic acid', 'Malic acid', 'Succinic acid', 'Tartaric acid', 'Peak 1', 'Peak 2']    # Ordred keys/labels
 labels_volatile = ['Ethanol', 'Methanol', '2,3-Butanediol', 'Acetic acid']
+labels_fromdry = ['Succinic acid', '2,3-Butanediol', 'Tartaric acid', 'Citric acid', 'Malic acid', 'Glucose', 'Fructose', 'Sucrose', 'Sorbitol']       # Which chemicals to estimate from evaporated samples
 abbrev = {'Ethanol':'EthOH', 'Glucose':'Glu', 'Fructose':'Fru', 'Sucrose':'Suc', 'Sorbitol':'SrbOH',
         'Glycerol':'GlyOH', 'Methanol':'MetOH', '2,3-Butanediol':'BudOH',
-        'Lactic acid':'LacAc', 'Acetic acid':'AceAc', 'Malic acid':'MalAc', 'Citric acid':'CitAc', 'Succinic acid':'SccAc'}     # Concentrations in g/kg
+        'Lactic acid':'LacAc', 'Acetic acid':'AceAc', 'Malic acid':'MalAc', 'Citric acid':'CitAc', 'Succinic acid':'SccAc', 'Tartaric acid':'TrtAc', 'Peak 1':'noAsgn_1', 'Peak 2':'noAsgn_2'}     # Concentrations in g/kg
 prefcol = {'Ethanol':None, 'Glucose':None, 'Fructose':None, 'Sucrose':None, 'Sorbitol':None,
            'Glycerol':None, 'Methanol':None, '2,3-Butanediol':'BudOH',
-           'Lactic acid':None, 'Acetic acid':'AceAc', 'Malic acid':'MalAc', 'Citric acid':'CitAc', 'Succinic acid':'SccAc'}     # Preferred colors for each species
+           'Lactic acid':None, 'Acetic acid':'AceAc', 'Malic acid':'MalAc', 'Citric acid':'CitAc', 'Succinic acid':'SccAc', 'Tartaric acid':None, 'Peak 1':None, 'Peak 2':None}     # Preferred colors for each species
 molWeight = {'Ethanol':46.07, 'Glucose':180.16, 'Fructose':180.16, 'Sucrose':342.2965, 'Sorbitol':182.17,
            'Glycerol':92.09382, 'Methanol':32.04, '2,3-Butanediol':90.121,
            'Lactic acid':90.08, 'Acetic acid':60.052, 'Malic acid':134.0874, 'Maleic acid':116.07, 'Citric acid':192.124,
-           'Water':18.01, 'Succinic acid':118.09, 'Alanine':89.09, 'Proline':115.13, 'TMSP':146.26}     # Molar weights for each species
+           'Water':18.01, 'Succinic acid':118.09, 'Alanine':89.09, 'Proline':115.13, 'TMSP':146.26, 'Tartaric acid':150.087, 'Peak 1':100.0, 'Peak 2':100.0}     # Molar weights for each species
 nH_labile = {'Ethanol':1, 'Glucose':5, 'Fructose':5, 'Sucrose':8, 'Sorbitol':6,
              'Glycerol':3, 'Methanol':1, '2,3-Butanediol':2,
              'Lactic acid':2, 'Acetic acid':1, 'Malic acid':3, 'Maleic acid':2, 'Citric acid':4,
-             'Water':2, 'Succinic acid':2, 'Alanine':2, 'Proline':2, 'TMSP':0}     # Number of labile protons (OH, NH2, NH3)
+             'Water':2, 'Succinic acid':2, 'Alanine':2, 'Proline':2, 'TMSP':0, 'Tartaric acid':4, 'Peak 1':1, 'Peak 2':1}     # Number of labile protons (OH, NH2, NH3)
 def cww2pvv(wconc):
     """Converts a dictionary of concentrations expressed in g/kg to %v/v of ethanol, actual alcoholic strength, and total alcoholic strength."""
     act_alc_vv = 1.2241*(wconc['Ethanol']+wconc['Methanol']+wconc['2,3-Butanediol'])*100+0.1182
@@ -140,14 +141,21 @@ def fit_global_chsh(DDD):
         autoKeys.append( ('Ethanol', 'ampl', 0) )
 
     # Use apodization
-    DDD.resetFreqs(apod=10.0, zff=0)
-    DDD.setCrntVal(key=('Mixture', 'alph', 0), val=12.0)
+    for apod in [10, 5, 3]:
+        DDD.resetFreqs(apod=apod, zff=0)
+        DDD.setCrntVal(key=('Mixture', 'alph', 0), val=apod+2.0)
 
-    # Adjust the global chemical shift
-    DDD.optimize(parsKeys=[('Mixture', 'chsh', 0)], autoKeys=autoKeys+[('Maleic acid', 'ampl', 0)], frqBlkIds=[2,3])
+        # Adjust the global chemical shift
+        DDD.optimize(parsKeys=[('Mixture', 'chsh', 0)], autoKeys=autoKeys+[('Maleic acid', 'ampl', 0)], frqBlkIds=[2,3])
+        # DDD.setPrior(key=('Mixture', 'chsh', 0), fromCurrent=True)
+
+        # Refine the global shift, now without maleic acid
+        DDD.optimize(parsKeys=[('Mixture', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3], nhop=5)
+        # Adjust the chemical shift of maleic acid alone
+        DDD.optimize(parsKeys=[('Maleic acid', 'chshQD', 0)], autoKeys=[('.', 'sigma2', 0), ('Maleic acid', 'ampl', 0)], frqBlkIds=[2])
+
     DDD.setPrior(key=('Mixture', 'chsh', 0), fromCurrent=True)
-    # Refine the global shift, now without maleic acid
-    DDD.optimize(parsKeys=[('Mixture', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3], nhop=5)
+
     # If there is strong ethanol signal, fit global position based on the CH3 peaks of ethanol
     mfrac = DDD.report_moleFrac(names = ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol'])
     if DDD.getCrntVal(key=('Ethanol', 'ampl', 0)) > 0.5*DDD.extra['sigma_est']:
@@ -221,7 +229,6 @@ def fit_acids(DDD):
         print('Maleic acid present, intensity = {:.4g}.'.format(ampl_MalAc))
         # Reset the parameters for the case when maleic acid is present
         DDD.altFreqBlock(indx=6, lims=(2.75, 3.05))
-        DDD.altFreqBlock(indx=11, lims=(4.65, 4.75))       # Tartaric acid
 
         # Shifts of individual acid peaks
         DDD.setCrntVals(parsF={('Citric acid', 'chshQD', 0):2.966, ('Citric acid', 'chshQD', 1):2.793,
@@ -242,8 +249,10 @@ def fit_acids(DDD):
         DDD.setCrntVal(key, val=DDD.getCrntVal(key)+chsh_acids)
         DDD.setPrior(key, fromCurrent=True)
     DDD.setCrntVal(key=('Acids', 'chsh', 0), val=0.0)
+    DDD.setPrior(key=('Malic acid', 'chshQD', 0), fromCurrent=True)
 
-    DDD.optimize(parsKeys=[('Acids', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
+    if DDD.getCrntVal(key=('Citric acid', 'ampl', 0)) > DDD.extra['sigma_est'] or DDD.getCrntVal(key=('Malic acid', 'ampl', 0)) > DDD.extra['sigma_est']:
+        DDD.optimize(parsKeys=[('Acids', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
 
     # Adjust citric and malic acids individually
     for _ in range(2):
@@ -254,7 +263,8 @@ def fit_acids(DDD):
             DDD.optimize(parsKeys=[('Malic acid', 'chshQD', 1), ('Malic acid', 'chshQD', 2)], autoKeys=autoKeys, frqBlkIds=[6])
             DDD.optimize(parsKeys=[('Citric acid', 'chshQD', 0), ('Citric acid', 'chshQD', 1)], autoKeys=autoKeys, frqBlkIds=[6])
 
-        DDD.optimize(parsKeys=[('Acids', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
+        if DDD.getCrntVal(key=('Citric acid', 'ampl', 0)) > DDD.extra['sigma_est'] or DDD.getCrntVal(key=('Malic acid', 'ampl', 0)) > DDD.extra['sigma_est']:
+            DDD.optimize(parsKeys=[('Acids', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
 
     # Return to the original frequency blocks
     DDD.altFreqBlock(indx=6, lims=(2.5, 3.1))     # Return to the original frequency block
@@ -263,7 +273,7 @@ def fit_acids(DDD):
     if ampl_MalAc > DDD.extra['sigma_est']:
         # With maleic acid
         DDD.setCrntVal(key=('Tartaric acid', 'chshQD', 0), val=4.671)
-        DDD.setPrior(key=('Tartaric acid', 'chshQD', 0), min=4.65, max=4.75)
+        DDD.setPrior(key=('Tartaric acid', 'chshQD', 0), min=4.59, max=4.75)
         frqBlkID_tartaric = 11
     else:
         # Without maleic acid
@@ -300,11 +310,15 @@ def fit_volatile(DDD):
         # Fit unidentified peaks
         autoKeys = [('.', 'sigma2', 0), ('Peak 1', 'ampl', 0), ('Peak 2', 'ampl', 0)]
         for _ in range(2):
-            DDD.optimize(parsKeys=[('Unidentified', 'chsh', 0), ('Unidentified', 'alph', 0)],
+            # DDD.optimize(parsKeys=[('Unidentified', 'chsh', 0), ('Unidentified', 'alph', 0)],
+            #              autoKeys=autoKeys, frqBlkIds=[10])
+            DDD.optimize(parsKeys=[('Peak 1', 'chshQD', 0), ('Peak 2', 'chshQD', 0)],
                          autoKeys=autoKeys, frqBlkIds=[10])
             DDD.optimize(parsKeys=[('Peak 1', 'chshQD', 0), ('Peak 1', 'alphQD', 0)],
                          autoKeys=autoKeys, frqBlkIds=[10])
             DDD.optimize(parsKeys=[('Peak 2', 'chshQD', 0), ('Peak 2', 'alphQD', 0)],
+                         autoKeys=autoKeys, frqBlkIds=[10])
+            DDD.optimize(parsKeys=[('Unidentified', 'alph', 0)],
                          autoKeys=autoKeys, frqBlkIds=[10])
 
 def fit_water_neighborhood(DDD):
@@ -329,7 +343,8 @@ def wine_results(data, intStd=None):
         if 'DRY' in DDD.name:
             dat_DRY = DDD
         elif 'PROTON' in DDD.name:
-            dat_MAIN = DDD
+            if dat_MAIN is None:
+                dat_MAIN = DDD
             dat_FULL = DDD
         elif 'PRESAT' in DDD.name:
             dat_MAIN = DDD
@@ -364,6 +379,7 @@ def wine_results(data, intStd=None):
     # Find the mass fractions of all chemicals
     wconc, brix = {key : 0.0 for key in labels+['Maleic acid', 'Water', 'Alanine']}, 0
     if dat_MAIN is not None and dat_MAIN.extra['mass_total_au'] != 0:
+        print(dat_MAIN.extra['masses_au'])
         wconc.update({key:val/dat_MAIN.extra['mass_total_au'] for key, val in dat_MAIN.extra['masses_au'].items()})
         brix = 100*(dat_MAIN.extra['masses_au']['Glucose']+dat_MAIN.extra['masses_au']['Fructose']+dat_MAIN.extra['masses_au']['Sucrose'])/dat_MAIN.extra['mass_total_au']
         if dat_MAIN.extra['acqu_time'] is not None:
@@ -374,7 +390,7 @@ def wine_results(data, intStd=None):
         result['acqu_time_abs'] = time.mktime(time.strptime(timeString, '%Y%m%d-%H%M%S'))         # Time in sec from the start of epoch
 
     if dat_DRY is not None and dat_DRY.extra['mass_total_au'] != 0:
-        wconc.update({key:dat_DRY.extra['masses_au'][key]/dat_DRY.extra['mass_total_au'] for key in labels if key not in labels_volatile})
+        wconc.update({key:dat_DRY.extra['masses_au'][key]/dat_DRY.extra['mass_total_au'] for key in labels_fromdry})
         brix = 100*(dat_DRY.extra['masses_au']['Glucose']+dat_DRY.extra['masses_au']['Fructose']+dat_DRY.extra['masses_au']['Sucrose'])/dat_DRY.extra['mass_total_au']
 
     # Convert the units for alcohol and estimate the density of the sample
@@ -411,7 +427,7 @@ def init_freqBlocks_autoWine(SSS):
     SSS.addFreqBlock(lims=(1.33, 1.6), bslnOrder=(3,3), select=False)          # Block 8. Lactic acid/Alanine
     SSS.addFreqBlock(lims=(3.30, 3.40), bslnOrder=(2,2), select=False)         # Block 9. Methanol
     SSS.addFreqBlock(lims=(0.75, .975), bslnOrder=(3,3), select=False)         # Block 10. Unidedentified volatile compounds
-    SSS.addFreqBlock(lims=(4.62, 4.75), bslnOrder=(2,2), select=False)         # Block 11. Tartaric acid _with_ maleic acid
+    SSS.addFreqBlock(lims=(4.59, 4.75), bslnOrder=(2,2), select=False)         # Block 11. Tartaric acid _with_ maleic acid
     SSS.addFreqBlock(lims=(4.45, 4.60), bslnOrder=(2,2), select=False)         # Block 12. Tartaric acid _without_ maleic acid
     SSS.addFreqBlock(lims=(4.00, 4.62), select=False)                          # Block 13. Adjusting peaks of lactic acid and malic acid close to water -- without reestimating their concentrations
 
@@ -624,7 +640,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
 
         # # Set distributions' parameters (to be done in the tree)
         # # TODO: Update in the tree
-        # wsp.setGlobalPrior(key=('Mixture', 'chsh', 0), min=-0.35, max=0.35)
+        wsp.setGlobalPrior(key=('Mixture', 'chsh', 0), min=-0.35, max=0.35, dval=0.0)
         wsp.setGlobalPrior(key=('Acids', 'alph', 0), min=-1.0, max=5.0, dval=0.00)
         # wsp.setGlobalPrior(key=('Succinic acid', 'chshQD', 0), min=2.625, max=2.675, dval=2.655)
         # wsp.setGlobalPrior(key=('Succinic acid', 'alphQD', 0), min=-2.0, max=5.0, dval=0.0)
