@@ -34,7 +34,7 @@ pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 pg.setConfigOptions(antialias=True)       # Enable antialiasing for prettier plots
 
-version = '0.0.2'
+version = '0.0.3'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -379,7 +379,6 @@ def wine_results(data, intStd=None):
     # Find the mass fractions of all chemicals
     wconc, brix = {key : 0.0 for key in labels+['Maleic acid', 'Water', 'Alanine']}, 0
     if dat_MAIN is not None and dat_MAIN.extra['mass_total_au'] != 0:
-        print(dat_MAIN.extra['masses_au'])
         wconc.update({key:val/dat_MAIN.extra['mass_total_au'] for key, val in dat_MAIN.extra['masses_au'].items()})
         brix = 100*(dat_MAIN.extra['masses_au']['Glucose']+dat_MAIN.extra['masses_au']['Fructose']+dat_MAIN.extra['masses_au']['Sucrose'])/dat_MAIN.extra['mass_total_au']
         if dat_MAIN.extra['acqu_time'] is not None:
