@@ -332,17 +332,17 @@ def finish_fit(DDD):
     """Finishing the fitting of a wine sample."""
     DDD.extra.update({'fitted':True})
 
-def wine_results(data, intStd=None):
-    """Expresses the results in %w/w. Takes into account all files in an array 'data'; all files must correspond to the same _original_ with the same amount of internal standard, possibly including spectra without ht einternal standard. intStd controls how to estimate the concentration of internal standard and can be eitehr None (will be determined from water) or a number corresponding to gravimetric mass fraction of maleic acid wrt the sample."""
+def wine_results(data, massFracIS_grav=None):
+    """Expresses the results in %w/w. Takes into account all files in an array 'data'; all files must correspond to the same _original_ with the same amount of internal standard, possibly including spectra without ht einternal standard. massFracIS_grav controls how to estimate the concentration of internal standard and can be eitehr None (will be determined from water) or a number corresponding to gravimetric mass fraction of maleic acid wrt the sample."""
     result = {key : 0.0 for key in labels+['Maleic acid', 'Water', 'Alanine']}          # Initialize the results
-    result['data_names'] = []
+    result['data_names'], result['acqu_time'], result['acqu_time_abs'] = [], None, None
     dat_FULL, dat_MAIN, dat_DRY = None, None, None         # Datums for the full (PROTON, non-PRESAT) spectrum, a spectrum from which the concentrations would be determined (usually, PRESAT), and a spectrum of dried sample (either presat or proton)
     for DDD in data:
         result['data_names'].append(DDD.name)
         # Determine the type of the dataset
-        if 'DRY' in DDD.name:
+        if 'DRY' in DDD.name and 'PRESAT' in DDD.name:
             dat_DRY = DDD
-        elif 'PROTON' in DDD.name:
+        elif 'PROTON' in DDD.name and not ('DRY' in DDD.name):
             if dat_MAIN is None:
                 dat_MAIN = DDD
             dat_FULL = DDD
@@ -356,24 +356,28 @@ def wine_results(data, intStd=None):
         DDD.extra['masses_au'].update({'Water': max(mass_H2O_au, 0.0)})
 
     # Use the first PROTON spectrum with internal standard to estimate the mass fraction of maleic acid
-    mass_frac_MalAc = intStd     # Use the gravimetric mas fraction
-    if intStd is None:
+    massFracIS_estm = None
+    if massFracIS_grav is None:
         for DDD in data:
             if 'PROTON' in DDD.name and '-IS' in DDD.name:
                 DDD.extra['mass_total_au'] = sum([val for _, val in DDD.extra['masses_au'].items()])
-                mass_frac_MalAc = DDD.extra['masses_au']['Maleic acid'] / DDD.extra['mass_total_au']            # Shared among all samples
+                massFracIS_estm = DDD.extra['masses_au']['Maleic acid'] / DDD.extra['mass_total_au']            # Shared among all samples
                 break
 
     # Find the total mass (expressed in arbitrary units). Preferrably - from the internal standard, alternatively, as a sum of all components
     for DDD in data:
         if '-IS' in DDD.name:
-            DDD.extra['mass_frac_MalAc'] = mass_frac_MalAc
-            DDD.extra['mass_total_au'] = DDD.extra['masses_au']['Maleic acid'] / DDD.extra['mass_frac_MalAc']
+            DDD.extra['mass_total_au'] = DDD.extra['masses_au']['Maleic acid']
+            if massFracIS_estm is not None:
+                DDD.extra['mass_total_au'] /= massFracIS_estm
+            elif massFracIS_grav is not None:
+                DDD.extra['mass_total_au'] /= massFracIS_grav
         elif 'PROTON' in DDD.name:
             DDD.extra['mass_total_au'] = sum([val for _, val in DDD.extra['masses_au'].items()])
         else:
             # If it is a PRESAT experiment without internal standard, use the total mass of non-water components as a reference of use an external standard
             if dat_FULL is not None:
+                # TODO: Use constant scaling factor
                 DDD.extra['mass_total_au'] = sum([val for _, val in dat_FULL.extra['masses_au'].items()]) * sum([val for key, val in DDD.extra['masses_au'].items() if key != 'Water']) / sum([val for key, val in dat_FULL.extra['masses_au'].items() if key != 'Water'])
 
     # Find the mass fractions of all chemicals
@@ -392,12 +396,18 @@ def wine_results(data, intStd=None):
         wconc.update({key:dat_DRY.extra['masses_au'][key]/dat_DRY.extra['mass_total_au'] for key in labels_fromdry})
         brix = 100*(dat_DRY.extra['masses_au']['Glucose']+dat_DRY.extra['masses_au']['Fructose']+dat_DRY.extra['masses_au']['Sucrose'])/dat_DRY.extra['mass_total_au']
 
+    # Estimate tartaric acid from DRY, PROTON, D2O, if available
+    for DDD in data:
+        if 'DRY' in DDD.name and 'PROTON' in DDD.name and 'D2O' in DDD.name:
+            wconc.update({'Tartaric acid': DDD.extra['masses_au']['Tartaric acid']/DDD.extra['mass_total_au']})
+
     # Convert the units for alcohol and estimate the density of the sample
     act_alc_vv, tot_alc_vv = cww2pvv(wconc)
     density = est_density(wconc)
 
     result.update({key:density*val for key, val in wconc.items()})
-    result.update({'BRIX':brix, 'Total Alcohol, %v\v':tot_alc_vv, 'Actual Alcohol, %v\v':act_alc_vv, 'Density':density, 'mass_frac_MalAc_estm':wconc['Maleic acid']})
+    result.update({'BRIX':brix, 'Total Alcohol, %v\v':tot_alc_vv, 'Actual Alcohol, %v\v':act_alc_vv,
+                   'Density':density, 'mass_frac_MalAc_estm':massFracIS_estm, 'mass_frac_MalAc_grav':massFracIS_grav})
 
     return result
 
@@ -409,6 +419,10 @@ def assign_wine_name(data_name):
         sample_name = '-'.join([sample_name, data_name[1]])
 
     return sample_name
+
+def sort_names(names):
+    """Sorts a list of wine names taking into account the name of the samples, presence of internal standard, if the sample was evaporated or not, addition of D2O, etc."""
+    pass
 
 def init_freqBlocks_autoWine(SSS):
     """Initializes frequency blocks in a series for wine analysis."""
@@ -508,7 +522,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
 
         # Write the amplitudes and parameters
         row = 3
-        for name in sorted(data_combs.keys()):
+        for name in sorted(data_combs.keys(), key=lambda x : (int(x.split('-')[0][1:]), x)):
             results = wine_results(data = [self.series[id[0]].data[id[1]] for id in data_combs[name]])
 
             worksheet.write(row, 0, row-1)
@@ -519,7 +533,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
             worksheet.write(row, 5, results['Actual Alcohol, %v\v'], fmt_num2f)
             worksheet.write(row, 6, results['Total Alcohol, %v\v'], fmt_num2f)
             worksheet.write(row, 7, results['BRIX'], fmt_num1f)
-            # worksheet.write(row, 8, results['mass_frac_MalAc_grav'])
+            worksheet.write(row, 8, results['mass_frac_MalAc_grav'], fmt_num3f)
             worksheet.write(row, 9, results['mass_frac_MalAc_estm'], fmt_num3f)
 
             # Write the results
