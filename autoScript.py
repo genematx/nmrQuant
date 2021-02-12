@@ -155,22 +155,6 @@ def main(cmdline=None):
 
     opts, args = parser.parse_args(cmdline)
 
-    # if opts.error is not None:
-    #     return opts.error
-    # elif opts.bad_option:
-    #     # you can call parser.error, which will show an error message
-    #     # displays the help, and then exits the program
-    #     parser.error("you called a bad option")
-    # elif opts.make_template:
-    #     pass
-    #     return 0
-    #
-    # # # args is now just a list, of everything that wasn't an
-    # # # "option". AKA everything that started with - or --
-    # for i in range(len(args)):
-    #     print("arg {:d}: {:s}".format(i, args[i]))
-    # # print("the number is:", opts.number)
-
     # -------------------- Execute the script ----------------------
     # dirName =     # 'C:\\Users\\yma80\\Data\\UWA_Sugars\\Raw Data\\1\\1Pulse-H (1 0% - 1)\\1\\'
 

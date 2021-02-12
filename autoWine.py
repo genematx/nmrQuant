@@ -167,20 +167,25 @@ def fit_global_chsh(DDD):
 
 def fit_ethanol_CH3(DDD):
     if 'DRY' in DDD.name:
-        # Fit butanediol
-        autoKeys = [('.', 'sigma2', 0), ('2,3-Butanediol', 'ampl', 0)]
-        DDD.optimize(parsKeys=[('2,3-Butanediol', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[4])
-        DDD.optimize(parsKeys=[('2,3-Butanediol', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[4])
+        # Fit butanediol and ethanol
+        DDD.altFreqBlock(indx=4, lims=(1.0, 1.33))          # Use narrow range
+        autoKeys = [('.', 'sigma2', 0), ('2,3-Butanediol', 'ampl', 0), ('Ethanol', 'ampl', 0)]
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('2,3-Butanediol', 'chsh', 0), ('Ethanol', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[4])
+            DDD.optimize(parsKeys=[('2,3-Butanediol', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[4], nhop=5)
+            DDD.optimize(parsKeys=[('Ethanol', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[4])
+            DDD.optimize(parsKeys=[('2,3-Butanediol', 'alph', 0), ('Ethanol', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[4])
+        DDD.altFreqBlock(indx=4, lims=(0.5, 1.75))         # Restore the range
     else:
-        # Fit ethanol
+        # Fit only ethanol
         autoKeys = [('.', 'sigma2', 0), ('Ethanol', 'ampl', 0)]
         for _ in range(2):
             DDD.optimize(parsKeys=[('Ethanol', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[4])
             DDD.optimize(parsKeys=[('Ethanol', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[4])
 
-        # Use the CH3 peak as the reference (only if the estimated signal of ethanol is strong enough)
-        if DDD.getCrntVal(key=('Ethanol', 'ampl', 0)) > 0.5*DDD.extra['sigma_est']:
-            DDD.shiftToRef(refKey=('Ethanol', 'chshQD', 0), keepFitted=False)
+    # Use the CH3 peak as the reference (only if the estimated signal of ethanol is strong enough)
+    if DDD.getCrntVal(key=('Ethanol', 'ampl', 0)) > 0.5*DDD.extra['sigma_est']:
+        DDD.shiftToRef(refKey=('Ethanol', 'chshQD', 0), keepFitted=False)
 
 def fit_sugars(DDD):
     # Step 4. Fit Glucose and Sucrose using the anomeric peaks
@@ -193,6 +198,11 @@ def fit_sugars(DDD):
     mfrac = DDD.report_moleFrac(names = ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol'])
     mfrac['Sugars'] = mfrac['Fructose']+mfrac['Glucose']+mfrac['Sucrose']+mfrac['Sorbitol']
     mfrac_sorted = sorted(['Sugars', 'Ethanol', 'Glycerol'], key=lambda x : mfrac[x], reverse=True)
+
+    if mfrac['Fructose'] > 1.1*mfrac['Glucose'] and DDD.getCrntVal(key=('Fructose', 'ampl', 0)) > DDD.extra['sigma_est']:
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=[('.', 'sigma2', 0), ('Fructose', 'ampl', 0)], frqBlkIds=[14])
+            DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=[('.', 'sigma2', 0), ('Fructose', 'ampl', 0)], frqBlkIds=[14])
 
     autoKeys = [('.', 'sigma2', 0), ('Fructose', 'ampl', 0), ('Sorbitol', 'ampl', 0), ('Glycerol', 'ampl', 0)]
     for _ in range(2):
@@ -233,7 +243,7 @@ def fit_acids(DDD):
         # Shifts of individual acid peaks
         DDD.setCrntVals(parsF={('Citric acid', 'chshQD', 0):2.966, ('Citric acid', 'chshQD', 1):2.793,
                                ('Malic acid', 'chshQD', 0): 4.595, ('Malic acid', 'chshQD', 1):2.852, ('Malic acid', 'chshQD', 2):2.804,
-                               ('Lactic acid', 'chshQD', 0):1.415, ('Lactic acid', 'chshQD', 1):4.358})     # Reset the chemical shift values to defaults for the case of maleic acid present
+                               ('Lactic acid', 'chshQD', 0):1.415, ('Lactic acid', 'chshQD', 1):4.370})     # Reset the chemical shift values to defaults for the case of maleic acid present
 
         # Global shift for the acids
         DDD.setPrior(key=('Acids', 'chsh', 0), min=-0.01, max=0.1, dval=0.00)
@@ -249,7 +259,7 @@ def fit_acids(DDD):
         DDD.setCrntVal(key, val=DDD.getCrntVal(key)+chsh_acids)
         DDD.setPrior(key, fromCurrent=True)
     DDD.setCrntVal(key=('Acids', 'chsh', 0), val=0.0)
-    DDD.setPrior(key=('Malic acid', 'chshQD', 0), fromCurrent=True)
+    DDD.setPrior(key=('Malic acid', 'chshQD', 0), fromCurrent=True, chshRange=0.025)
 
     if DDD.getCrntVal(key=('Citric acid', 'ampl', 0)) > DDD.extra['sigma_est'] or DDD.getCrntVal(key=('Malic acid', 'ampl', 0)) > DDD.extra['sigma_est']:
         DDD.optimize(parsKeys=[('Acids', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
@@ -298,6 +308,21 @@ def fit_lactic(DDD):
         DDD.optimize(parsKeys=[('Lactic acid', 'alph', 0), ('Alanine', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[8])
         DDD.optimize(parsKeys=[('Lactic acid', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[8])
 
+    if 'DRY' in DDD.name:
+        # Fit butanediol and ethanol
+        autoKeys.extend([('2,3-Butanediol', 'ampl', 0), ('Ethanol', 'ampl', 0)])
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('2,3-Butanediol', 'chsh', 0), ('Ethanol', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[4, 8])
+            DDD.optimize(parsKeys=[('2,3-Butanediol', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[4, 8])
+            DDD.optimize(parsKeys=[('Ethanol', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[4, 8])
+            DDD.optimize(parsKeys=[('2,3-Butanediol', 'alph', 0), ('Ethanol', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[4, 8])
+    else:
+        # Fit only ethanol
+        autoKeys.append( ('Ethanol', 'ampl', 0) )
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('Ethanol', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[4, 8])
+            DDD.optimize(parsKeys=[('Ethanol', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[4, 8])
+
 def fit_autoPhase(DDD):
     DDD.auto_phase(fit_Ph1=False)
 
@@ -328,6 +353,11 @@ def fit_water_neighborhood(DDD):
     if DDD.getCrntVal(key=('Lactic acid', 'ampl', 0)) > DDD.extra['sigma_est']: parsKeys.append(('Lactic acid', 'chshQD', 1))
     DDD.optimize(parsKeys=parsKeys, autoKeys=[], frqBlkIds=[12, 13])
 
+def use_presat(DDD):
+    """Tries to find an already fitted (PRESAT) experiment in the same Series and copies all its parameters and distributions to the current (PROTON) datum."""
+    if 'PROTON' not in DDD.name:
+        return 0
+
 def finish_fit(DDD):
     """Finishing the fitting of a wine sample."""
     DDD.extra.update({'fitted':True})
@@ -337,9 +367,28 @@ def wine_results(data, massFracIS_grav=None):
     result = {key : 0.0 for key in labels+['Maleic acid', 'Water', 'Alanine']}          # Initialize the results
     result['data_names'], result['acqu_time'], result['acqu_time_abs'] = [], None, None
     dat_FULL, dat_MAIN, dat_DRY = None, None, None         # Datums for the full (PROTON, non-PRESAT) spectrum, a spectrum from which the concentrations would be determined (usually, PRESAT), and a spectrum of dried sample (either presat or proton)
+    dat_FULL_DRY_D2O, dat_PRES_DRY_D2O, dat_FULL_DRY, dat_PRES_DRY, dat_FULL, dat_PRES = None, None, None, None, None, None
     for DDD in data:
         result['data_names'].append(DDD.name)
-        # Determine the type of the dataset
+        # Determine the type of each dataset
+        # TODO: Reorganize this
+        if 'DRY' in DDD.name:
+            if 'D2O' in DDD.name:
+                if 'PROTON' in DDD.name:
+                    dat_FULL_DRY_D2O = DDD
+                elif 'PRESAT' in DDD.name:
+                    dat_PRES_DRY_D2O = DDD
+            else:
+                if 'PROTON' in DDD.name:
+                    dat_FULL_DRY = DDD
+                elif 'PRESAT' in DDD.name:
+                    dat_PRES_DRY = DDD
+        else:
+            if 'PROTON' in DDD.name:
+                dat_FULL = DDD
+            elif 'PRESAT' in DDD.name:
+                dat_PRES = DDD
+
         if 'DRY' in DDD.name and 'PRESAT' in DDD.name:
             dat_DRY = DDD
         elif 'PROTON' in DDD.name and not ('DRY' in DDD.name):
@@ -401,6 +450,9 @@ def wine_results(data, massFracIS_grav=None):
         if 'DRY' in DDD.name and 'PROTON' in DDD.name and 'D2O' in DDD.name:
             wconc.update({'Tartaric acid': DDD.extra['masses_au']['Tartaric acid']/DDD.extra['mass_total_au']})
 
+    # Compute the total metrics
+
+
     # Convert the units for alcohol and estimate the density of the sample
     act_alc_vv, tot_alc_vv = cww2pvv(wconc)
     density = est_density(wconc)
@@ -409,14 +461,23 @@ def wine_results(data, massFracIS_grav=None):
     result.update({'BRIX':brix, 'Total Alcohol, %v\v':tot_alc_vv, 'Actual Alcohol, %v\v':act_alc_vv,
                    'Density':density, 'mass_frac_MalAc_estm':massFracIS_estm, 'mass_frac_MalAc_grav':massFracIS_grav})
 
+    # Save results from all other datasets
+    for DDD, DDD_type in [(dat_FULL, 'dat_FULL'), (dat_PRES, 'dat_PRES'), (dat_FULL_DRY, 'dat_FULL_DRY'), (dat_PRES_DRY, 'dat_PRES_DRY'), (dat_FULL_DRY_D2O, 'dat_FULL_DRY_D2O'), (dat_PRES_DRY_D2O, 'dat_PRES_DRY_D2O')]:
+        if DDD is not None:
+            result[DDD_type] = {key:density*val/DDD.extra['mass_total_au'] for key, val in DDD.extra['masses_au'].items()}
+        else: result[DDD_type] = None
+
     return result
 
-def assign_wine_name(data_name):
+def get_sample_name(DDD):
     """Assigns a specific Datum to a particular wine sampl, based on its name and presence/absence of an internal standard."""
-    data_name = data_name.split('-')
-    sample_name = data_name[0][:-2] if data_name[0][-2:] == '.0' else data_name[0]
-    if data_name[1][:2] == 'IS':
-        sample_name = '-'.join([sample_name, data_name[1]])
+    if DDD.extra['Sample'] is not None:
+        sample_name = DDD.extra['Sample']
+    else:
+        data_name = DDD.name.split('-')
+        sample_name = data_name[0][:-2] if data_name[0][-2:] == '.0' else data_name[0]
+        if data_name[1][:2] == 'IS':
+            sample_name = '-'.join([sample_name, data_name[1]])
 
     return sample_name
 
@@ -443,6 +504,7 @@ def init_freqBlocks_autoWine(SSS):
     SSS.addFreqBlock(lims=(4.59, 4.75), bslnOrder=(2,2), select=False)         # Block 11. Tartaric acid _with_ maleic acid
     SSS.addFreqBlock(lims=(4.45, 4.60), bslnOrder=(2,2), select=False)         # Block 12. Tartaric acid _without_ maleic acid
     SSS.addFreqBlock(lims=(4.00, 4.62), select=False)                          # Block 13. Adjusting peaks of lactic acid and malic acid close to water -- without reestimating their concentrations
+    SSS.addFreqBlock(lims=(3.90, 4.20), bslnOrder=(1,1), select=False)         # Block 14. Peaks of fructose
 
 def init_Steps_autoWine(SSS):
     SSS.steps.clear()
@@ -474,7 +536,7 @@ def init_Steps_autoWine(SSS):
     SSS.steps.append(Step(script=fit_water_neighborhood))
 
     SSS.steps.append(Step(script=finish_fit))
-    SSS.steps.append(Step(parsKeys=[], autoKeys = [('.', 'sigma2', 0)], frqBlkIds=[1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]))   # The last step to evaluate and plot the result # Add an empty step (no autofitting for amplitudes is selected)
+    SSS.steps.append(Step(parsKeys=[], autoKeys = [('.', 'sigma2', 0)], frqBlkIds=[1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14]))   # The last step to evaluate and plot the result # Add an empty step (no autofitting for amplitudes is selected)
 
 def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, resetSteps=True):
     """Initializes the workspace wsp for beverage analysis."""
@@ -500,17 +562,17 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
         worksheet = workbook.add_worksheet('SUMMARY')
         data_combs = {}        # Combinations of spectra to consider for the wine analysis
         for DDD in self.series[0].data:
-            wine_name = assign_wine_name(DDD.name)
+            wine_name = get_sample_name(DDD)
             try:
                 data_combs[wine_name].append(DDD.selfID())
             except KeyError: data_combs[wine_name] = [DDD.selfID()]
 
         # Write the header. Rows and columns are zero indexed.
-        ncol_ampl = len(labels)       # Number of columns for amplitudes
+        ncol_ampl = len(labels) + 1      # Number of columns for amplitudes (incl. Maleic acid)
         for i, (text, col_width) in enumerate(zip(['','Sample ID', 'Aqusition Date-Time', 'Acquisition time (absolute)', 'Estimated Density, g/L', 'Actual Alcohol, %v/v', 'Potential Alcohol, %v/v', 'BRIX', 'MassFrac of Maleic Acid (grav.), w/w', 'MassFrac of Maleic acid (estm.), w/w'], [3, 12, 5, 5, 10, 10, 10, 7, 10, 10])):
             worksheet.merge_range(0, i, 2, i, text, fmt_center)
             worksheet.set_column(i, i, col_width)
-        worksheet.merge_range(0, 10, 1, 10+ncol_ampl-1, 'Absolute Concentrations, g/L', fmt_center)
+        worksheet.merge_range(0, 10, 1, 10+ncol_ampl+1-1, 'Absolute Concentrations, g/L', fmt_center)
 
         col = 10
         # Write the amplitude names
@@ -519,10 +581,19 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
             col += 1
         worksheet.write( 2, col, 'Comment')
         worksheet.write( 2, col+1, 'IDs of used Data')
+        col += 2
+
+        # write the header for the individual datums
+        for i, dat_type in enumerate(['dat_FULL', 'dat_PRES', 'dat_FULL_DRY', 'dat_PRES_DRY', 'dat_FULL_DRY_D2O', 'dat_PRES_DRY_D2O']):
+            worksheet.merge_range(0, 12+ncol_ampl*(i+1), 0, 12+ncol_ampl*(i+2)-1, 'Absolute Concentrations, g/L', fmt_center)
+            worksheet.merge_range(1, 12+ncol_ampl*(i+1), 1, 12+ncol_ampl*(i+2)-1, dat_type, fmt_center)
+            for lbl in ['Maleic acid']+labels:
+                worksheet.write( 2, col, lbl )
+                col += 1
 
         # Write the amplitudes and parameters
         row = 3
-        for name in sorted(data_combs.keys(), key=lambda x : (int(x.split('-')[0][1:]), x)):
+        for name in sorted(data_combs.keys(), key=lambda x : (float( re.sub('[^0-9.]','', x.split('-')[0][1:]) ), x) ):          # Turn the name into number for sorting
             results = wine_results(data = [self.series[id[0]].data[id[1]] for id in data_combs[name]])
 
             worksheet.write(row, 0, row-1)
@@ -547,6 +618,15 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
 
             # Write the indices of used Datums
             worksheet.write(row, col, repr([data_combs[name]]) )
+            col += 1
+
+            # ----------------------------------------------------------------------
+            # Save results for each Datum
+            for DDD_type in ['dat_FULL', 'dat_PRES', 'dat_FULL_DRY', 'dat_PRES_DRY', 'dat_FULL_DRY_D2O', 'dat_PRES_DRY_D2O']:
+                for lbl in ['Maleic acid']+labels:
+                    if results[DDD_type] is not None:
+                        worksheet.write( row, col, results[DDD_type][lbl], fmt_num3f if results[DDD_type][lbl] != 0 else fmt_num0f )
+                    col += 1
 
             row += 1
 
@@ -936,7 +1016,7 @@ class MainView(QMainWindow):
         layRest.addWidget(self.resCanvas)
         layNavi.setContentsMargins(1,1,1,1)
         layRest.setContentsMargins(1,1,1,1)
-        tabNavi.setMaximumHeight(100)                 # Hide the navigation widget
+        tabNavi.setMaximumHeight(150)                 # Set to 0 to hide the navigation widget
 
         # --------------- Left --------------------
         widgetLeft = QWidget()
@@ -1069,6 +1149,7 @@ class MainView(QMainWindow):
     def addDatumFromFile(self, path):
         """Imports a new spectrum and adds it to the workspace and the list widget of data."""
         crnt_series = self.wsp.series[0]
+        dic = None
 
         if path[-3:] == '.1d':
 
@@ -1116,7 +1197,7 @@ class MainView(QMainWindow):
             crnt_series.t = t
             crnt_series.fullReset()
 
-        dat = crnt_series.addDatum(yT, name = name)
+        dat = crnt_series.addDatum(yT, name = name, extra=dic)
 
         # Add new entry to the data List
         newItem = QListWidgetItem(self._icon('icon_gof_none.png'), name, parent=self.dataListWidget)
@@ -1614,10 +1695,10 @@ class MainView(QMainWindow):
 
         if not reset:
             # Get the concentrations in g/L; choose only related Datums
-            wine_name = assign_wine_name(self._crnt.name)
-            conc_gL = wine_results(data = [DDD for DDD in self._crnt.parent.data if wine_name == assign_wine_name(DDD.name)])       # Use all datums in the series
+            wine_name = get_sample_name(self._crnt)
+            conc_gL = wine_results(data = [DDD for DDD in self._crnt.parent.data if wine_name == get_sample_name(DDD)])       # Use all datums in the series
 
-            vals = np.array([conc_gL[lbl] for lbl in labels])
+            vals = np.array([conc_gL[lbl] for lbl in labels if 'Peak' not in lbl])
             vals = np.where(np.isnan(vals), 0.0, vals)
 
             # Define the subplots
@@ -1645,20 +1726,27 @@ class MainView(QMainWindow):
 
             # -------------------------------- Table -------------------------------------
             # ax_tab.clear()
+            # ax_tab.axis('off')
+            # cellText = [['Tot. sugars, g/L', '1'], ['Tot. alcohol, g/L', '2'], ['Tot. acidity, g/L','3']]
+            # table = ax_tab.table(cellText=cellText,
+            #             colWidths=[0.75, 0.25], loc='center')
+            # table.auto_set_font_size(False)
+            # table.set_fontsize(14)
 
             # ------------------------------- Bar chart ----------------------------------
+            bar_labels = [lbl for lbl in labels if 'Peak' not in lbl]
             for i in range(n_ax-1, -1, -1):
                 ax = ax_bar[i]
-                x = np.arange(len(labels))  # the label locations
+                x = np.arange(len(bar_labels))  # the label locations
                 bars = ax.bar(x, vals, align='center', width=0.75,
-                              tick_label=[abbrev[lbl] for lbl in labels])
+                              tick_label=[abbrev[lbl] for lbl in bar_labels])
                 ax.spines['top'].set_visible(False)        # Don't show the top spine
                 ax.tick_params(length=3, labelsize=10, pad=2)
                 if i == 0:
                     # Bottom plot
                     ax.set_xticks(x)
                     ax.tick_params(top=False, right=False)
-                    ax.set_xlim(-0.5, len(labels)-0.5)
+                    ax.set_xlim(-0.5, len(bar_labels)-0.5)
                     for tick in ax.get_xticklabels():
                         tick.set_rotation('vertical')
                 else:
@@ -1694,13 +1782,28 @@ class MainView(QMainWindow):
             evt.acceptProposedAction()
 
     def dropEvent(self, evt):
+
+        def read_folders(rootPath, pathList=None):
+            """Recursively opens folders and returns paths to data.1d files, if found."""
+            if pathList is None: pathList = []
+
+            if os.path.isdir(rootPath):
+                if 'data.1d' in os.listdir(rootPath):
+                    pathList.append(os.path.join(rootPath, 'data.1d'))
+                else:
+                    for file in os.listdir(rootPath):
+                        read_folders(os.path.join(rootPath, file), pathList)
+
+            return pathList
+
         # Load the files
+        filePathList = []
         for url in evt.mimeData().urls():
-            newFilePath = url.toLocalFile()
-            if os.path.isdir(newFilePath):
-                newFilePath = os.path.join(newFilePath, 'data.1d')
-            elif 'data.1d' not in newFilePath: return False
-            dat = self.addDatumFromFile(newFilePath)
+            filePathList = read_folders(url.toLocalFile(), filePathList)
+
+        for filePath in filePathList:
+            dat = self.addDatumFromFile(filePath)
+
         # Run the optimization
         pass
 

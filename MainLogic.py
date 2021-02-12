@@ -1548,7 +1548,10 @@ class Datum():
         self.resetSignals(flagAdapFreq)
         self.resetCrntPars(crntParsH, priors)
         self.extra.clear()
-        self.extra.update({'acqu_time':None})
+        self.extra.update({'acqu_time':None,
+                           'Sample':None,
+                           'Solvent':None,
+                           'Custom':None})
         if extra is not None: self.extra.update(extra)
 
     def alignToSolventPeak(self, chshTo=4.75):
@@ -1839,7 +1842,7 @@ class Datum():
                     except KeyError:
                         print("Something is wrong with {}".format(key))
 
-    def setPrior(self, key, customPriors=None, reset=True, fromCurrent=False, **kwargs):
+    def setPrior(self, key, customPriors=None, reset=True, fromCurrent=False, chshRange=0.015, **kwargs):
         """Updates the prior key with parameters passed in kwargs (other parameters are left unchanged). Sets a new prior if no prior has been defined for this Datum."""
         par = self.getPrior(key, customPriors)
         if fromCurrent:
@@ -1847,7 +1850,7 @@ class Datum():
             val = self.getCrntVal(key)
             if 'chsh' in key[1]:
                 rval = np.round(val, 2)
-                minval, maxval = rval-0.015, rval+0.015
+                minval, maxval = rval-chshRange, rval+chshRange
             elif 'jcpl' in key[1]:
                 rval = np.round(val, 1)
                 minval, maxval = rval-1.0, rval+1.0
