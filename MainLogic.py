@@ -135,7 +135,6 @@ class Step():
             self.autoKeys.add(('.', 'theta', 0))
 
     def run(self, DDD):
-        # TODO! Check for convergence of parameters and don't fiit extra repetitions
         pars_start = np.array([DDD.getCrntVal(key) for key in self.parsKeys]) if len(self.parsKeys) > 0 else 0.0
 
         for _ in range(self.nrep):
@@ -300,7 +299,7 @@ class Workspace():
 
         return T
 
-    def allParsKeys(self, node_name=None, parsKind=None, globPars=False):
+    def allParsKeys(self, node_name=None, parsKind=None, globPars=False, amplitudes=False):
         """Returns all parameter keys for a (sub)tree starting from a specific node."""
         if node_name is None:
             node = self.T.findRoot()
@@ -317,6 +316,10 @@ class Workspace():
             parsKeys.extend([('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] + \
                             [('.', 'lshapeR', i) for i in range(self.lshapeOrder)] + \
                             [('.', 'lshapeI', i) for i in range(self.lshapeOrder)])
+
+        if amplitudes:
+            # Include the amplitude parameters for all reported nodes
+            parsKeys.extend([(node_name, 'ampl', 0) for node in self.repRootNames])
 
         return parsKeys
 

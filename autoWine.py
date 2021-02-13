@@ -34,7 +34,7 @@ pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 pg.setConfigOptions(antialias=True)       # Enable antialiasing for prettier plots
 
-version = '0.0.3'
+version = '0.0.4'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -280,10 +280,15 @@ def fit_acids(DDD):
     DDD.altFreqBlock(indx=6, lims=(2.5, 3.1))     # Return to the original frequency block
 
     # Fit tartaric acid, if possible
+    fit_tartaric(DDD)
+
+def fit_tartaric(DDD):
+    ampl_MalAc = DDD.getCrntVal(key=('Maleic acid', 'ampl', 0))
+
     if ampl_MalAc > DDD.extra['sigma_est']:
         # With maleic acid
         DDD.setCrntVal(key=('Tartaric acid', 'chshQD', 0), val=4.671)
-        DDD.setPrior(key=('Tartaric acid', 'chshQD', 0), min=4.59, max=4.75)
+        DDD.setPrior(key=('Tartaric acid', 'chshQD', 0), min=4.59, max=4.77)
         frqBlkID_tartaric = 11
     else:
         # Without maleic acid
@@ -293,14 +298,17 @@ def fit_acids(DDD):
 
     if 'DRY' in DDD.name or 'PRESAT' in DDD.name:
         for _ in range(2):
-            DDD.optimize(parsKeys=[('Tartaric acid', 'chshQD', 0)], autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
-            DDD.optimize(parsKeys=[('Tartaric acid', 'chshQD', 0), ('Tartaric acid', 'alphQD', 0)], autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
-            DDD.optimize(parsKeys=[('Tartaric acid', 'alphQD', 0)], autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
+            DDD.optimize(parsKeys=[('Tartaric acid', 'chshQD', 0)],
+                         autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
+            DDD.optimize(parsKeys=[('Tartaric acid', 'chshQD', 0), ('Tartaric acid', 'alphQD', 0)],
+                         autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
+            DDD.optimize(parsKeys=[('Tartaric acid', 'alphQD', 0)],
+                         autoKeys=[('.', 'sigma2', 0), ('Tartaric acid', 'ampl', 0)], frqBlkIds=[frqBlkID_tartaric])
 
 def fit_lactic(DDD):
     """Fits the region related to lactic acid peaks H3 (incl. lactic acid and alanine)."""
     DDD.setPrior(key=('Lactic acid', 'chshQD', 0), fromCurrent=True)        # Depends on presense/absense of Maleic acid in the sample
-    DDD.setPrior(key=('Lactic acid', 'chshQD', 1), fromCurrent=True)
+    DDD.setPrior(key=('Lactic acid', 'chshQD', 1), fromCurrent=True, chshRange=0.02)
     autoKeys=[('.', 'sigma2', 0), ('Lactic acid', 'ampl', 0), ('Alanine', 'ampl', 0)]
     for _ in range(2):
         DDD.optimize(parsKeys=[('Lactic acid', 'chshQD', 0)], autoKeys=autoKeys, frqBlkIds=[8])
@@ -349,14 +357,42 @@ def fit_volatile(DDD):
 def fit_water_neighborhood(DDD):
     """Adjust the peaks of malic and lactic acids that are close to water without reestimating their intensities"""
     parsKeys = []
-    if DDD.getCrntVal(key=('Malic acid', 'ampl', 0)) > DDD.extra['sigma_est']: parsKeys.append(('Malic acid', 'chshQD', 0))
-    if DDD.getCrntVal(key=('Lactic acid', 'ampl', 0)) > DDD.extra['sigma_est']: parsKeys.append(('Lactic acid', 'chshQD', 1))
+    intnMalAc = DDD.getCrntVal(key=('Malic acid', 'ampl', 0))
+    intnLacAc = DDD.getCrntVal(key=('Lactic acid', 'ampl', 0))
+    sigma_est = DDD.extra['sigma_est']
+
+    if intnMalAc > sigma_est: parsKeys.append(('Malic acid', 'chshQD', 0))
+    if intnLacAc > sigma_est: parsKeys.append(('Lactic acid', 'chshQD', 1))
     DDD.optimize(parsKeys=parsKeys, autoKeys=[], frqBlkIds=[12, 13])
+
+    # Readjust J-couplings of malic acid
+    if intnMalAc > intnLacAc:
+        if intnMalAc > 2*sigma_est:
+            DDD.optimize(parsKeys=[('Malic acid', 'jcplQD', 0), ('Malic acid', 'jcplQD', 1)], autoKeys=[], frqBlkIds=[6])
+            DDD.optimize(parsKeys=[('Malic acid', 'jcplQD', 0), ('Malic acid', 'jcplQD', 2)], autoKeys=[], frqBlkIds=[6])
+            DDD.optimize(parsKeys=[('Malic acid', 'jcplQD', 1), ('Malic acid', 'jcplQD', 2)], autoKeys=[], frqBlkIds=[6])
+            DDD.optimize(parsKeys=[('Malic acid', 'chshQD', 0), ('Malic acid', 'jcplQD', 0)], autoKeys=[], frqBlkIds=[11, 12, 13, 6])
+            DDD.optimize(parsKeys=[('Malic acid', 'chshQD', 0), ('Malic acid', 'jcplQD', 1)], autoKeys=[], frqBlkIds=[11, 12, 13, 6])
+
+    if DDD.getCrntVal(key=('Glucose', 'ampl', 0)) > 2*sigma_est:
+        DDD.optimize(parsKeys=[('beta-D-Glucopyranose-SPSY1', 'chshQD', 0)], autoKeys=[], frqBlkIds=[11, 12])
+
+    # Refit tartaric acid
+    fit_tartaric(DDD)
 
 def use_presat(DDD):
     """Tries to find an already fitted (PRESAT) experiment in the same Series and copies all its parameters and distributions to the current (PROTON) datum."""
     if 'PROTON' not in DDD.name:
         return 0
+
+    for dat in DDD.parent.data:
+        if get_sample_name(DDD) == get_sample_name(dat) and dat.extra['Fitted'] and ('PRESAT' in dat.name) and ('DRY' not in dat.name):
+            for key in DDD.allParsKeys(amplitudes=True):
+                # Copy the distribution definitions
+                DDD.parsSpecDict.update(copy.deepcopy(dat.parsSpecDict))
+
+                # Copy the parameters values from
+                DDD.setCrntVal(key, dat.getCrntVal(key))
 
 def finish_fit(DDD):
     """Finishing the fitting of a wine sample."""
@@ -481,9 +517,22 @@ def get_sample_name(DDD):
 
     return sample_name
 
-def sort_names(names):
+def sorting_key(name):
     """Sorts a list of wine names taking into account the name of the samples, presence of internal standard, if the sample was evaporated or not, addition of D2O, etc."""
-    pass
+    key = [0,0,0,0]    # letter, number, dry/not dry, d2o, proton/presat
+
+    if 'PRESAT' in name:
+        key[3] = 1
+    elif 'PROTON' in name:
+        key[3] = 2
+
+    key[0] = name[0]         # The first letter (e.g. beer/wine/etc.)
+
+    if '-' in name:
+        key[1] = re.sub('[^0-9.]','', name.split('-')[0][1:])   # Remove all letters from the sample number
+        key[1] = (int(key[1].split('.')[0]), key[1].split('.')[1:])
+
+    return tuple(key)
 
 def init_freqBlocks_autoWine(SSS):
     """Initializes frequency blocks in a series for wine analysis."""
@@ -501,12 +550,12 @@ def init_freqBlocks_autoWine(SSS):
     SSS.addFreqBlock(lims=(1.33, 1.6), bslnOrder=(3,3), select=False)          # Block 8. Lactic acid/Alanine
     SSS.addFreqBlock(lims=(3.30, 3.40), bslnOrder=(2,2), select=False)         # Block 9. Methanol
     SSS.addFreqBlock(lims=(0.75, .975), bslnOrder=(3,3), select=False)         # Block 10. Unidedentified volatile compounds
-    SSS.addFreqBlock(lims=(4.59, 4.75), bslnOrder=(2,2), select=False)         # Block 11. Tartaric acid _with_ maleic acid
+    SSS.addFreqBlock(lims=(4.59, 4.78), bslnOrder=(2,2), select=False)         # Block 11. Tartaric acid _with_ maleic acid
     SSS.addFreqBlock(lims=(4.45, 4.60), bslnOrder=(2,2), select=False)         # Block 12. Tartaric acid _without_ maleic acid
     SSS.addFreqBlock(lims=(4.00, 4.62), select=False)                          # Block 13. Adjusting peaks of lactic acid and malic acid close to water -- without reestimating their concentrations
     SSS.addFreqBlock(lims=(3.90, 4.20), bslnOrder=(1,1), select=False)         # Block 14. Peaks of fructose
 
-def init_Steps_autoWine(SSS):
+def init_Steps_autoWine(SSS, fast=False):
     SSS.steps.clear()
     SSS.steps.append(Step(script=start_fit))
     SSS.steps.append(Step(script=fit_autoPhase))
@@ -593,7 +642,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
 
         # Write the amplitudes and parameters
         row = 3
-        for name in sorted(data_combs.keys(), key=lambda x : (float( re.sub('[^0-9.]','', x.split('-')[0][1:]) ), x) ):          # Turn the name into number for sorting
+        for name in sorted(data_combs.keys(), key=lambda x : sorting_key(x) ):          # Turn the name into number for sorting
             results = wine_results(data = [self.series[id[0]].data[id[1]] for id in data_combs[name]])
 
             worksheet.write(row, 0, row-1)
@@ -735,6 +784,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
         # # TODO: Update in the tree
         wsp.setGlobalPrior(key=('Mixture', 'chsh', 0), min=-0.35, max=0.35, dval=0.0)
         wsp.setGlobalPrior(key=('Acids', 'alph', 0), min=-1.0, max=5.0, dval=0.00)
+        wsp.setGlobalPrior(key=('Tartaric acid', 'alph', 0), min=-3.0, max=5.0, dval=0.00)
         # wsp.setGlobalPrior(key=('Succinic acid', 'chshQD', 0), min=2.625, max=2.675, dval=2.655)
         # wsp.setGlobalPrior(key=('Succinic acid', 'alphQD', 0), min=-2.0, max=5.0, dval=0.0)
         # wsp.setGlobalPrior(key=('Acetic acid', 'chshQD', 0), min=2.05, max=2.1, dval=2.08)
@@ -1325,7 +1375,7 @@ class MainView(QMainWindow):
         queueActns = [self.treeModel.actvStepIndx if x == 'Fit' else x for x in queueActns]
         if len(queueFiles) > 1: queueActns.insert(0, 'Init')
 
-        # Set up the fitting queue
+        # Setup the fitting queue
         self._fittingQueue = [[file, actn] for file in queueFiles for actn in queueActns]
 
         # Set up the progress bars
@@ -1459,6 +1509,10 @@ class MainView(QMainWindow):
             selectedFiles = [i for i in self._crnt.parent.data]
 
         else: return 0
+
+        # Sort the files to fit presat experiments first
+        selectedFiles.sort( key = lambda x : sorting_key(x.name) )
+
         self.fitAllSteps(selectedFiles)
 
     def saveResults(self):
