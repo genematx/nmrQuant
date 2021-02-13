@@ -173,6 +173,15 @@ class Workspace():
     def selfID(self):
         return (None, None)
 
+    def dataByID(self, selfID):
+        """Returns a Datum or a Series corresponding to the specific selfID."""
+        if selfID[0] is None:
+            return self
+        elif selfID[1] is None:
+            return self.series[selfID[0]]
+        else:
+            return self.series[selfID[0]].data[selfID[1]]
+
     def reset(self, HCmode='1H', lshapeOrder=2):
         # Resets the entire workspace
         self.series = []
@@ -319,7 +328,7 @@ class Workspace():
 
         if amplitudes:
             # Include the amplitude parameters for all reported nodes
-            parsKeys.extend([(node_name, 'ampl', 0) for node in self.repRootNames])
+            parsKeys.extend([(name, 'ampl', 0) for name in self.repRootNames])
 
         return parsKeys
 

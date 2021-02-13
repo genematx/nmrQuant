@@ -25,6 +25,9 @@ import os
 import nmrglue as ng
 from datetime import date
 
+SCRIPT_PATH = os.path.abspath(os.path.dirname(sys.argv[0]))
+CALLED_PATH = os.getcwd()                                          # Where it has been executed from
+
 # Set white background in plots
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
@@ -3951,7 +3954,7 @@ class MainView(QMainWindow):
         self.printoutEdit.ensureCursorVisible()
 
     def _icon(self, name):
-        return QIcon(path.join('icons', name))
+        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
 
     def setupGUI(self):
         """Sets the layout for the main window."""
@@ -5157,7 +5160,7 @@ if __name__ == '__main__':
     app = 0
     app = QApplication(sys.argv)
 
-    expiryTime, options = readLicenseFile()
+    expiryTime, options = readLicenseFile(path=SCRIPT_PATH)
 
     if expiryTime is None:
         # No license file found

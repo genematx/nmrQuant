@@ -34,6 +34,9 @@ pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 pg.setConfigOptions(antialias=True)       # Enable antialiasing for prettier plots
 
+SCRIPT_PATH = os.path.abspath(os.path.dirname(sys.argv[0]))
+CALLED_PATH = os.getcwd()                                          # Where it has been executed from
+
 version = '0.0.4'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
@@ -112,21 +115,9 @@ def reset_parameters(DDD):
     start_fit(DDD)
 
 def start_fit(DDD):
-    """Resets the current parameters in a Datum."""
+    """Resets the datum. The current parameters will be reset if all Steps are optimized."""
     # Reset the definitions of the extra parameters
     DDD.extra.update({'mass_frac_MalAc':0.0, 'masses_au': {}, 'mass_total_au':0.0, 'density':1000.0, 'fitted':False})
-
-    # Clear priors set in the Datum, if any
-    DDD.parsSpecDict.clear()
-
-    # Reset the current parameters to their default values
-    for key in DDD.allParsKeys():
-        val = DDD.getPrior(key).dflt()    # Default parameter value from the prior
-        DDD.setCrntVal(key, val)
-
-    # Reset all intensities
-    for name in DDD.repRootNames:
-        DDD.setCrntVal(key=(name, 'ampl', 0), val=0.0)
 
     # Measure the noise level in the spectrum
     DDD.extra['sigma_est'] = np.sqrt( DDD.measure_noise(lims=(-10, -2)) )
@@ -380,20 +371,6 @@ def fit_water_neighborhood(DDD):
     # Refit tartaric acid
     fit_tartaric(DDD)
 
-def use_presat(DDD):
-    """Tries to find an already fitted (PRESAT) experiment in the same Series and copies all its parameters and distributions to the current (PROTON) datum."""
-    if 'PROTON' not in DDD.name:
-        return 0
-
-    for dat in DDD.parent.data:
-        if get_sample_name(DDD) == get_sample_name(dat) and dat.extra['Fitted'] and ('PRESAT' in dat.name) and ('DRY' not in dat.name):
-            for key in DDD.allParsKeys(amplitudes=True):
-                # Copy the distribution definitions
-                DDD.parsSpecDict.update(copy.deepcopy(dat.parsSpecDict))
-
-                # Copy the parameters values from
-                DDD.setCrntVal(key, dat.getCrntVal(key))
-
 def finish_fit(DDD):
     """Finishing the fitting of a wine sample."""
     DDD.extra.update({'fitted':True})
@@ -555,7 +532,7 @@ def init_freqBlocks_autoWine(SSS):
     SSS.addFreqBlock(lims=(4.00, 4.62), select=False)                          # Block 13. Adjusting peaks of lactic acid and malic acid close to water -- without reestimating their concentrations
     SSS.addFreqBlock(lims=(3.90, 4.20), bslnOrder=(1,1), select=False)         # Block 14. Peaks of fructose
 
-def init_Steps_autoWine(SSS, fast=False):
+def init_Steps_autoWine(SSS):
     SSS.steps.clear()
     SSS.steps.append(Step(script=start_fit))
     SSS.steps.append(Step(script=fit_autoPhase))
@@ -576,16 +553,19 @@ def init_Steps_autoWine(SSS, fast=False):
     #                       autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
     # # Fit the sugars
     SSS.steps.append(Step(script=fit_sugars))
+
     # Fit methanol and butanediol
     SSS.steps.append(Step(parsKeys=[('Methanol', 'chshQD', 0), ('Methanol', 'alphQD', 0)],
                          autoKeys = [('.', 'sigma2', 0), ('Methanol', 'ampl', 0)], frqBlkIds=[9], nrep=3, fitEach=True))     # Fit methanol
-    # SSS.steps.append(Step(parsKeys=[('2,3-Butanediol', 'chsh', 0), ('2,3-Butanediol', 'alph', 0)],
-    #                      autoKeys = [('.', 'sigma2', 0), ('2,3-Butanediol', 'ampl', 0)], frqBlkIds=[10], fitEach=True))     # Fit butanediol
     SSS.steps.append(Step(script=fit_volatile))
     SSS.steps.append(Step(script=fit_water_neighborhood))
 
     SSS.steps.append(Step(script=finish_fit))
     SSS.steps.append(Step(parsKeys=[], autoKeys = [('.', 'sigma2', 0)], frqBlkIds=[1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14]))   # The last step to evaluate and plot the result # Add an empty step (no autofitting for amplitudes is selected)
+
+    # Define a list of fast processing steps
+    n = len(SSS.steps)
+    SSS.extra['fastStepIDs'] = [0, 1, 2, 4, 5, n-2, n-1]   # List of step IDs that should should be run if the fitted values are copied from PRESAT to PROTON spectra
 
 def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, resetSteps=True):
     """Initializes the workspace wsp for beverage analysis."""
@@ -766,6 +746,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
     config.QD_AggregatePeaksThreshold = 0.0
     config.QD_RerunQDchshThreshold = 0.0
     config.OPTIM_startFrom = "default"
+    config.OPTIM_copyFromPRESAT = True
     wsp.extra['autoWine'] = True
     wsp.saveResults = MethodType(saveResults_wine, wsp)      # Update the saving function
 
@@ -777,7 +758,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
 
     # Set the chemical tree
     if resetTree:
-        T = loadTree('autoWineTree.ctr')
+        T = loadTree( os.path.join(SCRIPT_PATH, 'autoWineTree.ctr') )
         wsp.setTree(T)
 
         # # Set distributions' parameters (to be done in the tree)
@@ -958,7 +939,7 @@ class ParameterDisplayWidget(QWidget):
     def reset(self):
         pass
 
-class MainView(QMainWindow):
+class MainViewWine(QMainWindow):
     """Main GUI form class."""
 
     def __init__(self, wsp, expiryTime = np.inf, parent = None):
@@ -978,7 +959,7 @@ class MainView(QMainWindow):
             msg.exec_()
 
         # initialize the main window
-        super(MainView, self).__init__(parent)
+        super(MainViewWine, self).__init__(parent)
         self.resize(1200, 700)
         self.setAcceptDrops(True)      # Allow drag-and-drop
         self.setupGUI()
@@ -1027,7 +1008,7 @@ class MainView(QMainWindow):
         self.printoutEdit.ensureCursorVisible()
 
     def _icon(self, name):
-        return QIcon(path.join('icons', name))
+        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
 
     def setupGUI(self):
         """Sets the layout for the main window."""
@@ -1373,7 +1354,7 @@ class MainView(QMainWindow):
         if queueActns is None: queueActns = ['Evl']        # Only evaluate the active step by default
 
         queueActns = [self.treeModel.actvStepIndx if x == 'Fit' else x for x in queueActns]
-        if len(queueFiles) > 1: queueActns.insert(0, 'Init')
+        # if len(queueFiles) > 1: queueActns.insert(0, 'Init')
 
         # Setup the fitting queue
         self._fittingQueue = [[file, actn] for file in queueFiles for actn in queueActns]
@@ -1400,9 +1381,33 @@ class MainView(QMainWindow):
                     if sid[1] > 0:
                         fileToFit.resetCrntPars(crntParsH = copy.deepcopy(fileToFit.series[sid[0]].data[sid[1]-1].crntParsH) )
                 elif config.OPTIM_startFrom == "default":
-                    fileToFit.resetCrntPars()   # Reset to defaults
+                    fileToFit.resetCrntPars()   # Reset to defaults (parameters and distributions)
                 else: # i.e. settings["startgFromPars"] == "current"
                     pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
+
+                # Try copying the parameters from a previously fitted presat experiment
+                if config.OPTIM_copyFromPRESAT and 'PROTON' in fileToFit.name:
+                    #Tries to find an already fitted (PRESAT) experiment in the same Series and copies all its parameters and distributions to the current (PROTON) datum.
+                    fileCopyFrom = None
+                    for dat in fileToFit.parent.data:
+                        if get_sample_name(fileToFit) == get_sample_name(dat) and dat.extra['fitted'] and ('PRESAT' in dat.name) and ('DRY' not in dat.name):
+                            fileCopyFrom = dat
+                            break
+
+                    if fileCopyFrom is not None:
+                        for key in fileToFit.allParsKeys(amplitudes=True):
+                            # Copy the distribution definitions
+                            fileToFit.parsSpecDict.update(copy.deepcopy(dat.parsSpecDict))
+
+                            # Copy the parameter values
+                            fileToFit.setCrntVal(key, dat.getCrntVal(key))
+
+                        # Remove the steps that do not need to be refitted and update the fitting queue and progress bars
+                        new_fittingQueue = [x for x in self._fittingQueue if (x[0] == fileToFit and x[1] in fileToFit.parent.extra['fastStepIDs']) or x[0] != fileToFit]
+                        self.progressBarFiles.setMaximum( self.progressBarFiles.maximum() - (len(self._fittingQueue) - len(new_fittingQueue)) )
+                        self._fittingQueue.clear()
+                        self._fittingQueue.extend(new_fittingQueue)
+
                 self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
 
                 self.continueThread()
@@ -1483,14 +1488,15 @@ class MainView(QMainWindow):
     def fitAllSteps(self, selectedFiles = None):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
         # Form the list of steps to Fit
-        stepIdsToFit = list(range(len(self._crnt.steps)))
+        stepIdsToFit = ['Init'] + list(range(len(self._crnt.steps)))
 
         # Set up the fitting queue making sure that there are no repeated files
         if selectedFiles is None:
             selectedFiles = [self._crnt]         # Fit all steps of the current file only
         selectedIDs = [ddd.selfID() for ddd in selectedFiles if isinstance(ddd, Datum)] \
                     + [ddd.selfID() for sss in selectedFiles for ddd in sss.data if isinstance(sss, Series)]      # Expand all Series
-        selectedIDs = sorted(list(set(selectedIDs)))
+        selectedIDs = sorted(list(set(selectedIDs)),
+                            key = lambda x : sorting_key(self._crnt.dataByID(x).name))                     # Sort the files to fit presat experiments first
         queueFiles = [self._crnt.series[sid[0]].data[sid[1]] for sid in selectedIDs]
 
         # Call the fitting function
@@ -1509,9 +1515,6 @@ class MainView(QMainWindow):
             selectedFiles = [i for i in self._crnt.parent.data]
 
         else: return 0
-
-        # Sort the files to fit presat experiments first
-        selectedFiles.sort( key = lambda x : sorting_key(x.name) )
 
         self.fitAllSteps(selectedFiles)
 
@@ -1865,7 +1868,7 @@ if __name__ == '__main__':
     app = 0
     app = QApplication(sys.argv)
 
-    expiryTime, options = readLicenseFile()
+    expiryTime, options = readLicenseFile(path=SCRIPT_PATH)
 
     if expiryTime is None:
         # No license file found
@@ -1895,7 +1898,7 @@ if __name__ == '__main__':
         msg.show()         # msg.exec_()            # Returns the values of pressed button
     else:
         wsp = Workspace()
-        main_view = MainView(wsp, expiryTime)
+        main_view = MainViewWine(wsp, expiryTime)
         main_view.show()
 
     app.exec_()

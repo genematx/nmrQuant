@@ -8,6 +8,7 @@ OPTIM_nvalLinearSearch = 25                # Number of values in the linear sear
 OPTIM_convergenceEps = 1e-06               # Convergence accuracy
 OPTIM_method = 'L-BFGS-B'
 OPTIM_startFrom = 'current'                # Initial values to start optimization in each file {'current', 'previous', 'default'}
+OPTIM_copyFromPRESAT = False
 
 #SAMPL_varEstimator = 'robust'               # Defines the method for estimation of the variances of intensities ['usual', 'robust', 'liberal', 'tight']
 SAMPL_robustLS = False                   # Compute the robust LS estimator for variances
@@ -48,6 +49,7 @@ def as_dict():
             'OPTIM_convergenceEps' : OPTIM_convergenceEps,
             'OPTIM_method' : OPTIM_method,
             'OPTIM_startFrom' : OPTIM_startFrom,
+            'OPTIM_copyFromPRESAT' : OPTIM_copyFromPRESAT,
 
             'SAMPL_robustLS' : SAMPL_robustLS,
             'SAMPL_funcType' : SAMPL_funcType,
@@ -75,6 +77,8 @@ def from_dict(self, D):
             self.OPTIM_method = val
         elif key == 'OPTIM_startFrom':
             self.OPTIM_startFrom = val
+        elif key == 'OPTIM_copyFromPRESAT':
+            self.OPTIM_copyFromPRESAT = val
         elif key == 'SAMPL_robustLS':
             self.SAMPL_robustLS = val
         elif key == 'SAMPL_funcType':
