@@ -302,7 +302,6 @@ def make_parser():
 
     usage = """%prog: args
 
-    Sometimes you might explain the purpose of this program as well.
     """
 
     parser = OptionParser(usage)

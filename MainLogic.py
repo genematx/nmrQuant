@@ -2446,7 +2446,9 @@ class Datum():
         posZa_corr = posZa + rFph.real*C           # Corrected models without the constant baselines
         ampl_corr = np.copy(ampl)
         ampl_corr[corr_comp] = np.sum(posZa_corr[:, corr_comp].real, axis=0)/zF0[corr_comp].real.ravel()
-        zF_corr = posZa_corr / ampl_corr + bF0
+        zF_corr = np.divide(posZa_corr, ampl_corr, out=posZa_corr, where=(ampl_corr!=0)) + bF0        # Avoid dividing by zero. posZa_corr / ampl_corr + bF0
+        print(posZa_corr)
+        print(zF_corr)
 
         # Save the corrections and amplitudes
         reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
