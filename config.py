@@ -10,14 +10,14 @@ OPTIM_method = 'L-BFGS-B'
 OPTIM_startFrom = 'current'                # Initial values to start optimization in each file {'current', 'previous', 'default'}
 OPTIM_copyFromPRESAT = False
 
-#SAMPL_varEstimator = 'robust'               # Defines the method for estimation of the variances of intensities ['usual', 'robust', 'liberal', 'tight']
-SAMPL_robustLS = False                   # Compute the robust LS estimator for variances
+#SAMPL_varEstimator = 'robust'              # Defines the method for estimation of the variances of intensities ['usual', 'robust', 'liberal', 'tight']
+SAMPL_robustLS = False                      # Compute the robust LS estimator for variances
 SAMPL_funcType = 'LS'                       # Defines the type of the cost function.
                                             # 'LS' - least Squares
-                                            # 'TLS' - toal Least Squares
+                                            # 'TLS' - total Least Squares
                                             # 'L1' - L1 norm minimization
                                             # 'TV' - total variation
-SAMPL_numberField = 'Re'
+SAMPL_numberField = 'Re'                    # 'Re', 'ReIm', or 'Cx'
 
 MODEL_ShapeKernelSize = 13                  # Size of the custom lineshape correction kernel (must be odd)
 
@@ -34,7 +34,7 @@ colrseq = [(0.1216,    0.4706,    0.7059),\
     (0.9843,    0.6039,    0.6000),\
     (0.9922,    0.7490,    0.4353),\
     (0.7922,    0.6980,    0.8392),\
-    (1.0000,    1.0000,    0.6000)]*2      # Sequence of colors to plot the results
+    (1.0000,    0.0000,    0.6000)]*2      # Sequence of colors to plot the results
 
 colr_freqBlocks = [255, 245, 175, 25]
 colr_freqBlocks_inactive = [255, 245, 175, 3]

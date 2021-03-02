@@ -1,7 +1,8 @@
 import numpy as np
 
 def ls(Z, y, m0=None, S0=None, Gy=None, lockedPhase=False, indxPositive=None, robust=True):
-    """Solves a phased-constrained complex-valued least-squares problem, y=Zx for x; nb - number of baseline terms (columns in the end of Z). theta=None - the phase will be determined from the data. Gy - covariance matrix of noise (or the diagonal vecotr of that matrix)"""
+    """Solves a phased-constrained complex-valued least-squares problem, y=Zx for x; nb - number of baseline terms (columns in the end of Z).
+    If theta=None - the phase will be determined from the data. Gy - covariance matrix of noise (or the diagonal vector of that matrix)."""
     n, k = Z.shape      # Number of dimensions
     if lockedPhase and indxPositive is None:
         indxPositive = list(range(k))
@@ -272,7 +273,7 @@ def wtls(Z, y, Gz=None, Gy=None, gamma=0.5, niter=15, tol=1e-06):
 
     return b, C_hat, logdetS0, Q
 
-def ll_ls(Z, y, ampl, m0=None, iS0=None, Gy=None, lockedPhase=False, robust=False):
+def ll_ls(Z, y, ampl, m0=None, iS0=None, Gy=None, robust=False):
     """Solves the generalized least-squares problem, y=Zx for x; Gy - covariance matrix of noise (or the diagonal vector of that matrix)."""
     n, k = Z.shape      # Number of dimensions
     isReal = np.isreal(Z).all() and np.isreal(y).all() and (np.any(np.equal(ampl, None)) or np.isreal(ampl).all())    # Determine if the problem is real or complex-valued
@@ -313,6 +314,7 @@ def ll_ls(Z, y, ampl, m0=None, iS0=None, Gy=None, lockedPhase=False, robust=Fals
         logdetG = np.linalg.slogdet(Gy)[1]
     #logdetG -= np.log(np.prod(np.diag(iS0[gvar])))
     #print(np.diag(iS0[gvar]))
+
     ZZ = ZG.dot(Z)
     Zy = ZG.dot(y)
     if ZZ.size > 0 and np.linalg.matrix_rank(ZZ) < ZZ.shape[0]:
@@ -321,40 +323,11 @@ def ll_ls(Z, y, ampl, m0=None, iS0=None, Gy=None, lockedPhase=False, robust=Fals
     Q = yG.dot(y)   # Initialize Q
 
     if len(ivar) > 0:
-        # Compute the ML estimates of the unknown amplitudes, mc, if any
-        if lockedPhase:                 # Locked phase - real amplitudes
-            pass
-            """while True:
-                iSc = (iS0[gvar] + ZZ).real
-                Sc = np.linalg.inv(iSc)
-                # Estimate theta to maximize the posterior
-                theta = np.asscalar( 0.5*np.angle(np.dot(Zy.T, np.dot(Sc, Zy))) )
-                # TODO!!! This should also depend on priors over amplitudes (i.e. S0 and m0)
-                mc = Sc.dot( (Zy*np.exp(-1j*theta) + np.dot(iS0[gvar], m0[ivar])).real )
+        # Compute the ML estimates of the unknown amplitudes, mc, if any # LS problem with unconstrained phase (if complex)
+        iSc = iS0[gvar] + ZZ
+        Sc[gvar] = np.linalg.inv(iSc)
+        mc[ivar] = Sc[gvar].dot(Zy+np.dot(iS0[gvar], m0[ivar]))
 
-                # Find which components (if any) have negative intensities and set them to 0.0
-                mc[indxPositive] = np.maximum(mc[indxPositive], 0.0) if mc[indxPositive].sum() > 0 else np.minimum(mc[indxPositive], 0.0)     # Discard negative values in mc but keep the sign for baseline components
-                indx_zero = [ indxPositive[i] for i in np.where(mc[indxPositive] == 0.0)[0] ]     # Indices of elements currently set to zeros
-                if len(indx_zero) == 0:
-                    # If all components have the same sign
-                    if mc[indxPositive].sum() < 0:      # Make sure that all amplitudes are positive
-                        mc = - mc
-                        theta = theta + np.pi
-                    break
-                else:
-                    # Exclude the components with negative intensities from computation and update their priors accordingly
-                    indx_fixed = np.append(indx_fixed, indx_zero)
-                    indx_variable = np.setdiff1d(indx_variable, indx_zero)
-                    indxPositive = np.setdiff1d(indxPositive, indx_zero)
-                    m0[indx_zero] = 0.0
-                    iS0[indx_zero, indx_zero] = 1e+42
-            theta = (theta + np.pi) % (2 * np.pi) - np.pi
-            mc = mc* np.exp(1j*theta)"""
-        else:
-            # LS problem with unconstrained phase (if complex)
-            iSc = iS0[gvar] + ZZ
-            Sc[gvar] = np.linalg.inv(iSc)
-            mc[ivar] = Sc[gvar].dot(Zy+np.dot(iS0[gvar], m0[ivar]))
         Q += - 2*mc[ivar].conj().T.dot(Zy) + mc[ivar].conj().T.dot(ZZ.dot(mc[ivar]))    # Possibly faster would be to compute r'*G*r
 
     # Include the priors
@@ -364,15 +337,17 @@ def ll_ls(Z, y, ampl, m0=None, iS0=None, Gy=None, lockedPhase=False, robust=Fals
 
     # Define a function that computes the covariance matrix
     if robust:
-        r = y - Z.dot(mc)    # the residual
+        r = y - Z.dot(mc[ivar])    # the residual
         r2 = np.abs(r.reshape(1,-1))**2
         ZrZ = (ZG * r2).dot(ZG.conj().T)
         if ZrZ.size > 0 and np.linalg.matrix_rank(ZrZ) < ZrZ.shape[0]:
             ZrZ += (1e-09)*np.identity(ZrZ.shape[0])          # Make sure ZZ is invertible if it is low rank
-        Sr = Sc.dot( (iS0 + ZrZ).real ).dot(Sc)
+        iS0 += 1e-42 * np.eye(k)           # Make sure that the result is invertible
+        iS0[gvar] += ZrZ
+        Sr = Sc.dot( iS0.real ).dot(Sc)
         fun_Sc = lambda _ : Sr
     else:
-        fun_Sc = lambda sigma2 : sigma2/2*Sc                # Assuming that the amplitudes are always real, need to scale the covariance matrix by 2
+        fun_Sc = lambda sigma2 : sigma2/2 * Sc                # Assuming that the amplitudes are always real, need to scale the covariance matrix by 2
 
     return mc, fun_Sc, Q, logdetG
 
@@ -520,113 +495,6 @@ def ll_tls(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=None, maxiter=
         return -np.linalg.inv(hes)
 
     return mc, fun_Sc, Q, logdetGc, gamma
-
-# from collections import namedtuple
-# grad = namedtuple('grad', 'dQda, dQdg, dlda, dldg, d2lda2, d2Qda2')    # Derivatives of Q and logdetGc wrt amplitudes and gamma
-#@profile
-# def ll_tls_eval_BACKUP(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=False, hes=False):
-#     """Only evaluates the Structured Total Maximum Likelihood with Gaussian priors on the amplitudes. See Beck and Eldar."""
-#     # NOTE: Possibly there are errors in computing the gradients/hessians for complex-valued arguments (e.g. conj().T vs .T, etc...)
-#     n, k = Z.shape      # Number of dimensions
-#     ampl = ampl.reshape(k, 1)
-#     Q, logdetGc, dQdg, dldg = 0.0, 0.0, 0.0, 0.0
-#     dQda, dlda = np.zeros((k, 1)), np.zeros((k, 1))
-#     d2lda2, d2Qda2 = np.zeros((k, k)), np.zeros((k,k))
-#     grad = namedtuple('grad', 'dQda, dQdg, dlda, dldg, d2lda2, d2Qda2')    # Derivatives of Q and logdetGc wrt amplitudes and gamma
-#
-#     if Gz is None: Gz = np.ones((n, k))
-#     if Gy is None: Gy = np.ones((n, 1))
-#     Gz, Gy = gamma*Gz, (1-gamma)*Gy
-#
-#     ey = y - Z.dot(ampl)
-#     C_hat = np.hstack([Z, y])     # Initialize C_hat
-#
-#     # Compute b2Gz
-#     if Gz.shape == (n*k, n*k):
-#         # Full matrix Qz
-#         #iGz = np.linalg.inv(Gz)
-#         bGz = Gz.dot(np.kron(np.eye(n), ampl))
-#         b2Gz = np.kron(ampl.conj().T, np.eye(n)).dot(bGz)
-#     elif Gz.shape == (n, n, k):
-#         # Block-diagonal matrix Gz
-#         #iGz = np.dstack([np.linalg.inv(Gz[..., i]) for i in range(k)])
-#         #bGz = Gz * ampl.reshape(1,-1)
-#         b2Gz = Gz.dot(np.abs(ampl)**2).squeeze()
-#     elif Gz.size == n*k:
-#         # Diagonal matrix Gz, possibly needs to be reshaped
-#         Gz = Gz.reshape(n, k)
-#         #iGz = 1 / Gz
-#         #bGz = Gz * ampl.reshape(1,-1)
-#         b2Gz = Gz.dot(np.abs(ampl)**2)
-#
-#     # Invert the covariance matrix Gy
-#     if Gy.shape == (n, n):
-#         # Full matrix Gy
-#         iGy = np.linalg.inv(Gy)
-#     elif Gy.size == n:
-#         # Diagonal matrix Gy
-#         iGy = 1 / Gy
-#
-#     if Gy.size == n*n or b2Gz.size == n*n:
-#         # If at least one of them is a matrix
-#         if Gy.size == n: Gy = np.diag(Gy.ravel())
-#         if b2Gz.size == n: b2Gz = np.diag(b2Gz.ravel())
-#
-#         Gc = Gy + b2Gz
-#         iGc = np.linalg.inv( Gc )
-#         logdetGc, Q = np.linalg.slogdet(Gc)[1], np.asscalar(ey.conj().T.dot(iGc).dot(ey))
-#
-#         # Compute the partial derivatives
-#         if jac or hes:
-#             dGc_dg = b2Gz/gamma-Gy/(1-gamma) if gamma != 0 else b2Gz - Gy      # derivative of Gc wrt to gamma
-#             diGc_dg = -iGc.dot(dGc_dg).dot(iGc)
-#             dQdg = ey.conj().T.dot(diGc_dg).dot(ey)
-#             dldg = np.trace(iGc.dot(dGc_dg))
-#             dGc_da = 2*Gz*ampl.reshape(1, 1, -1)         # gradient vector wrt the amplitudes
-#             #diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
-#             diGc_da = -( ((iGc.T.dot(dGc_da.reshape(n, -1, order='F'))).reshape(n, n, -1, order='F')).transpose(1,0,2).reshape(n,-1,order='F').T.dot(iGc) ).T.reshape(n,n,-1,order='F').transpose(1,0,2)      # The same as    diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
-#             #diGc_da = -np.dstack([iGc.dot(dGc_da[..., i]).dot(iGc) for i in range(k)])
-#             dQda = ( -2*(ey.conj().T.dot(iGc)).dot(Z).real + \
-#                      np.array([ey.conj().T.dot(diGc_da[..., i]).dot(ey) for i in range(k)]).reshape(1, -1) ).T
-#             dlda = np.array([np.trace(iGc.dot(dGc_da[..., i])) for i in range(k)]).reshape(-1, 1)
-#
-#         # Compute the Hessian matrices
-#         if hes:
-#             d2lda2 = np.tensordot(diGc_da.T, dGc_da, 2) + 2*np.diag(np.tensordot(iGc, Gz, 2))
-#             d2iGc_da2 = - 2*iGc[..., None]*(diGc_da*dGc_da + iGc[..., None]*Gz )
-#             d2Qda2 = 2*(Z.conj().T.dot(iGc.dot(Z)) - 2*np.squeeze(ey.conj().T.dot(diGc_da)).T.dot(Z)).real \
-#                     + np.diag( np.squeeze(ey.conj().T.dot(d2iGc_da2)).T.dot(ey).ravel() )
-#     elif Gy.size == n:
-#         # If both are diagonal vectors
-#         Gc = Gy + b2Gz             # Covariance matrix of the distribution of the measurement vector
-#         iGc = 1 / Gc
-#         logdetGc, Q = np.sum(np.log(Gc)), np.sum(iGc*(np.abs(ey)**2))
-#
-#         # Compute the partial derivatives
-#         if jac or hes:
-#             dGc_dg = b2Gz/gamma-Gy/(1-gamma) if gamma != 0 else b2Gz - Gy      # derivative of Gc wrt to gamma
-#             diGc_dg = -iGc**2 * dGc_dg
-#             dQdg = (ey * diGc_dg).conj().T.dot(ey)
-#             dldg = (iGc*dGc_dg).sum()
-#             dGc_da = 2*Gz*ampl.reshape(1, -1)         # gradient vector wrt the amplitudes
-#             diGc_da = -iGc**2 * dGc_da
-#             dQda = ( -2*((ey*iGc).conj().T.dot(Z)).real + (ey**2).T.dot(diGc_da) ).T
-#             dlda = np.sum(iGc*dGc_da, axis=0).reshape(-1, 1)
-#
-#         # Compute the Hessian matrices
-#         if hes:
-#             d2lda2 = diGc_da.T.dot(dGc_da) + np.diag(np.sum(2*Gz*iGc, axis=0))
-#             d2iGc_da2 = - 2*(diGc_da*dGc_da*iGc + Gz*(iGc**2) )
-#             d2Qda2 = 2*(Z.conj().T.dot(iGc*Z) - 2*(ey.conj()*diGc_da).T.dot(Z)).real + np.diag(np.sum(d2iGc_da2*(np.abs(ey)**2), axis=0))
-#
-#     # Include the prior
-#     if m0 is not None and iS0 is not None:
-#         Q += (ampl-m0).T.dot(iS0.dot(ampl-m0))
-#         dQda += iS0.dot(ampl-m0)
-#
-#     Q = np.asscalar(Q)
-#     logdetGc = np.asscalar(logdetGc)
-#     return Q, logdetGc, grad(dQda, dQdg, dlda, dldg, d2lda2, d2Qda2)
 
 #@profile
 def ll_tls_eval(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=False, hes=False, constr=False):

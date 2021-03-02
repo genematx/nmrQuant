@@ -72,12 +72,12 @@ class freqSpec():
     def repr(self):
         return '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
 
-    def bline(self, nf, numberField='Cm'):
+    def bline(self, nf, numberField='Cx'):
         """Creates a set of base polynomial functions to store the baseline of length nf."""
         if self._bF is None or self._bF.shape[1] != nf:
             # Define baseline in the frequency domain
-            bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[0]+1)] if (self.bslnOrder[0] is not None) and (numberField in ['Re', 'Cm']) else []
-            bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[1]+1)] if (self.bslnOrder[1] is not None) and (numberField in ['Im', 'Cm']) else []
+            bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[0]+1)] if (self.bslnOrder[0] is not None) and (numberField in ['Re', 'Cx']) else []
+            bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[1]+1)] if (self.bslnOrder[1] is not None) and (numberField in ['Im', 'Cx']) else []
             self._bF = np.hstack(bFr+bFi) if len(bFr)+len(bFi) > 0 else None
         return self._bF
 
@@ -548,6 +548,8 @@ class Workspace():
         p0 = 0.1*delta*(np.random.rand(nwalkers, ndim)-1/2) + np.array(initVals).reshape(1,-1)    # Starting points
         p0 = np.minimum(np.maximum(p0, bounds[:, 0].reshape(1,-1)), bounds[:, 1].reshape(1,-1))
 
+        costFuncSmplBounded = lambda x : costFuncSmpl(x) if (x > bounds[:, 0]).all() and (x < bounds[:, 1]).all() else (-np.inf, {})
+
         """# Run burn-in iterations (separately for each dimension)
         print('Burning in...')
         for i in range(ndim):
@@ -563,7 +565,7 @@ class Workspace():
             p0[:,i] = pos.ravel()"""
 
         # Define the sampler
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, costFuncSmpl, a=2.0)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, costFuncSmplBounded, a=2.0)
 
         # Run burn-in iterations (jointly for all dimensions)
         print("Burning in...")
@@ -1227,7 +1229,7 @@ class Series():
 
         return result, {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
 
-    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nhop=None, respectBounds=True, verbose=True):
+    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nhop=None, respectBounds=True, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples of the form: (datum_id, node_name, parameter_name, parameter_id), e.g. (2, 'Sucrose-F', 'chshQD', 5) )."""
 
         # Prepare keys and starting parameters. Expand parameter keys (if 3-tuples were provided, they will be substituted with 4-tuples for all datasets) and make sure there are no repeats
@@ -1254,7 +1256,7 @@ class Series():
                 # Evaluate the function skipping the datasets that are not present in parsKeys
                 return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
 
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, robust=robust, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
 
             if res is not None:
                 # Update the structure of all parameters
@@ -1265,7 +1267,7 @@ class Series():
                         self.crntMetaF[k] = v
 
         # Re-evaluatethe posterior
-        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, returnSignals=True)
+        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -1276,7 +1278,7 @@ class Series():
 
         return result, meta
 
-    def sample(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
+    def sample(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, verbose=False)
@@ -1286,7 +1288,7 @@ class Series():
 
         # If there are no parameters to sample
         # First evaluate the cost function with current parameters. If there is nothing to sample, this will be output as the result (at least for some datasets).
-        value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
+        value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, robust=robust, returnSignals=True)
         for j in range(len(self.data)):
             for i, a in enumerate(meta['ampl'][0]):
                 result[(j, self.repRootNames[i], 'ampl', 0)] = np.array([a[j]])
@@ -1317,7 +1319,7 @@ class Series():
                 elif len(k) == 2:
                     evalMetaF[k] = v
             # Evaluate the function skipping the datasets that are not present in parsKeys
-            return self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, evaluateAll=evaluateAll)
+            return self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, evaluateAll=evaluateAll)
 
         sampler = self._sample(costFuncSmpl, bounds, initVals, nwalkers, nsteps)
 
@@ -1499,6 +1501,19 @@ class Datum():
 
     def isAdapFreq(self):
         return self._flagAdapFreq
+
+    def protocol(self):
+        """Determines the protocol of the experiment (PROTON/PRESAT). Works for Spinsolve, currently."""
+        try:
+            p = self.extra['Protocol']
+        except KeyError:
+            p = self.name
+
+        if 'PROTON' in self.name:
+            return 'PROTON'
+        elif 'PRESAT' in self.name:
+            return 'PRESAT'
+        else: return None
 
     def resetSignals(self, flagAdapFreq=None):
         self._f = None         # Subsampled frequency array from the Series level that overwrites it for the specific Datum
@@ -2111,7 +2126,8 @@ class Datum():
         gamma = meta['gamma']
         S_ampl = meta['ampl'][1]
         a_sigma2, b_sigma2 = meta['sigma2']
-        #print(m_ampl)
+        # print(m_ampl)
+        # print(S_ampl)
 
         mult = 1   # sum(m_ampl)     # Multiplier (can be used to output normalized amplitudes)
         for lbl, val in zip(reportedNames, m_ampl[:na]):
@@ -2126,6 +2142,8 @@ class Datum():
         self.zF, self.bF = None, None                     # Reset the signals
         self.zF_corr, self.bF_corr = None, None           # Reset the corrections for the model matrix and the baseline
         if returnSignals:
+            self.smplDistF.clear()
+
             # Save the estimated signals
             if inTimeDomain:
                 self.zF = np.fft.fftshift(np.fft.fft(Z, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
@@ -2137,6 +2155,7 @@ class Datum():
             for i in range(na):
                 key=(reportedNames[i], 'ampl', 0)
                 if key in autoKeys:
+                    # print(key, (np.asscalar(np.abs(m_ampl[i])), np.asscalar(np.abs(S_ampl[i,i]))))
                     self.smplDistF[key] = smplSpec_Gaussian(np.asscalar(np.abs(m_ampl[i])), np.asscalar(np.abs(S_ampl[i,i])))
 
             key=('.', 'sigma2', 0)
@@ -2233,7 +2252,7 @@ class Datum():
 
         return result, meta
 
-    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nhop=None, respectBounds=True, verbose=True):
+    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nhop=None, respectBounds=True, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples)."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds, verbose=verbose)
@@ -2252,7 +2271,7 @@ class Datum():
             costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=False, allowShift=allowShift, shiftingRange=shiftingRange)[0]
 
             # Call the optimization routine
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, robust=robust, verbose=verbose)
 
             if res is not None:
                 # Update the stored parameters
@@ -2260,7 +2279,7 @@ class Datum():
                 self.smplDistF.clear()
 
         # Re-evaluate the posterior
-        result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, returnSignals=True)
+        result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -2393,7 +2412,7 @@ class Datum():
         if verbose:
             print('Found values: ph0 = {:.4f}, ph1 = {:.4f}'.format(ph0, ph1))
 
-    def adjust_residual(self, evalParsH=None, frqBlkIds=None, freqMask=None, mw=2048, verbose=True):
+    def adjust_residual(self, evalParsH=None, frqBlkIds=None, freqMask=None, mw=2048, correct_comps=True, force_eval=False, verbose=True):
         """Correction of the model signals and the baseline to make the residual noise-like."""
 
         if verbose:
@@ -2411,7 +2430,7 @@ class Datum():
         dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
 
         # 2. Compute the model spectrum if necessary
-        if self.zF is None or self.bF is None:
+        if self.zF is None or self.bF is None or force_eval:
             self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, autoKeys=[], returnSignals=True)
 
         # Find the model signal
@@ -2428,36 +2447,42 @@ class Datum():
         # Evaluate the phasing cost function to find the residual and baseline
         val, yFph, rFph, bFph = ph_cost(yFph, xF, mw=mw)
 
-        # Find the corrected amplitudes
-        zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)           # Values of the first time-domain points for each model signal
-        bF0 = zT0.real.ravel()/(2*np.sqrt(len(self.parent.f)))          # Levels of the constant baselines for each signature model
-        zFnb = (zF - bF0).real                # Model signatures with constant baselines removed
-        zF0 = np.sum(zFnb, axis=0).real       # What the (restricted) models sum to; should be np.sqrt(len(self.f))/2*zT0 if the entire frequency range
+        # Adjust the baseline
+        self.bF_corr = np.zeros(self.bF.shape)        # Additive corrections for the baseline
+        self.bF_corr[indxInRangeStacked] = bFph
 
-        corr_comp = np.where(zF0 > 0.01*sum(zF0))[0]           # Indices of components to correct, choose only large components
+        # Adjust components if needed by redistributing the residual among them
+        if correct_comps:
+            self.zF_corr = np.zeros(self.zF.shape)           # Initialize additive correction for the models
 
-        posZa = zFnb * ampl.reshape(1, -1)
+            # Find the corrected amplitudes
+            zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)           # Values of the first time-domain points for each model signal
+            bF0 = zT0.real.ravel()/(2*np.sqrt(len(self.parent.f)))          # Levels of the constant baselines for each signature model
+            zFnb = (zF - bF0).real                # Model signatures with constant baselines removed
+            zF0 = np.sum(zFnb, axis=0).real       # What the (restricted) models sum to; should be np.sqrt(len(self.f))/2*zT0 if the entire frequency range
 
-        # Define the weight matrix
-        Za = self.zF[indxInRangeStacked, :] * ampl.reshape(1,-1)
-        absZa = np.abs(Za)**2
-        C = absZa/np.sum(absZa, axis=1).reshape(-1,1)                     # Weights for redistributing the residual
+            corr_comp = np.where(zF0 > 0.01*sum(zF0))[0]           # Indices of components to correct, choose only large components
 
-        posZa_corr = posZa + rFph.real*C           # Corrected models without the constant baselines
-        ampl_corr = np.copy(ampl)
-        ampl_corr[corr_comp] = np.sum(posZa_corr[:, corr_comp].real, axis=0)/zF0[corr_comp].real.ravel()
-        zF_corr = np.divide(posZa_corr, ampl_corr, out=posZa_corr, where=(ampl_corr!=0)) + bF0        # Avoid dividing by zero. posZa_corr / ampl_corr + bF0
-        print(posZa_corr)
-        print(zF_corr)
+            posZa = zFnb * ampl.reshape(1, -1)
 
-        # Save the corrections and amplitudes
-        reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
+            # Define the weight matrix
+            Za = self.zF[indxInRangeStacked, :] * ampl.reshape(1,-1)
+            absZa = np.abs(Za)**2
+            C = absZa/np.sum(absZa, axis=1).reshape(-1,1)                     # Weights for redistributing the residual
 
-        for name, val in zip(reportedNames, ampl_corr):
-            self.setCrntVal(key=(name, 'ampl', 0), val=val)
-        self.zF_corr, self.bF_corr = np.zeros(self.zF.shape), np.zeros(self.bF.shape)        # Additive corrections for the models and the baseline
-        self.zF_corr[indxInRangeStacked, :] = zF_corr - self.zF[indxInRangeStacked, :]
-        self.bF_corr[indxInRangeStacked] = bFph + np.sum(bF0*(ampl-ampl_corr))
+            posZa_corr = posZa + rFph.real*C           # Corrected models without the constant baselines
+            ampl_corr = np.copy(ampl)
+            ampl_corr[corr_comp] = np.sum(posZa_corr[:, corr_comp].real, axis=0)/zF0[corr_comp].real.ravel()
+            zF_corr = np.divide(posZa_corr, ampl_corr, out=posZa_corr, where=(ampl_corr!=0)) + bF0        # Avoid dividing by zero. posZa_corr / ampl_corr + bF0
+
+            # Save the corrections and amplitudes
+            reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
+
+            for name, val in zip(reportedNames, ampl_corr):
+                self.setCrntVal(key=(name, 'ampl', 0), val=val)
+
+            self.zF_corr[indxInRangeStacked, :] = zF_corr - self.zF[indxInRangeStacked, :]
+            self.bF_corr[indxInRangeStacked] = self.bF_corr[indxInRangeStacked] + np.sum(bF0*(ampl-ampl_corr))
 
     def integrate(self, lims, source='measured', evalParsH=None, frqBlkIds=None, freqMask=None):
         """Integrates the model signal within the limits lims.
@@ -2594,7 +2619,7 @@ class Datum():
         self.sF = None
         self._gof = None
 
-    def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, nwalkers=None, nsteps=None):
+    def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds)
@@ -2604,12 +2629,12 @@ class Datum():
 
         # If no parameters are set for sampling, just evaluate the marginal posterior
         if len(parsKeys) == 0:
-            # Define the spectrum shifting range for faster computations
-            allowShift = any([key[1] in ['chsh', 'alph'] for key in parsKeys])
-            shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])
+            # # Define the spectrum shifting range for faster computations
+            # allowShift = any([key[1] in ['chsh', 'alph'] for key in parsKeys])
+            # shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])
 
             # Nothing to sample; just evaluate the function
-            value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, returnSignals=True)
+            value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, robust=robust, returnSignals=True)
 
             m_ampl = np.array(meta['ampl'][0]).reshape(-1, 1)
             S_ampl = meta['ampl'][1]
@@ -2632,7 +2657,7 @@ class Datum():
         evalParsH = copy.deepcopy(self.crntParsH)
         bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
         initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-        costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors)
+        costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust)
 
         sampler = self._sample(costFuncSmpl, bounds, initVals, nwalkers, nsteps)
 
@@ -2640,6 +2665,7 @@ class Datum():
         # sampler.blobs has size nsteps x nwalkers
         # sampler.chain in nwalkers x nsteps x ndim
         # Want an output in the form nsamples x ndim
+        return sampler, costFuncSmpl
         flatchain = sampler.flatchain
         for i, key in enumerate(parsKeys):
             result[key] = flatchain[:, i]
@@ -2648,8 +2674,8 @@ class Datum():
         m_ampl = np.array([blbWlkr['ampl'][0].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T     # Means of the amplitudes
         S_ampl = np.array([blbWlkr['ampl'][1] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T             # Covariance matrices of the amplitudes
         # Generate random samples of amplitudes
-        nrep = 3     # Number of repeats for each case to sample the amplitudes from the Gaussian distributions
-        indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled
+        nrep = 3     # Number of repeats for each case of parsKeys to sample the amplitudes from the Gaussian distributions
+        indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled explicitely
         if len(indx) > 0:
             smpl = np.hstack([np.linalg.cholesky(np.squeeze(S_ampl[np.ix_(indx, indx, [i])])).dot(np.random.randn(len(indx), nrep)) \
                              + m_ampl[indx,i].reshape(-1,1) for i in range(S_ampl.shape[-1])])              # Multivariate Gaussian random samples
@@ -2973,6 +2999,12 @@ class Datum():
                 bF = self.bF[allIndx, :] if self.bF_corr is None else self.bF[allIndx, :] + self.bF_corr[allIndx, :]
                 xF += bF
 
+            # # Remove the constant baselines from each zF signal
+            evalParsH = self.crntParsH
+            zT0, _ = getFID(self.T, [0.0], self.c0, self.f0, evalParsH, tau=0.0, xclRootNames=self.xclRootNames)           # Values of the first time-domain points for each model signal
+            bF0 = zT0.real.ravel()/(2*np.sqrt(len(self.parent.f)))          # Levels of the constant baselines for each signature model
+            zF = (zF - bF0*ampl).real                # Model signatures with constant baselines removed
+
         return f, yFph, xF, zF, bF
 
     def stems_for_plot(self):
@@ -3241,8 +3273,8 @@ def save_workspace(filename, wsp, GUIsettings=None):
                                      'xlim': (10.0, 0.0)},
                        'autoPhase': False, 'startFromPars': 'current',
                        '_view': {'hiddenTreeViewNodes': [], 'stepsEditText': 'AAAAAA'},
-                       '_config': {'SAMPL_varEstimator': 'robust', 'OPTIM_method': 'L-BFGS-B', 'QD_RerunQDchshThreshold': 0.1, 'OPTIM_startFrom': 'current', 'SAMPL_funcType': 'LS', 'OPTIM_niterSuccess': 5, 'MODEL_ShapeKernelSize': 13, 'OPTIM_maxBasinhoppingSteps': 3, 'QD_AggregatePeaksThreshold': 0.5, 'DISPL_ShiftToReference': True},
                        'autoPick': False, 'ax1Limits': None, 'ax2Limits': None}
+    GUIsettings.update( {'_config': config.as_dict()} )
     dataPack = wsp.pack()
     with open(filename, 'wb') as fp:
         dill.dump([dataPack, GUIsettings], fp)
@@ -3448,94 +3480,95 @@ def make_causal(xF):
 #@profile
 def leastSquares(Z, y, m0=None, S0=None, Gy=None, lockedPhase=True, indxPositive=None, robust=True):
     """Solves a phased-constrained complex-valued least-squares problem, y=Zx for x; nb - number of baseline terms (columns in the end of Z). theta=None - the phase will be determined from the data. Gy - covariance matrix of noise (or the diagonal vecotr of that matrix)"""
-    nz = Z.shape[1]      # Number of dimensions
-    if lockedPhase and indxPositive is None:
-        indxPositive = list(range(nz))
-    ampl = np.zeros((nz,1))
-
-    # 2. Set up the (Gaussian) priors
-    if m0 is None: m0 = np.zeros((k, 1))
-    if S0 is None: S0 = 1e+42 * np.identity(k)
-
-    # Find which dimensions have priors with infinite or zero variance and invert the covariance matrix
-    indx_inf = np.where(np.diag(S0) == np.inf)[0]        # Indices of components with infinite-variance (non-informative) intensities
-    indx_fixed = np.where(np.diag(S0) == 0)[0]           # Indices of components with fixed (zero-variance) intensities
-    indx_variable = np.where(np.diag(S0) != 0)[0]        # Indices of components with variable intensities
-    indx_zero = []                                       # Indices of components with zero intensities
-    iS0 = np.zeros((nz, nz))
-    iS0[indx_variable[:,None], indx_variable] = np.linalg.inv(S0[indx_variable[:, None], indx_variable])           # Invert the part that that doesn't have zeros on the diagonal as usual
-    iS0[indx_fixed, indx_fixed] = 1e+42   # np.inf                                                             # Substitute the rest of diagonal values with a very large number
-
-    # 3.
-    if Gy is None:
-        # No weighting matrix (assume identity)
-        ZG = Z.conj().T
-        yG = y.conj().T
-    elif Gy.ndim==1 or (Gy.ndim==2 and (Gy.shape[0]==1 or Gy.shape[1]==1)):
-        # Weighting matrix G is diagonal and is defined by the vector
-        iGy = 1 / Gy.reshape(1, -1)
-        ZG = Z.conj().T * iGy
-        yG = y.conj().T * iGy
-    else:
-        # G is a full matrix
-        iGy = np.linalg.inv(Gy)
-        ZG = Z.conj().T.dot(iGy)
-        yG = y.conj().T.dot(iGy)
-    ZZ = ZG.dot(Z)
-    Zy = ZG.dot(y)
-    if np.linalg.matrix_rank(ZZ) < nz:
-        ZZ += 0.000001*np.identity(nz)
-
-    if lockedPhase:                 # Locked phase - real amplitudes
-        while True:
-            iSc = (iS0 + ZZ).real
-            Sc = np.linalg.inv(iSc)
-            # Estimate theta to maximize the posterior
-            theta = np.asscalar( 0.5*np.angle(np.dot(Zy.T, np.dot(Sc, Zy))) )
-            # TODO!!! This should also depend on priors over amplitudes (i.e. S0 and m0)
-            mc = Sc.dot( (Zy*np.exp(-1j*theta) + np.dot(iS0,m0)).real )
-
-            # Find which components (if any) have negative intensities and set them to 0.0
-            mc[indxPositive] = np.maximum(mc[indxPositive], 0.0) if mc[indxPositive].sum() > 0 else np.minimum(mc[indxPositive], 0.0)     # Discard negative values in mc but keep the sign for baseline components
-            indx_zero = [ indxPositive[i] for i in np.where(mc[indxPositive] == 0.0)[0] ]     # Indices of elements currently set to zeros
-            if len(indx_zero) == 0:
-                # If all components have the same sign
-                if mc[indxPositive].sum() < 0:      # Make sure that all amplitudes are positive
-                    mc = - mc
-                    theta = theta + np.pi
-                mc[indx_fixed] = m0[indx_fixed]     # Replace intensities with fixed vcalues if neecessary (where variance is 0)
-                break
-            else:
-                # Exclude the components with negative intensities from computation and update their priors accordingly
-                indx_fixed = np.append(indx_fixed, indx_zero)
-                indx_variable = np.setdiff1d(indx_variable, indx_zero)
-                indxPositive = np.setdiff1d(indxPositive, indx_zero)
-                m0[indx_zero] = 0.0
-                iS0[indx_zero, indx_zero] = 1e+42
-        theta = (theta + np.pi) % (2 * np.pi) - np.pi
-        mc = mc* np.exp(1j*theta)
-    else:
-        # LS problem with unconstrained phase (if complex)
-        theta = None
-        iSc = iS0 + ZZ
-        Sc = np.linalg.inv(iSc)
-        mc = np.dot(Sc, (Zy+np.dot(iS0, m0)))
-        mc[indx_fixed] = m0[indx_fixed]     # Replace values if neecessary (where variance is 0)
-
-    # Find robust variance estimators
-    if robust:
-        r = y - Z.dot(mc)    # the residual
-        r2 = np.abs(r.reshape(1,-1))**2
-        #print( "sum r2 = {}".format(np.asscalar(r2.sum(axis=1))/r2.size) )
-        ZrZ = (ZG * r2).dot(ZG.conj().T)
-        if np.linalg.matrix_rank(ZrZ) < nz:
-            ZrZ = ZrZ + 0.000001*np.identity(nz)
-        Sr = Sc.dot( (iS0 + ZrZ).real ).dot(Sc)
-    else: Sr = None
-
-    Q = yG.dot(y) + np.dot(np.dot(m0[indx_variable].conj().T, iS0[indx_variable[:,None], indx_variable]), m0[indx_variable]) - np.dot(np.dot(mc[indx_variable].conj().T, iSc[indx_variable[:,None], indx_variable]), mc[indx_variable])
-    Q = max(np.asscalar(Q.real), 0.0)
-    return mc, Sc, Sr, Q
+    # nz = Z.shape[1]      # Number of dimensions
+    # if lockedPhase and indxPositive is None:
+    #     indxPositive = list(range(nz))
+    # ampl = np.zeros((nz,1))
+    #
+    # # 2. Set up the (Gaussian) priors
+    # if m0 is None: m0 = np.zeros((k, 1))
+    # if S0 is None: S0 = 1e+42 * np.identity(k)
+    #
+    # # Find which dimensions have priors with infinite or zero variance and invert the covariance matrix
+    # indx_inf = np.where(np.diag(S0) == np.inf)[0]        # Indices of components with infinite-variance (non-informative) intensities
+    # indx_fixed = np.where(np.diag(S0) == 0)[0]           # Indices of components with fixed (zero-variance) intensities
+    # indx_variable = np.where(np.diag(S0) != 0)[0]        # Indices of components with variable intensities
+    # indx_zero = []                                       # Indices of components with zero intensities
+    # iS0 = np.zeros((nz, nz))
+    # iS0[indx_variable[:,None], indx_variable] = np.linalg.inv(S0[indx_variable[:, None], indx_variable])           # Invert the part that that doesn't have zeros on the diagonal as usual
+    # iS0[indx_fixed, indx_fixed] = 1e+42   # np.inf                                                             # Substitute the rest of diagonal values with a very large number
+    #
+    # # 3.
+    # if Gy is None:
+    #     # No weighting matrix (assume identity)
+    #     ZG = Z.conj().T
+    #     yG = y.conj().T
+    # elif Gy.ndim==1 or (Gy.ndim==2 and (Gy.shape[0]==1 or Gy.shape[1]==1)):
+    #     # Weighting matrix G is diagonal and is defined by the vector
+    #     iGy = 1 / Gy.reshape(1, -1)
+    #     ZG = Z.conj().T * iGy
+    #     yG = y.conj().T * iGy
+    # else:
+    #     # G is a full matrix
+    #     iGy = np.linalg.inv(Gy)
+    #     ZG = Z.conj().T.dot(iGy)
+    #     yG = y.conj().T.dot(iGy)
+    # ZZ = ZG.dot(Z)
+    # Zy = ZG.dot(y)
+    # if np.linalg.matrix_rank(ZZ) < nz:
+    #     ZZ += 0.000001*np.identity(nz)
+    #
+    # if lockedPhase:                 # Locked phase - real amplitudes
+    #     while True:
+    #         iSc = (iS0 + ZZ).real
+    #         Sc = np.linalg.inv(iSc)
+    #         # Estimate theta to maximize the posterior
+    #         theta = np.asscalar( 0.5*np.angle(np.dot(Zy.T, np.dot(Sc, Zy))) )
+    #         # TODO!!! This should also depend on priors over amplitudes (i.e. S0 and m0)
+    #         mc = Sc.dot( (Zy*np.exp(-1j*theta) + np.dot(iS0,m0)).real )
+    #
+    #         # Find which components (if any) have negative intensities and set them to 0.0
+    #         mc[indxPositive] = np.maximum(mc[indxPositive], 0.0) if mc[indxPositive].sum() > 0 else np.minimum(mc[indxPositive], 0.0)     # Discard negative values in mc but keep the sign for baseline components
+    #         indx_zero = [ indxPositive[i] for i in np.where(mc[indxPositive] == 0.0)[0] ]     # Indices of elements currently set to zeros
+    #         if len(indx_zero) == 0:
+    #             # If all components have the same sign
+    #             if mc[indxPositive].sum() < 0:      # Make sure that all amplitudes are positive
+    #                 mc = - mc
+    #                 theta = theta + np.pi
+    #             mc[indx_fixed] = m0[indx_fixed]     # Replace intensities with fixed vcalues if neecessary (where variance is 0)
+    #             break
+    #         else:
+    #             # Exclude the components with negative intensities from computation and update their priors accordingly
+    #             indx_fixed = np.append(indx_fixed, indx_zero)
+    #             indx_variable = np.setdiff1d(indx_variable, indx_zero)
+    #             indxPositive = np.setdiff1d(indxPositive, indx_zero)
+    #             m0[indx_zero] = 0.0
+    #             iS0[indx_zero, indx_zero] = 1e+42
+    #     theta = (theta + np.pi) % (2 * np.pi) - np.pi
+    #     mc = mc* np.exp(1j*theta)
+    # else:
+    #     # LS problem with unconstrained phase (if complex)
+    #     theta = None
+    #     iSc = iS0 + ZZ
+    #     Sc = np.linalg.inv(iSc)
+    #     mc = np.dot(Sc, (Zy+np.dot(iS0, m0)))
+    #     mc[indx_fixed] = m0[indx_fixed]     # Replace values if neecessary (where variance is 0)
+    #
+    # # Find robust variance estimators
+    # if robust:
+    #     r = y - Z.dot(mc)    # the residual
+    #     r2 = np.abs(r.reshape(1,-1))**2
+    #     #print( "sum r2 = {}".format(np.asscalar(r2.sum(axis=1))/r2.size) )
+    #     ZrZ = (ZG * r2).dot(ZG.conj().T)
+    #     if np.linalg.matrix_rank(ZrZ) < nz:
+    #         ZrZ = ZrZ + 0.000001*np.identity(nz)
+    #     Sr = Sc.dot( (iS0 + ZrZ).real ).dot(Sc)
+    # else: Sr = None
+    #
+    # Q = yG.dot(y) + np.dot(np.dot(m0[indx_variable].conj().T, iS0[indx_variable[:,None], indx_variable]), m0[indx_variable]) - np.dot(np.dot(mc[indx_variable].conj().T, iSc[indx_variable[:,None], indx_variable]), mc[indx_variable])
+    # Q = max(np.asscalar(Q.real), 0.0)
+    # return mc, Sc, Sr, Q
+    pass
 
 def setattrs(_self, **kwargs):
     """Sets multiple attributes for a class instance"""

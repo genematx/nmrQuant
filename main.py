@@ -637,7 +637,8 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             if indx_colr is None: indx_colr = list(range(zF.shape[1]))
             self._zF = [None]*zF.shape[1]
             for i in range(zF.shape[1]):
-                self._zF[i] = p0.plot(f, zF[:,i].ravel().real, pen={'color':colrseq[indx_colr[i]+2], 'width':1})
+                self._zF[i] = p0.plot(f, zF[:,i].ravel().real, pen={'color':colrseq[indx_colr[i]+2], 'width':1},
+                                      fillLevel=0.0, brush=tuple([*colrseq[indx_colr[i]+2], 100]) )       # brush=(50,50,200,100)
 
         # Plot the ranges
         if freqBlocks is not None:
@@ -890,11 +891,12 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             p0.setLabel('bottom', 'Chemical shift, ppm')
             p1.hide()
 
-    def showComponents(self, flag=True):
+    def showComponents(self, flag=True, indx=None):
         if len(self._zF) == 0:
             raise Exception('No components exist.')
-        for x in self._zF:
-            if flag:
+
+        for i, x in enumerate(self._zF):
+            if flag and (i==indx or indx is None):
                 x.show()
             else: x.hide()
 
@@ -3852,6 +3854,9 @@ class FittingThread(QThread):
             elif actnToRun == 'Rsd':
                 # Adjusting the residual
                 fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds)
+            elif actnToRun == 'Bln':
+                # Adjust the baseline without abjusting the residual
+                fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds, correct_comps=False)
             elif actnToRun == 'Lsh':
                 # Adjust the lineshape
                 fileToFit.adjust_shape(frqBlkIds=step.frqBlkIds)
