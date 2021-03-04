@@ -232,30 +232,68 @@ def fit_ethanol_CH3(DDD):
         DDD.shiftToRef(refKey=('Ethanol', 'chshQD', 0), keepFitted=False)
 
 def fit_sugars(DDD):
-    # Step 4. Fit Glucose and Sucrose using the anomeric peaks
-    autoKeys = [('.', 'sigma2', 0), ('Glucose', 'ampl', 0), ('Sucrose', 'ampl', 0)]
-    for _ in range(2):
-        DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[5])
-        DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[5])
-
-    autoKeys = [('.', 'sigma2', 0), ('Fructose', 'ampl', 0)]
-    chshAnomGluc = None    # Chemical shift from the anomeric proton of glucose
-    if DDD.getCrntVal(key=('Glucose', 'ampl', 0)) > DDD.extra['sigma_est']:
-        autoKeys.append(('Glucose', 'ampl', 0))
-        chshAnomGluc = DDD.getCrntVal(key=('Sugars', 'chsh', 0))
-    for _ in range(2):
-        DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[14])
-        DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[14])
-
-    # Step 5. Fit the rest of sugars, glycerol, and CH2 peak of ethanol
+    # Get rough estimate of intensities of all major components in the sugars region
+    DDD.evaluate(autoKeys=[('.', 'sigma2', 0), ('Glucose', 'ampl', 0), ('Sucrose', 'ampl', 0), ('Fructose', 'ampl', 0),
+                           ('Sorbitol', 'ampl', 0), ('Glycerol', 'ampl', 0)], frqBlkIds=[3])
     mfrac = DDD.report_moleFrac(names = ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol'])
     mfrac['Sugars'] = mfrac['Fructose']+mfrac['Glucose']+mfrac['Sucrose']+mfrac['Sorbitol']
     mfrac_sorted = sorted(['Sugars', 'Ethanol', 'Glycerol'], key=lambda x : mfrac[x], reverse=True)
 
-    if mfrac['Fructose'] > 2*mfrac['Glucose'] and DDD.getCrntVal(key=('Fructose', 'ampl', 0)) > DDD.extra['sigma_est']:
+    # Find the global position/width for sugars
+    if DDD.getCrntVal(key=('Glucose', 'ampl', 0)) + DDD.getCrntVal(key=('Sucrose', 'ampl', 0)) > DDD.extra['sigma_est']:
+        # Fit Glucose and Sucrose using the anomeric peaks
+        autoKeys = [('.', 'sigma2', 0), ('Glucose', 'ampl', 0), ('Sucrose', 'ampl', 0)]
+        DDD.optimize(parsKeys=[('Sugars', 'chsh', 0), ('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[5, 9])
         for _ in range(2):
-            DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=[('.', 'sigma2', 0), ('Fructose', 'ampl', 0)], frqBlkIds=[14])
-            DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=[('.', 'sigma2', 0), ('Fructose', 'ampl', 0)], frqBlkIds=[14])
+            DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[5, 9])
+            DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[5, 9])
+    elif DDD.getCrntVal(key=('Fructose', 'ampl', 0)) + DDD.getCrntVal(key=('Sucrose', 'ampl', 0)) > DDD.extra['sigma_est']:
+        # If there is enough Fructose, use it to fit the position of sugars
+        autoKeys = [('.', 'sigma2', 0), ('Fructose', 'ampl', 0), ('Sucrose', 'ampl', 0)]
+        DDD.optimize(parsKeys=[('Sugars', 'chsh', 0), ('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[14])
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[14])
+            DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[14])
+    else:
+        # Use them all
+        # TODO! Possibly needs refinement
+        autoKeys = [('.', 'sigma2', 0), ('Fructose', 'ampl', 0), ('Sucrose', 'ampl', 0), ('Glucose', 'ampl', 0), ('Sorbitol', 'ampl', 0), ('Glycerol', 'ampl', 0)]
+        DDD.optimize(parsKeys=[('Sugars', 'chsh', 0), ('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[3])
+        for _ in range(2):
+            DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3])
+            DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[3])
+
+    # Optimize Glycerol
+    DDD.optimize(parsKeys=[('Glycerol', 'chsh', 0), ('Glycerol', 'alph', 0)], \
+                 autoKeys=[('.', 'sigma2', 0), ('Glycerol', 'ampl', 0)], frqBlkIds=[3], nhop=5)
+
+    # # Try readjusting the individual (global) chemical shifts of Glucose and Fructose
+    # if DDD.getCrntVal(key=('Fructose', 'ampl', 0)) > DDD.extra['sigma_est'] and DDD.getCrntVal(key=('Glucose', 'ampl', 0)) > DDD.extra['sigma_est']:
+    #     autoKeys = [('.', 'sigma2', 0), ('Fructose', 'ampl', 0), ('Sucrose', 'ampl', 0), ('Glucose', 'ampl', 0)]
+    #     DDD.optimize(parsKeys=[('Fructose', 'chsh', 0), ('Glucose', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3, 5, 9, 14], nhop=5)
+    #     DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[3, 5, 9, 14])
+    #     DDD.optimize(parsKeys=[('Fructose', 'chsh', 0), ('Glucose', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3, 5, 9, 14], nhop=3)
+
+    # Optimize Glycerol
+    DDD.optimize(parsKeys=[('Glycerol', 'chsh', 0), ('Glycerol', 'alph', 0)], \
+                 autoKeys=[('.', 'sigma2', 0), ('Glycerol', 'ampl', 0)], frqBlkIds=[3], nhop=5)
+
+    # autoKeys = [('.', 'sigma2', 0), ('Fructose', 'ampl', 0)]
+    # chshAnomGluc = None    # Chemical shift from the anomeric proton of glucose
+    # if DDD.getCrntVal(key=('Glucose', 'ampl', 0)) > DDD.extra['sigma_est']:
+    #     autoKeys.append(('Glucose', 'ampl', 0))
+    #     chshAnomGluc = DDD.getCrntVal(key=('Sugars', 'chsh', 0))
+    # for _ in range(2):
+    #     DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[14])
+    #     DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[14])
+    #
+    # # Step 5. Fit the rest of sugars, glycerol, and CH2 peak of ethanol
+
+
+    # if mfrac['Fructose'] > 2*mfrac['Glucose'] and DDD.getCrntVal(key=('Fructose', 'ampl', 0)) > DDD.extra['sigma_est']:
+    #     for _ in range(2):
+    #         DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=[('.', 'sigma2', 0), ('Fructose', 'ampl', 0)], frqBlkIds=[14])
+    #         DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=[('.', 'sigma2', 0), ('Fructose', 'ampl', 0)], frqBlkIds=[14])
     # elif mfrac['Glucose'] > 2*mfrac['Fructose'] and DDD.getCrntVal(key=('Glucose', 'ampl', 0)) > DDD.extra['sigma_est']:
     #     for _ in range(2):
     #         DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=[('.', 'sigma2', 0), ('Glucose', 'ampl', 0)], frqBlkIds=[5])
@@ -270,16 +308,16 @@ def fit_sugars(DDD):
 
         autoKeys = [('.', 'sigma2', 0)]
         for name in ['Glucose', 'Fructose', 'Sucrose', 'Sorbitol', 'Glycerol']:
-            if mfrac[name] > 0.05: autoKeys.append( (name, 'ampl', 0) )
+            if mfrac[name] > 0.01: autoKeys.append( (name, 'ampl', 0) )
         for _ in range(2):
             for name in mfrac_sorted:
-                if mfrac[name] > 0.05:
-                    if name == 'Ethanol':
-                        DDD.optimize(parsKeys=[('Ethanol', 'chshQD', 1)], autoKeys=autoKeys, frqBlkIds=[3])
-                        DDD.optimize(parsKeys=[('Ethanol', 'alphQD', 1)], autoKeys=autoKeys, frqBlkIds=[3])
-                    else:
-                        DDD.optimize(parsKeys=[(name, 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3])
-                        DDD.optimize(parsKeys=[(name, 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[3])
+                # if mfrac[name] > 0.01:
+                if name == 'Ethanol':
+                    DDD.optimize(parsKeys=[('Ethanol', 'chshQD', 1)], autoKeys=autoKeys, frqBlkIds=[3])
+                    DDD.optimize(parsKeys=[('Ethanol', 'alphQD', 1)], autoKeys=autoKeys, frqBlkIds=[3])
+                else:
+                    DDD.optimize(parsKeys=[(name, 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3])
+                    DDD.optimize(parsKeys=[(name, 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[3])
 
     # mfrac = DDD.report_moleFrac(names = ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol'])
     # mfrac['Sugars'] = mfrac['Fructose']+mfrac['Glucose']+mfrac['Sucrose']+mfrac['Sorbitol']
@@ -300,6 +338,10 @@ def fit_sugars(DDD):
     #         else:
     #             DDD.optimize(parsKeys=[(name, 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3])
     #             DDD.optimize(parsKeys=[(name, 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[3])
+
+    # Update the estimates for Sorbitol and Glycerol
+    DDD.evaluate(autoKeys=[('.', 'sigma2', 0), ('Sorbitol', 'ampl', 0), ('Glycerol', 'ampl', 0)], frqBlkIds=[3])
+
     pass
 
 def fit_acids(DDD):
@@ -676,7 +718,7 @@ def init_freqBlocks_autoWine(SSS):
     # Add new blocks
     SSS.addFreqBlock(lims=(-0.5, 7.0), select=True)           # Block 1. The main range (mainly for plotting)
     SSS.addFreqBlock(lims=(6.0, 6.8), select=False)            # Block 2. Maleic acid
-    SSS.addFreqBlock(lims=(3.25, 4.20), bslnOrder=(1,1), select=False)            # Block 3. Sugars
+    SSS.addFreqBlock(lims=(3.25, 4.20), bslnOrder=(0,0), select=False)            # Block 3. Sugars
     SSS.addFreqBlock(lims=(0.5, 1.75), select=False)           # Block 4. Ethanol CH3
     SSS.addFreqBlock(lims=(5.1, 5.55), bslnOrder=(5,5), select=False)          # Block 5. Anomeric protons of Glucose
     SSS.addFreqBlock(lims=(2.5, 3.1), bslnOrder=(3,3), select=False)           # Block 6. Citric/Malic acid
@@ -947,7 +989,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
         # wsp.setGlobalPrior(key=('Lactic acid', 'chshQD', 0), min=1.365, max=1.39, dval=1.381)
         # wsp.setGlobalPrior(key=('Lactic acid', 'alph', 0), min=-2.0, max=5.0, dval=0.00)
         # wsp.setGlobalPrior(key=('Alanine', 'alph', 0), min=-1.0, max=5.0, dval=0.00)
-        # wsp.setGlobalPrior(key=('2,3-Butanediol', 'alph', 0), min=-2.0, max=5.0, dval=0.0)
+        wsp.setGlobalPrior(key=('Glycerol', 'alph', 0), min=-2.5, max=3.0, dval=0.0)
         wsp.setGlobalPrior(key=('Ethanol', 'chshQD', 1), min=3.63, max=3.655, dval=3.647)
         wsp.setGlobalPrior(key=('Maleic acid', 'chshQD', 0), min=6.3, max=6.45, dval=6.390)
 

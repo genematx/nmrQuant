@@ -643,46 +643,62 @@ def ll_tls_eval(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=
     logdetGc = np.asscalar(logdetGc)
     return Q, logdetGc, grad(dQda, dQdg, dlda, dldg, d2lda2, d2Qda2)
 
-def log_likelihood(Z, y, ampl=None, sigma2=None, Gz=None, Gy=None, gamma=None, m0=None, iS0=None, a_sigma2=2.0, b_sigma2=10.0, funcType='LS', constr=False, robust=False):
-    """Computes the value of the Gaussian likelihood function. iG - inverse covariance matrix of the noise."""
+def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=None, m0=None, iS0=None, a_sigma2_0=2.0, b_sigma2_0=10.0, funcType='LS', constr=False, robust=False, nonnegative=True, na=None):
+    """Computes the value of the Gaussian likelihood function. iG - inverse covariance matrix of the noise.
+       ampl0 - array of intial amplitudes, entries which are initialized to None will be estimated in closed form.
+       If nonnegative=True, first na amplitudes will be forced to have non-negative values."""
     # 0. Prepare the inputs
     n, k = Z.shape     # Number of samples and (model signals)
-    isReal = np.isreal(Z).all() and np.isreal(y).all() and (ampl is None or np.isreal(ampl).all())    # Determine if the problem is real or complex-valued
-    #gamma = max(min(gamma, 1-1e-12), 1e-12)    # Make sure gamma is within allowed bounds
+    isReal = np.isreal(Z).all() and np.isreal(y).all() and (ampl0 is None or np.isreal(ampl0).all())    # Determine if the problem is real or complex-valued
+    #gamma0 = max(min(gamma0, 1-1e-12), 1e-12)    # Make sure gamma is within allowed bounds
 
     # Initialize the array of amplitudes
-    if ampl is None:
-        ampl = np.array([None]*k)
-    #print('Is real:', isReal)
+    if ampl0 is None:
+        ampl0 = np.array([None]*k)
+    ampl0 = ampl0.reshape(-1, 1)
+    if na is None:
+        na = k
 
-    #print("ampl in = ", ampl.ravel())
     if funcType == 'LS':
-        ampl, fun_Sc, Q, logdetG = ll_ls(Z, y, ampl, m0, iS0, Gy, robust=robust)
+        mc, fun_Sc, Q, logdetG = ll_ls(Z, y, ampl0, m0, iS0, Gy, robust=robust)
+        gamma = gamma0
     elif funcType == 'TLS':
-        ampl, fun_Sc, Q, logdetG, gamma = ll_tls(Z, y, ampl, m0, iS0, Gz, Gy, gamma, constr=constr)
+        mc, fun_Sc, Q, logdetG, gamma = ll_tls(Z, y, ampl0, m0, iS0, Gz, Gy, gamma0, constr=constr)
     result = -logdetG/2 if isReal else -logdetG
-    #print("ampl out = ", ampl.ravel())
 
     # Sigma2
-    if sigma2 is not None:
+    if sigma2_0 is not None:
         # Evaluate the posterior (without integrating out sigma2)
         sigma2 = max(sigma2, 1e-16)
         result = result - n/2*np.log(sigma2) if isReal else result - n*np.log(sigma2)
         result -= Q / sigma2
     else:
-        a_sigma2 = a_sigma2 + n/2 if isReal else a_sigma2 + n
-        b_sigma2 += Q           # Parameters of the posterior distribution for sigma2
+        a_sigma2 = a_sigma2_0 + n/2 if isReal else a_sigma2_0 + n
+        b_sigma2 = b_sigma2_0 + Q           # Parameters of the posterior distribution for sigma2
         sigma2 = b_sigma2/(a_sigma2-1)    # Mean estimator for sigma2
         # Evaluate the posterior (after integrating sigma2 out)
         result += - a_sigma2*np.log(b_sigma2)
 
     result = result - n/2*np.log(np.pi) if isReal else result - n*np.log(np.pi)
+    result = np.asscalar(result.real)
 
     # Report posterior distributions for amplitudes
-    m_ampl = ampl
+    m_ampl = mc.copy()
     S_ampl = fun_Sc(sigma2)
 
-    return np.asscalar(result.real), ampl, sigma2, {"ampl":(m_ampl, S_ampl), "sigma2":(a_sigma2, b_sigma2), "gamma":gamma}          # Output the log value and parameters of the marginalized distributions
+    # # Constrain amplitudes to non-negative values and re-estimate them using fewer components
+    theta_0 = np.asscalar( 1/2*np.angle(mc[:na].T.dot(mc[:na])) )   # Global phase estimated from the complex valued amplitudes
+    m_ampl[:na] = (mc[:na]*np.exp(-1j*theta_0)).real                                   # #m_ampl[:na] = m_ampl[:na].real
+    if m_ampl[:na].sum() < 0:      # Make sure that all amplitudes are positive
+        m_ampl *= -1
+        mc *= -1
+
+    if np.any(m_ampl[:na] < 0):
+        ampl0[:na] = np.where(m_ampl[:na] <= 0.0, 0.0, ampl0[:na])
+        result, mc, sigma2, dic = log_likelihood(Z, y, ampl0, sigma2_0, Gz, Gy, gamma0, m0, iS0, a_sigma2_0, b_sigma2_0, funcType, constr, robust, nonnegative, na)
+    else: dic = {"ampl":(m_ampl, S_ampl), "sigma2":(a_sigma2, b_sigma2), "gamma":gamma}
+
+    return result, mc, sigma2, dic          # Output the log value and parameters of the marginalized distributions
 
 
 

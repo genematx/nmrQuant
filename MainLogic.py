@@ -541,7 +541,7 @@ class Workspace():
         # Set parameters of the sampling algorithm
         ndim = len(initVals)          # Number of dimensions (number of parameters to sample over)
         if nwalkers is None: nwalkers = 4*ndim             # Number of walkers
-        if nsteps is None: nsteps = min(int(1000/nwalkers), 250)      # Number of steps
+        if nsteps is None: nsteps = min(int(1000/nwalkers), 330)      # Number of steps
         nsteps = max(1, nsteps)       # Make sure at least one step is taken
         bounds = np.array(bounds)
         delta = np.abs(bounds[:,1] - bounds[:,0])
@@ -1256,7 +1256,7 @@ class Series():
                 # Evaluate the function skipping the datasets that are not present in parsKeys
                 return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
 
-            res = self._optimize(costFuncOpti, bounds, initVals, robust=robust, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
 
             if res is not None:
                 # Update the structure of all parameters
@@ -2109,13 +2109,14 @@ class Datum():
 
         Gz[:, na:] = 0
         # print(np.sum(np.abs(Z), axis=0))
-        result, ampl, sigma2, meta = log_likelihood(Z, y, ampl=ampl, sigma2=sigma2, \
-            Gz=Gz, Gy=None, gamma=gamma, m0=m0, iS0=iS0, a_sigma2=a_sigma2, b_sigma2=b_sigma2, \
-            funcType=funcType, robust=robust)
-        diff_theta = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase estimated from the complex valued amplitudes
-        theta = (theta + diff_theta)   # + np.pi) % (2 * np.pi) - np.pi             # Updated value of theta
-        m_ampl = ampl*np.exp(-1j*diff_theta)
+        result, ampl, sigma2, meta = log_likelihood(Z, y, ampl0=ampl, sigma2_0=sigma2, \
+            Gz=Gz, Gy=None, gamma0=gamma, m0=m0, iS0=iS0, a_sigma2_0=a_sigma2, b_sigma2_0=b_sigma2, \
+            funcType=funcType, robust=robust, nonnegative=True, na=na)
+        theta_0 = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase estimated from the complex valued amplitudes
+        theta = (theta + theta_0)   # + np.pi) % (2 * np.pi) - np.pi             # Updated value of theta
+        m_ampl = ampl*np.exp(-1j*theta_0)
         #m_ampl[:na] = m_ampl[:na].real
+
         # TODO: This needs revision
         if m_ampl[:na].real.sum() < 0:      # Make sure that all amplitudes are positive
             m_ampl = - m_ampl
@@ -2123,11 +2124,10 @@ class Datum():
             # print('Flippping the phase by 180 degrees...')
             if numberField == 'Re': evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
         m_ampl[:na] = np.maximum(m_ampl[:na], 0.0)
+
         gamma = meta['gamma']
         S_ampl = meta['ampl'][1]
         a_sigma2, b_sigma2 = meta['sigma2']
-        # print(m_ampl)
-        # print(S_ampl)
 
         mult = 1   # sum(m_ampl)     # Multiplier (can be used to output normalized amplitudes)
         for lbl, val in zip(reportedNames, m_ampl[:na]):
@@ -2271,7 +2271,7 @@ class Datum():
             costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=False, allowShift=allowShift, shiftingRange=shiftingRange)[0]
 
             # Call the optimization routine
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, robust=robust, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
 
             if res is not None:
                 # Update the stored parameters
@@ -2655,6 +2655,7 @@ class Datum():
 
         # Define the objective function using a copy of the parameters dictionary
         evalParsH = copy.deepcopy(self.crntParsH)
+        # TODO! Make tight bounds, e.g. only xx% of the full range centered at the initial values
         bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
         initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
         costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust)
@@ -2665,7 +2666,7 @@ class Datum():
         # sampler.blobs has size nsteps x nwalkers
         # sampler.chain in nwalkers x nsteps x ndim
         # Want an output in the form nsamples x ndim
-        return sampler, costFuncSmpl
+
         flatchain = sampler.flatchain
         for i, key in enumerate(parsKeys):
             result[key] = flatchain[:, i]
