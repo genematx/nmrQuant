@@ -11,23 +11,22 @@ from PyQt4.QtGui import QAction, QActionGroup, QApplication, QBrush, QCheckBox, 
 from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
-from matplotlib import rc, rcParams, gridspec
+from matplotlib import rc, rcParams
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.backend_bases import cursors
 from matplotlib.figure import Figure
-from matplotlib.widgets import SpanSelector
 from operator import itemgetter
 from os import path
-import six
-import tabulate
 from random import shuffle
 import re
 import math
 import os
 import nmrglue as ng
 from datetime import date
-import pyqtgraph as pg
+
+SCRIPT_PATH = os.path.abspath(os.path.dirname(sys.argv[0]))
+CALLED_PATH = os.getcwd()                                          # Where it has been executed from
 
 # Set white background in plots
 pg.setConfigOption('background', 'w')
@@ -36,7 +35,6 @@ pg.setConfigOption('foreground', 'k')
 # Enable antialiasing for prettier plots
 pg.setConfigOptions(antialias=True)
 
-from matplotlib.backend_bases import NavigationToolbar2
 try:
     import matplotlib.backends.qt_editor.figureoptions as figureoptions
 except ImportError:
@@ -569,7 +567,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self.lr_zoom.setZValue(-10)
         self.lr_zoom.sigRegionChanged.connect(self.updatePlot)
 
-        self.setMinimumSize(900, 480)
+        self.setMinimumSize(750, 450)
 
         self.reset()
 
@@ -600,7 +598,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         """Plots and returns a handle to a group of stem lines for transition peaks."""
         return plot.plot(x=np.repeat(chsh_stems, 2), y=np.dstack((np.zeros(intn_stems.shape[0]), intn_stems)).flatten(), connect='pairs', **kwargs)
 
-    def plot(self, f, yF, xF=None, zF=None, stems=None, freqBlocks=None, indx_colr=None):
+    def plot(self, f, yF, xF=None, zF=None, stems=None, freqBlocks=None, phasingPivot=True, indx_colr=None, show_yaxis=True):
         """Plots the data.
         freBlocks is a list of tuples (min, max, bool), where the last position indicates whether the range is active (fitted) or not."""
 
@@ -618,6 +616,13 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self.lr_zoom.setBounds([f.min(), f.max()])
         self.p0r.setLimits(xMin=min(f), xMax=max(f))
 
+        # Hide the vertical axes
+        if not show_yaxis:
+            p0.getAxis('left').setStyle(showValues=False)
+            p0.getAxis('left').showLabel(False)
+            p1.getAxis('left').setStyle(showValues=False)
+            p1.getAxis('left').showLabel(False)
+
         # Plot the experimental spectrum yF
         self._yF = p0.plot(f, yF.ravel().real, pen={'color': colrseq[0], 'width': 2})
         pz.plot(f, yF.ravel().real, pen={'color':'b', 'width':1})
@@ -632,7 +637,8 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             if indx_colr is None: indx_colr = list(range(zF.shape[1]))
             self._zF = [None]*zF.shape[1]
             for i in range(zF.shape[1]):
-                self._zF[i] = p0.plot(f, zF[:,i].ravel().real, pen={'color':colrseq[indx_colr[i]+2], 'width':1})
+                self._zF[i] = p0.plot(f, zF[:,i].ravel().real, pen={'color':colrseq[indx_colr[i]+2], 'width':1},
+                                      fillLevel=0.0, brush=tuple([*colrseq[indx_colr[i]+2], 100]) )       # brush=(50,50,200,100)
 
         # Plot the ranges
         if freqBlocks is not None:
@@ -663,12 +669,13 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
                     self.p0r.addItem( self._stems[key] )
 
         # Show the phasing pivot
-        pos = self._phasingPivot.getXPos()
-        if pos > max(f) or pos < min(f):
-            pos = (max(f) + min(f))/2
-            self._phasingPivot.setPos(pos)
-            self.sigPivotDragged.emit(pos)     # Notify that the pivot has changed
-        p0.addItem(self._phasingPivot)
+        if phasingPivot:
+            pos = self._phasingPivot.getXPos()
+            if pos > max(f) or pos < min(f):
+                pos = (max(f) + min(f))/2
+                self._phasingPivot.setPos(pos)
+                self.sigPivotDragged.emit(pos)     # Notify that the pivot has changed
+            p0.addItem(self._phasingPivot)
 
         self.updatePlot()
 
@@ -884,11 +891,12 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             p0.setLabel('bottom', 'Chemical shift, ppm')
             p1.hide()
 
-    def showComponents(self, flag=True):
+    def showComponents(self, flag=True, indx=None):
         if len(self._zF) == 0:
             raise Exception('No components exist.')
-        for x in self._zF:
-            if flag:
+
+        for i, x in enumerate(self._zF):
+            if flag and (i==indx or indx is None):
                 x.show()
             else: x.hide()
 
@@ -905,35 +913,38 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         """Highlights/dehighlits stem with a certain key."""
         self._stems[key].highlight(flag)
 
-    def autoRange(self):
-        # Autoscale both x and y
-        self.getItem(0, 0).vb.autoRange()
+    def autoRange(self, xlims=None, ylims=None, margin=0.04):
+        """Adjust the view to the data (frequency blocks); xlims and ylims overrides the limits imposed by the frequency blocks. margin is the amount of extra space on each side of the plotted region, expressed as a ratio to the region width."""
+        self.getItem(0, 0).vb.autoRange()     # Autoscale both x and y
 
-        # Adjust the view to the data (frequency blocks)
-        # boundaries = np.ravel([frqBlk[0].getRegion() for frqBlk in self._freqBlocks if frqBlk[0] is not None])
-        # if len(boundaries) > 1:
-        #     b_min = boundaries.min()
-        #     b_max = boundaries.max()
-        #     self.getItem(0, 0).vb.setRange(xRange=(b_min-(b_max-b_min)*0.04, b_max+(b_max-b_min)*0.04),
-        #                                    yRange=None)
         xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
         set_flag = False
+        if hasattr(xlims, '__iter__'):
+            xmin, xmax = min(xlims), max(xlims)
+            if hasattr(ylims, '__iter__'):
+                ymin, ymax = min(ylims), max(ylims)
+            else:
+                yreg = self._yF.yData[np.logical_and(self._f<xmax, self._f>xmin)]
+                ymin = min(ymin, min(yreg))
+                ymax = max(ymax, max(yreg))
+            set_flag = True
+
         for frqBlk in self._freqBlocks:
             # Check if there is a freq block and if it is active
             if frqBlk[0] is not None and frqBlk[0].active:
-                xreg = frqBlk[0].getRegion()
-                xmin = min(xmin, min(xreg))
-                xmax = max(xmax, max(xreg))
+                    xreg = frqBlk[0].getRegion()
+                    xmin = min(xmin, min(xreg))
+                    xmax = max(xmax, max(xreg))
 
-                yreg = self._yF.yData[np.logical_and(self._f<max(xreg), self._f>min(xreg))]
-                ymin = min(ymin, min(yreg))
-                ymax = max(ymax, max(yreg))
-                set_flag = True
+                    yreg = self._yF.yData[np.logical_and(self._f<max(xreg), self._f>min(xreg))]
+                    ymin = min(ymin, min(yreg))
+                    ymax = max(ymax, max(yreg))
+                    set_flag = True
 
         # self.getItem(0, 0).vb.setRange(xRange=(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04) if set_flag else None)
         if set_flag:
-            self.getItem(0, 0).vb.setXRange(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04)
-            self.getItem(0, 0).vb.setYRange(ymin-(ymax-ymin)*0.02, ymax+(ymax-ymin)*0.04, padding=0)
+            self.getItem(0, 0).vb.setXRange(xmin-(xmax-xmin)*margin, xmax+(xmax-xmin)*margin)
+            self.getItem(0, 0).vb.setYRange(ymin-(ymax-ymin)*(margin/2), ymax+(ymax-ymin)*margin, padding=0)
 
     def saveImage(self):
         """Saves the spectrum as an image file."""
@@ -2074,12 +2085,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
             return font
 
-        # Setup font for the reference parameter
-        if clmn == 4 and role == QtCore.Qt.FontRole and isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
-            font = QtGui.QFont()    # Default font
-            font.setBold(True)
-            return font
-
         if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole, QtCore.Qt.ForegroundRole]:
             if node.nodeType == 'param':
                 key = node.name
@@ -2127,10 +2132,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             if clmn == 0:
                 if node.nodeType == 'param':
                     if "chshQD" in node.name[1]:
-                        if isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
-                            displayIcon = QIcon("icons\icon_deltaQD_lock.png")
-                        else:
-                            displayIcon = QIcon("icons\icon_deltaQD.png")
+                        displayIcon = QIcon("icons\icon_deltaQD.png")
                     elif node.name[1] == 'ampl':
                         displayIcon = QIcon("icons\icon_ampl.png")
                     elif node.name[1][:6] == "alphQD":
@@ -2140,10 +2142,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     elif node.name[1][:4] == "alph":
                         displayIcon = QIcon("icons\icon_alpha.png")
                     elif node.name[1][:4] == "chsh":
-                        if isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
-                            displayIcon = QIcon("icons\icon_delta_lock.png")
-                        else:
-                            displayIcon = QIcon("icons\icon_delta.png")
+                        displayIcon = QIcon("icons\icon_delta.png")
                 elif node.nodeType == 'lshape':
                     displayIcon = QIcon('icons\icon_lshape.png')
                 elif node.name == 'lshapeX':
@@ -2408,7 +2407,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         # Get the node in the parameter tree to which new chemical will be attached
         prnt = index.internalPointer()
 
-        success = self.datum.addTreeNode(prnt.name, X)
+        success = self.datum.addTreeNode(X, prnt.name)
 
         if success:                 # self.datum.T has been updated
             self.beginInsertRows(index, 0, 0) # Parent node, first and last position
@@ -2470,7 +2469,7 @@ class ChemTreeView(QTreeView):
     class ParsSpecDialog(QDialog):
         """A dialog to set specification for a parameter."""
 
-        def __init__(self, name, param, crntVal=None, isReference=None, parent = None):
+        def __init__(self, name, param, crntVal=None, parent = None):
             super().__init__(parent)
             layoutMain = QVBoxLayout(self)
             layoutForm = QFormLayout()
@@ -2515,18 +2514,11 @@ class ChemTreeView(QTreeView):
             else:
                 actnDfltFromCrnt.triggered.connect(lambda : self.editDfltVal.setValue(crntVal))
 
-            # Checkbox to set the current parameter as a reference
-            self.chckReference = QCheckBox("Use as reference")
-
-
             # OK and Cancel buttons
             self.buttonsBox = QDialogButtonBox(
                 QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
                 Qt.Horizontal, self)
             layoutMain.addLayout(layoutForm)
-            if isReference is not None:          # If the parameter can be set as a reference (e.g. if it is a chemical shift)
-                self.chckReference.setChecked(isReference)
-                layoutMain.addWidget(self.chckReference)
             layoutMain.addWidget(self.chckSeries)
             layoutMain.addWidget(self.buttonsBox)
 
@@ -2581,8 +2573,7 @@ class ChemTreeView(QTreeView):
                     'p1':self.editPriorP1.value(),\
                     'p2':self.editPriorP2.value(),\
                     'dval':self.editDfltVal.value()},\
-                    self.chckSeries.isChecked(), \
-                    self.chckReference.isChecked()
+                    self.chckSeries.isChecked()
 
     class LabelAndButton(QWidget):
         """A widget consisting of a label and a small button, e.g. used to display phase adjustment in the tree."""
@@ -2789,13 +2780,15 @@ class ChemTreeView(QTreeView):
                     cfunAction.setStatusTip('Display cost function')
                     cfunAction.triggered.connect(lambda : self.showCfunPopup(key))
                     popMenu.addAction(cfunAction)
+
+                    if key[1] in ['chsh', 'chshQD']:
+                        actnScaleToRef = QAction(QIcon('icons\icon_none.png'), 'Set reference', self)
+                        actnScaleToRef.setStatusTip('Reset all chemical shifts in the model to the reference')
+                        actnScaleToRef.triggered.connect( lambda _ : self.model().datum.shiftToRef(refKey=key) )
+                        popMenu.addAction(actnScaleToRef)
                     popMenu.addSeparator()
 
                 # Define parameter setting actions
-                actnScaleToRef = QAction(QIcon('icons\icon_none.png'), 'Set reference', self)
-                actnScaleToRef.setStatusTip('Reset all chemical shifts in the model to the reference')
-                actnScaleToRef.triggered.connect( lambda _ : self.model().datum.shiftToRef(diffChsh=None) )
-
                 actnPromotePriors = QAction(QIcon('icons\icon_globalPriors.png'), 'Set prior as global' if len(slctdKeys) == 1 else 'Set priors as global', self)
                 actnPromotePriors.setStatusTip('Use this prior for all datasets in the Workspace')
                 actnPromotePriors.triggered.connect(lambda : self.promotePriors(keys=slctdKeys))
@@ -2832,8 +2825,6 @@ class ChemTreeView(QTreeView):
                     popMenu.addAction(actnPasteCrnt)
                     popMenu.addAction(actnPasteDflt)
                     popMenu.addAction(actnResetToDflt)
-                    if node.name == self.model().datum.getRefKey():
-                        popMenu.addAction(actnScaleToRef)
                 if isinstance(self.model().datum, Series):
                     popMenu.addAction(actnPasteCrnt)
                     popMenu.addAction(actnPasteDflt)
@@ -2867,22 +2858,18 @@ class ChemTreeView(QTreeView):
             param = self.model().datum.getPrior(key)
             try:
                 crntVal = self.model().datum.getCrntVal(key)
-                isReference = (self.model().datum.getRefKey() == key) if key[1][:4] == 'chsh' else None
             except AttributeError:
-                crntVal, isReference = None, None
+                crntVal = None
 
-            dialog = self.ParsSpecDialog(key, param, crntVal, isReference, parent=self)
+            dialog = self.ParsSpecDialog(key, param, crntVal, parent=self)
             result = dialog.exec_()
             if result == QDialog.Accepted:    # If OK was clicked
-                newParSpec, resetSeries, setReference = dialog.getSelection()
+                newParSpec, resetSeries = dialog.getSelection()
                 crnt = self.model().datum
                 if isinstance(crnt, Datum) and resetSeries:
                     crnt = crnt.parent
                 else: pass # It is either a Datum and no series flag was set or it is a Series
                 crnt.setPrior(key, **newParSpec, reset=True)
-                if isReference is not None:
-                    crnt.setRefKey(key = key if setReference else None)
-                    # if setReference: self.model().requestParameterChange.emit()            # Update the computed signals
 
     def saveSubtree(self, index):
         """Saves the subtree starting with the node index."""
@@ -2902,7 +2889,17 @@ class ChemTreeView(QTreeView):
         DDD = self.model().datum
         evalPars = copy.deepcopy(DDD.crntParsH)
         actvStep = DDD.steps[-1]
-        costFuncOpti = lambda x : (DDD.getPrior(key).abs(x), DDD.evaluate(evalParsH=updateFromFlat(evalPars, [key], [DDD.getPrior(key).abs(x)]), autoKeys=actvStep.autoKeys, frqBlkIds=actvStep.frqBlkIds)[0])
+
+        if key[1] == 'chsh':
+            allowShift, shiftingRange = True, DDD.getPrior(key).max - DDD.getPrior(key).min
+        elif key[1] == 'alph':
+            allowShift, shiftingRange = True, 0.0
+        else: allowShift, shiftingRange = False, 0.0
+
+        # allowShift, shiftingRange = False, 0.0
+
+        costFuncOpti = lambda x : (DDD.getPrior(key).abs(x), DDD.evaluate(evalParsH=updateFromFlat(evalPars, [key], [DDD.getPrior(key).abs(x)]), autoKeys=actvStep.autoKeys, \
+                                                                          frqBlkIds=actvStep.frqBlkIds, allowShift=allowShift, shiftingRange=shiftingRange)[0])
         self.popupWindow = CfunPopup(costFuncOpti)
         self.popupWindow.show()
 
@@ -3844,10 +3841,8 @@ class FittingThread(QThread):
         actnToRun = self._actnToRun
 
         if isinstance(actnToRun, Step):
-            # The action code is an integer - i.e. the number of a step to optimize
-            step = actnToRun
-            # Fit the model parameters
-            fileToFit.optimize(parsKeys=step.parsKeys, autoKeys=step.autoKeys, frqBlkIds=step.frqBlkIds, evaluatePriors=False)
+            # The action code is a Step
+            actnToRun.run(fileToFit)         # Run the step on the given datum
         else:
             step = self._evalStep
 
@@ -3859,6 +3854,9 @@ class FittingThread(QThread):
             elif actnToRun == 'Rsd':
                 # Adjusting the residual
                 fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds)
+            elif actnToRun == 'Bln':
+                # Adjust the baseline without abjusting the residual
+                fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds, correct_comps=False)
             elif actnToRun == 'Lsh':
                 # Adjust the lineshape
                 fileToFit.adjust_shape(frqBlkIds=step.frqBlkIds)
@@ -3874,6 +3872,9 @@ class FittingThread(QThread):
             elif actnToRun == 'PhA':
                 # Autophasing
                 fileToFit.auto_phase()
+            elif actnToRun == 'PhA0':
+                # Autophasing, only Ph0
+                fileToFit.auto_phase(fit_Ph1=False)
 
 class MySpecPlot(FigureCanvas):
 
@@ -3958,7 +3959,7 @@ class MainView(QMainWindow):
         self.printoutEdit.ensureCursorVisible()
 
     def _icon(self, name):
-        return QIcon(path.join('icons', name))
+        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
 
     def setupGUI(self):
         """Sets the layout for the main window."""
@@ -4797,7 +4798,7 @@ class MainView(QMainWindow):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
         # Form the list of steps to Fit
         s = self.stepsEdit.toPlainText()
-        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhX)|(Rsd)|(Lsh)|(PhA)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
+        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhX)|(Rsd)|(Lsh)|(PhA)|(PhA0)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
         s = "A ".join(re.split("A", s ))      # Prevent any consecutive A's from occuring in the string; separate them with spaces
         while s.find('(') != -1:    # Randomize all elements in all parentheses
             beg, end = s.find('('), s.find(')')
@@ -5164,7 +5165,7 @@ if __name__ == '__main__':
     app = 0
     app = QApplication(sys.argv)
 
-    expiryTime, options = readLicenseFile()
+    expiryTime, options = readLicenseFile(path=SCRIPT_PATH)
 
     if expiryTime is None:
         # No license file found

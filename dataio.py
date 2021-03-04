@@ -225,3 +225,16 @@ def read_spinsolve(path):
     # name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
 
     return yT, c0, f0, dt, dic
+
+def read_spinsolve_subfolders(rootPath, pathList=None):
+    """Recursively opens folders and returns paths to data.1d files, if found."""
+    if pathList is None: pathList = []
+
+    if os.path.isdir(rootPath):
+        if ( 'PROTON' in os.path.basename(rootPath) or 'PRESAT' in os.path.basename(rootPath) ) and 'data.1d' in os.listdir(rootPath):
+            pathList.append(os.path.join(rootPath, 'data.1d'))
+        else:
+            for file in os.listdir(rootPath):
+                read_spinsolve_subfolders(os.path.join(rootPath, file), pathList)
+
+    return pathList
