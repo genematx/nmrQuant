@@ -669,7 +669,7 @@ def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=Non
     # Sigma2
     if sigma2_0 is not None:
         # Evaluate the posterior (without integrating out sigma2)
-        sigma2 = max(sigma2, 1e-16)
+        sigma2 = max(sigma2_0, 1e-16)
         result = result - n/2*np.log(sigma2) if isReal else result - n*np.log(sigma2)
         result -= Q / sigma2
     else:
