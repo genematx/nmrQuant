@@ -1491,7 +1491,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
             # Form the arrays
             t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
-            yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
+            yT = (data[::2] + 1j*data[1::2]).reshape(-1,1)
 
             ## Subsample if the frequency range is too large
             #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
