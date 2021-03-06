@@ -1227,7 +1227,7 @@ class Series():
         if evaluatePriors:
             result += self._fnc_prior(evalParsH, evalMetaF, parsKeys, customPriors=customPriors)      # Add prior on the series level
 
-        return result, {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
+        return result, {'ampl':(m_ampl, S_ampl), 'theta':theta, 'sigma2':(a_sigma2, b_sigma2)}
 
     def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nhop=None, respectBounds=True, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples of the form: (datum_id, node_name, parameter_name, parameter_id), e.g. (2, 'Sucrose-F', 'chshQD', 5) )."""
@@ -2044,8 +2044,6 @@ class Datum():
 
         # 3. Collect current values of the amplitudes, phase, and the variance of noise
         # 3.1. Amplitudes
-        #ampl = np.array([evalParsH[self.repRootNames[i]]['ampl'][0] for i in range(na)]).reshape(-1,1) \
-        #     * np.exp(1j*np.array([evalParsH[self.repRootNames[i]]['phase'][0] for i in range(na)])).reshape(-1,1)
         ampl = np.array([None]*nz)        # By default, if no amplitudes are set, they will be found as ML estimates
         # Set the corresponding priors
         m0 = np.zeros((nz, 1))         # Prior amplitudes
@@ -2117,13 +2115,13 @@ class Datum():
         m_ampl = ampl*np.exp(-1j*theta_0)
         #m_ampl[:na] = m_ampl[:na].real
 
-        # TODO: This needs revision
-        if m_ampl[:na].real.sum() < 0:      # Make sure that all amplitudes are positive
-            m_ampl = - m_ampl
-            theta = (theta + np.pi + np.pi) % (2 * np.pi) - np.pi
-            # print('Flippping the phase by 180 degrees...')
-            if numberField == 'Re': evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
-        m_ampl[:na] = np.maximum(m_ampl[:na], 0.0)
+        # # TODO: This needs revision
+        # if m_ampl[:na].real.sum() < 0:      # Make sure that all amplitudes are positive
+        #     m_ampl = - m_ampl
+        #     theta = (theta + np.pi + np.pi) % (2 * np.pi) - np.pi
+        #     # print('Flippping the phase by 180 degrees...')
+        #     if numberField == 'Re': evalParsH['.']['theta'][0] = (evalParsH['.']['theta'][0] + np.pi + np.pi) % (2 * np.pi) - np.pi  # Always update the phase if it needs to be flipped
+        # m_ampl[:na] = np.maximum(m_ampl[:na], 0.0)
 
         gamma = meta['gamma']
         S_ampl = meta['ampl'][1]
@@ -2858,7 +2856,7 @@ class Datum():
         if full:
             pass
         else:
-            tab = [[self.name] + [np.linalg.norm(fff.yT)] + fff.crntParsH["."]["ampl"] for fff in self._crnt.data]   # Update the table of results
+            tab = [[self.name] + [np.linalg.norm(fff.yT)] + fff.crntParsH["."]['ampl'] for fff in self._crnt.data]   # Update the table of results
             head = ['Filename'] + ['Total intensity'] + [node.name for node in self.wsp.T.repRoots()]
             with open('_results.txt', 'w') as fout:
                 print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
