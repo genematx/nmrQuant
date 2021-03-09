@@ -342,10 +342,11 @@ def ll_ls(Z, y, ampl, m0=None, iS0=None, Gy=None, robust=False):
         ZrZ = (ZG * r2).dot(ZG.conj().T)
         if ZrZ.size > 0 and np.linalg.matrix_rank(ZrZ) < ZrZ.shape[0]:
             ZrZ += (1e-09)*np.identity(ZrZ.shape[0])          # Make sure ZZ is invertible if it is low rank
-        iS0 += 1e-42 * np.eye(k)           # Make sure that the result is invertible
-        iS0[gvar] += ZrZ
-        Sr = Sc.dot( iS0.real ).dot(Sc)
-        fun_Sc = lambda _ : Sr
+        # iS0 += 1e-42 * np.eye(k)           # Make sure that the result is invertible
+        # iS0[gvar] += ZrZ
+        Sc[gvar] = Sc[gvar].dot((iS0[gvar] + ZrZ).real).dot(Sc[gvar])
+        # Sr = Sc.dot( iS0.real ).dot(Sc)
+        fun_Sc = lambda _ : Sc
     else:
         fun_Sc = lambda sigma2 : sigma2/2 * Sc                # Assuming that the amplitudes are always real, need to scale the covariance matrix by 2
 
@@ -669,7 +670,8 @@ def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=Non
     # Sigma2
     if sigma2_0 is not None:
         # Evaluate the posterior (without integrating out sigma2)
-        sigma2 = max(sigma2, 1e-16)
+        sigma2 = max(sigma2_0, 1e-16)
+        a_sigma2, b_sigma2 = a_sigma2_0, b_sigma2_0
         result = result - n/2*np.log(sigma2) if isReal else result - n*np.log(sigma2)
         result -= Q / sigma2
     else:
@@ -696,7 +698,8 @@ def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=Non
     if np.any(m_ampl[:na] < 0):
         ampl0[:na] = np.where(m_ampl[:na] <= 0.0, 0.0, ampl0[:na])
         result, mc, sigma2, dic = log_likelihood(Z, y, ampl0, sigma2_0, Gz, Gy, gamma0, m0, iS0, a_sigma2_0, b_sigma2_0, funcType, constr, robust, nonnegative, na)
-    else: dic = {"ampl":(m_ampl, S_ampl), "sigma2":(a_sigma2, b_sigma2), "gamma":gamma}
+    else:
+        dic = {"ampl":(m_ampl, S_ampl), "sigma2":(a_sigma2, b_sigma2), "gamma":gamma}
 
     return result, mc, sigma2, dic          # Output the log value and parameters of the marginalized distributions
 
