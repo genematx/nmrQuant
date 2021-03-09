@@ -1491,7 +1491,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
             # Form the arrays
             t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
-            yT = (data[::2] + 1j*data[1::2]).reshape(-1,1)
+            yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
 
             ## Subsample if the frequency range is too large
             #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
@@ -3881,6 +3881,1767 @@ class MySpecPlot(FigureCanvas):
     def __init__(self, figure):
         pass
 
+class MainView_Generic(QMainWindow):
+    """Main GUI form class; can be subclassed by more specialized applications with specific GUIs, e.g. wine analysis."""
+
+    def __init__(self, wsp, expiryTime = np.inf, parent = None):
+        # Set the expiry time/date
+        self._expiryTime = expiryTime
+
+        # Show the warning window if the license is about to expire (less than 5 days left)
+        if (self._expiryTime - time.time()) < 5*24*3600:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+
+            msg.setText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
+            msg.setInformativeText("Please consider renewing it." )
+            msg.setWindowTitle("Expiring license")
+            # msg.setDetailedText("The details are as follows:")
+            msg.setStandardButtons(QMessageBox.Close)
+            msg.exec_()
+
+        # Initialize with some workspace
+        self.wsp = wsp    # The Workspace; main class that holds all logic
+        self._crnt = self.wsp     # Currently opened Series/Datum/or the entire Workspace
+        self._undoStack = []      # The stack of previous actions; each entry is a 2-tuple with the first element = the datum, second elent = flat dictionary of previous parameter values
+        self._redoStack = []
+        self._actions = {}
+
+        # initialize the main window
+        super().__init__(parent)
+        self.setAcceptDrops(True)      # Allow drag-and-drop
+        self.setupGUI()
+
+        # Start the fitting thread
+        self.fittingThread = FittingThread()
+        self.fittingThread.finished.connect(self.onThreadFinished)
+        self.fittingThread.terminated.connect(self.onThreadFinished)
+
+    def __del__(self):
+        # Restore sys.stdout (if used to collect output to the console)
+        if compile_standalone:
+            sys.stdout = sys.__stdout__
+            sys.stderr = sys.__stderr__
+
+    def __getattr__(self, attr):
+        """Called with the dot notation for attributes not found in the class. Access the Workspace directly."""
+        return getattr(self.wsp, attr)
+
+    def normalOutputWritten(self, text):
+        # Used to show text that was written to the console
+        #self.statusBar.showMessage(text)
+        cursor = self.printoutEdit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        cursor.insertText(text)
+        self.printoutEdit.setTextCursor(cursor)
+        self.printoutEdit.ensureCursorVisible()
+
+    def errorOutputWritten(self, text):
+        # Used to show text that was written to the console
+        #self.statusBar.showMessage(text)
+        cursor = self.printoutEdit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        #if err: cursor.insertText("------------ ERROR -------------")
+        cursor.insertText(text)
+        self.printoutEdit.setTextCursor(cursor)
+        self.printoutEdit.ensureCursorVisible()
+
+    def _icon(self, name):
+        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
+
+    def setupGUI(self):
+        """Sets the layout for the main window."""
+        self.setWindowTitle("Base class for NMR analysis.".format(version, str(date.today())) )
+        self.resize(750, 500)
+
+        # ------------- set the main diagram --------------
+        #rc('font', **{'family' : 'sans-serif', 'weight' : 'normal', 'size'   : 10})
+        rcParams['pdf.fonttype'] = 42 # pdf.fonttype : 42 # Output Type 3 (Type3) or Type 42 (TrueType)
+        rcParams['ps.fonttype'] = 42
+        SMALL_SIZE = 11
+        MEDIUM_SIZE = 12
+        BIGGER_SIZE = 14
+
+        rc('font', size=SMALL_SIZE)          # controls default text sizes
+        rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+        #rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+        #rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+        #rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+        #rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+        #rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
+        # ------------------------- Set up the toolbars ------------------------
+        self.setup_actions()
+        self.assign_actions()
+
+        # ---------------------- Set up the status bar -------------------------
+        self.statusBar= QStatusBar()
+        self.statusBar.setMaximumHeight(16)
+        self.setStatusBar(self.statusBar)
+        self.progressBarFiles = QProgressBar()
+        self.progressBarFiles.setMaximumHeight(16)
+        self.progressBarFiles.setMaximumWidth(400)
+        self.statusBar.addPermanentWidget(self.progressBarFiles)
+
+    def setup_actions(self):
+        """Sets up all actions to be used in the GUI."""
+        self._actions.clear()
+
+        # Clear workspace action
+        new = QAction(QIcon('icons\icon_new.png'), 'Clear workspace', self)
+        new.setStatusTip('Clear the workspace')
+        new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None))
+        self._actions['Clear workspace'] = new
+
+        # Add import datafile action
+        new = QAction(self._icon('icon_addFile.png'), 'Import files', self)
+        new.setStatusTip('Import new data and add them to the current series')
+        new.triggered.connect(self.onImportData)
+        self._actions['Import file'] = new
+
+        new = QAction(self._icon('icon_removeFile.png'), 'Remove file', self)
+        new.setStatusTip('Remove file from the workspace')
+        new.triggered.connect(self.removeCurrent)
+        self._actions['Remove file'] = new
+
+        # Show the settings dialog
+        new = QAction(self._icon('icon_settings.png'), 'Settings', self)
+        new.setStatusTip('Show settings dialog')
+        new.triggered.connect(self.showSettingsDialog)
+        self._actions['Show settings'] = new
+
+        # Load Tree action
+        new = QAction(self._icon('icon_hierarchy.png'), 'Load new tree', self)
+        new.setStatusTip('Load a new chemical tree')
+        new.triggered.connect(self.loadChemTree)
+        self._actions['Load tree'] = new
+
+        # Load wokspace action
+        new = QAction(self._icon('icon_load.png'), 'Load workspace', self)
+        new.setStatusTip('Load the workspace')
+        new.triggered.connect(self.onLoadWspAction)
+        self._actions['Load workspace'] = new
+
+        # Add save action
+        new = QAction(self._icon('icon_save.png'), 'Save workspace', self)
+        new.setShortcut('Ctrl+S')
+        new.setStatusTip('Save the workspace')
+        new.triggered.connect(self.onSaveWspAction)
+        self._actions['Save workspace'] = new
+
+        # Add exit action
+        new = QAction(QIcon('icons\icon_exit.png'), 'Exit', self)
+        new.setShortcut('Ctrl+Q')
+        new.setStatusTip('Exit the application')
+        new.triggered.connect(self.close)
+        self._actions['Exit'] = new
+
+        # Show the information dialog action
+        new = QAction(QIcon('icons\icon_info.png'), 'About', self)
+        new.setStatusTip('Information about the program')
+        new.triggered.connect(self.showAboutMessage)
+        self._actions['Show about'] = new
+
+        # ------------------------ Actions for fitting -------------------------
+        # Fit the last step action
+        new = QAction(self._icon('icon_fitOneStep.png'), 'Fit active step', self)
+        new.setStatusTip('Fit the active step')
+        new.triggered.connect( lambda : self.startThread(queueActns=['Fit']) )
+        self._actions['Fit one step'] = new
+
+        # Sample action
+        new = QAction(self._icon('icon_sample.png'), 'Sample last step with MCMC', self)
+        new.setStatusTip('Sample parameters checked on the last step with the MCMC algorithm')
+        new.triggered.connect( self.sampleStep )
+        self._actions['Sample step'] = new
+
+        # Report without sampling action
+        new = QAction(self._icon('icon_report.png'), 'Report results', self)
+        new.setStatusTip('Report results without MCMC sampling')
+        new.triggered.connect(lambda:self.sampleStep(onlyAutoKeys=True))
+        self._actions['Report results'] = new
+
+        # Fit all steps action
+        new = QAction(self._icon('icon_fitAllSteps.png'), 'Fit all steps', self)
+        new.setStatusTip('Fit all steps for this file')
+        new.triggered.connect(lambda _ : self.fitAllSteps(selectedFiles = None))
+        self._actions['Fit all steps'] = new
+
+        # Fit all files action
+        new = QAction(self._icon('icon_fitAllFiles.png'), 'Fit all files', self)
+        new.setStatusTip('Fit all steps for this file')
+        new.triggered.connect(self.fitAllFiles)
+        self._actions['Fit all files'] = new
+
+        # Undo
+        new = QAction(self._icon('icon_undo.png'), 'Undo', self)
+        new.setStatusTip('Undo the previous change to model parameters')
+        new.triggered.connect(self.pullUndo)
+        self._actions['Undo'] = new
+
+        # Redo
+        new = QAction(self._icon('icon_redo.png'), 'Return', self)
+        new.setStatusTip('Return the undone change to model parameters')
+        new.triggered.connect(self.pullRedo)
+        self._actions['Redo'] = new
+
+        # Stop fitting action
+        new = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
+        new.setStatusTip('Stop fitting')
+        new.triggered.connect(self.stopThread)
+        self._actions['Stop thread'] = new
+
+        # Save current results
+        new = QAction(self._icon('icon_saveResults.png'), 'Save results to file', self)
+        new.setStatusTip('Save all current results to file')
+        new.triggered.connect(self.saveResults)
+        self._actions['Save results'] = new
+
+    def assign_actions(self):
+        """Assigns actions to the lements of toolbars."""
+        menubar = self.menuBar()
+        tbMain = self.addToolBar("File")               # Main toolbar
+
+        # ------------------------- set the menubar ----------------------------
+        fileMenu = menubar.addMenu('&File')
+        for actn in ['Import file','Remone file','Load workspace','Save workspace', 'Exit']:
+            fileMenu.addAction(self._actions[actn])
+        helpMenu = menubar.addMenu('&Help')
+        helpMenu.addAction(self._actions['Show about'])
+
+        # ------------------------- Set the toolbar ----------------------------
+        for actn in ['Clear workspace','Import file','Remone file','Show settings',None,
+                     'Load workspace','Save workspace', None, 'Undo', 'Redo', None,
+                     'Fit one step', 'Fit all steps', 'Fit all files', None,
+                     'Report results', 'Save results', 'Exit']:
+            if actn is not None:
+                tbMain.addAction(self._actions[actn])
+            else: tbMain.addSeparator()
+
+    # -------------------- Processing keyboard interactions --------------------
+
+    def keyPressEvent(self, ev):
+        # self.scene().keyPressEvent(ev)
+        # self.sigKeyPress.emit(ev)
+        # print('Key pressed ', ev.key())
+        pass
+
+    # ------------------------- Other utility methods --------------------------
+
+    def onImportData(self):
+        """Runs a dialog to select a new file."""
+        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "Spinsolve FID (*.1d)"):   # ;;JEOL FID (*.jdf)
+            dat = self.addDatumFromFile(newFilePath)
+        return dat
+
+    def removeCurrent(self):
+        """Removes current selection (Series or Datum)."""
+        if self._crnt != self.wsp:
+            self.naviTreeModel.remItems([self._crnt])
+            self.naviSelection.clear()    # Select the entire workspace
+
+    def setCurrent(self, newCrnt=None):
+        """Sets the _crnt Datum and updates the plot, tables, etc. accordingly."""
+
+        # Set self._crnt to the new Series/Datum or the entire workspace
+        if newCrnt is None:
+            try:
+                newCrnt = self.wsp.series[0].data[0]
+            except IndexError:
+                self._crnt = self.wsp
+                return None
+
+        # Compute the model signal if there is None
+        try:
+            if newCrnt.zF is None:
+                step = newCrnt.steps[-1]
+                newCrnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
+                #TODO: Possibly check which step to evaluate if steps use different frequency ranges
+        except AttributeError:
+            pass
+
+        # Update the necessary display widgets
+        self.treeModel.setNewDatum(newCrnt)
+        self.freqTableModel.setNewDatum(newCrnt)
+        self.preprocTool.setNewDatum(newCrnt)
+        # self.phasingTool.setNewDatum(newCrnt)
+
+        # Highlight the current Datum in the Navigation widget if it was seletected programmatically
+        self.naviTreeView.selectCurrentDatum(newCrnt.selfID())
+
+        if isinstance(self._crnt, Datum) and isinstance(newCrnt, Datum) and self._crnt.parent == newCrnt.parent:
+            resetView = False
+        else: resetView = True
+        self._crnt = newCrnt
+        self.plotCurrent(autoRange=resetView)
+
+    def onCurrentSelectedChanged(self, index):
+        """Slot for the signal indicating the change in the currently selected Series/Datum"""
+
+        self.setCurrent(newCrnt = index.internalPointer() if index.isValid() else None)
+
+    def loadChemTree(self):
+        """Calls a dialog and loads a new chemical tree from file."""
+        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")
+
+        T = loadTree(filename)
+
+        self.treeModel.resetChemTree(T)
+
+    def onSaveWspAction(self):
+        """Saves the workspace including the stepClass class and the steps array."""
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')
+        if filename:
+            if filename[-4:] != '.wsp': filename += '.wsp'
+
+            # Pack the logic of the workspace
+            dataPack = self.wsp.pack()
+
+            # Pack the settings
+            stngPack = copy.deepcopy(settings)
+            stngView = {'stepsEditText' : self.stepsEdit.toPlainText(),\
+                        'hiddenTreeViewNodes' : [node.name for node in self.treeModel.TP.items() if node.hidden]}
+            stngConfig = config.as_dict()
+
+            stngPack['_view'] = stngView
+            stngPack['_config'] = stngConfig
+
+            with open(filename, 'wb') as fp:
+                dill.dump([dataPack, stngPack], fp)
+
+    def onLoadWspAction(self):
+        """Loads the workspace including the stepClass class and the steps array."""
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")
+        if filename:
+            with open(filename, 'rb') as fp:
+                dataUnPack = dill.load(fp)
+
+            # Reset the settings and the Workspace
+            self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
+
+    def onResetWspAction(self, newWorkspace=None, newSettings=None):
+        """Clears the workspace including the stepClass, signals and the tree."""
+        self.naviTreeModel.beginResetModel()
+
+        # Update the global settings
+        settings.clear()
+        settings.update({"ax0Limits": None,
+                        "ax1Limits": {'ylim':(0, 5)},
+                        "ax2Limits": None,
+                        "startFromPars" : "current",          # Starting values of parameters when fitting multiple files (current, previous, default) - will be copied from crntParsH of this file, previous file or dfltParsH
+                        "autoPhase" : False,
+                        "autoPick" : False})
+        if newSettings is not None:
+            try:
+                stngView = newSettings.pop('_view')
+            except KeyError:
+                stngView = None
+            try:
+                stngConfig = newSettings.pop('_config')
+            except KeyError:
+                stngConfig = None
+            settings.update(newSettings)
+        else:
+            settings.update({"HCmode":"1H"})
+            stngView, stngConfig = None, None
+        settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
+
+        # Reset the undo and redo stacks
+        self._undoStack.clear()
+        self._actions['Undo'].setEnabled(False)
+        self._redoStack.clear()
+        self._actions['Redo'].setEnabled(False)
+
+        # Reset the workspace
+        self.wsp.reset()
+        if newWorkspace is not None:
+            self.wsp.unpack(newWorkspace)
+
+        # Reset the tree model
+        self.treeModel.fullReset(self._crnt)
+
+        self.naviTreeModel.endResetModel()
+
+        self.setCurrent()          # Sets the current display to the first Datum or the entire workspace if there is no Datum
+
+        # Update the views (e.g. shown/hidden rows, etc.)
+        if stngView is not None:
+            self.stepsEdit.setPlainText(stngView['stepsEditText'])
+            for node in stngView['hiddenTreeViewNodes']:
+                self.treeModel.TP[node].hidden = True
+            self.treeView.hideExcessiveRows()
+
+        # Update the global config
+        if stngConfig is not None:
+            config.from_dict(config, stngConfig)
+        self._actions['Toggle TLS'].setChecked(config.SAMPL_funcType == 'TLS')
+
+    def resetSignals(self, zff=None, apod=None, flagAdapFreq=None):
+        self._crnt.resetFreqs(zff, apod)
+
+        if flagAdapFreq is not None:
+            for dat in self._crnt.parent.data:
+                dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
+
+        self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
+        self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
+
+    def showSettingsDialog(self):
+        """Shows an input dialog and updates settings"""
+        accepted, newSettings = SettingsDialog.run(oldSettings={'HCmode': self.wsp.HCmode})
+
+        if accepted:
+            self.treeModel.setHCmode(newSettings['HCmode'])
+
+    def showAboutMessage(self):
+        """Displays the About message."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+
+        msg.setText("Quantitative NMR analysis with quantum mechanical models.")
+        msg.setInformativeText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
+        msg.setWindowTitle("About qNMR")
+        # msg.setDetailedText("The details are as follows:")
+        msg.setStandardButtons(QMessageBox.Close)
+
+        msg.exec_()            # Returns the values of pressed button
+
+    def onAssigned(self):
+        """Updates the tree and plots when model peaks have been assigned to picked peaks."""
+        self.plotCurrent(autoRange=False)
+        self.treeWidget.showStep()
+        #self.phasingTool.setVals(self.steps[0])
+        #dataFiles[self.indxCrntFile].update()
+        pass
+
+    def pullUndo(self):
+        """Restores the last state from the Undo stack."""
+        dats_list, pars_list = self._undoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        self._redoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
+
+        # Set the stored values to the Datums
+        for dat, par in zip(dats_list, pars_list):
+            dat.setCrntVals(par)
+
+        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
+
+    def pullRedo(self):
+        """Restores the last state from the Redo stack."""
+        dats_list, pars_list = self._redoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        self._undoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
+
+        # Set the stored values to the Datums
+        for dat, par in zip(dats_list, pars_list):
+            dat.setCrntVals(par)
+
+        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
+
+    # ------------------ Working with the fitting thread -----------------------
+
+    def startThread(self, queueFiles=None, queueActns=None, pushUndo=True):
+        """Fits the files in the queueFiles list."""
+        # Disable controls that can start fitting
+        self._actions['Fit all steps'].setDisabled(True)
+        self._actions['Fit all files'].setDisabled(True)
+        self._actions['Fit one step'].setDisabled(True)
+        self._actions['Undo'].setEnabled(False)
+        self._actions['Redo'].setEnabled(False)
+        self.setCursor(Qt.BusyCursor)
+
+        if queueFiles is None: queueFiles = [self._crnt]
+        if pushUndo:
+            self._undoStack.append([queueFiles, [dat.getCrntVals() for dat in queueFiles]])
+            self._redoStack.clear()
+
+        if queueActns is None: queueActns = ['Evl']        # Only evaluate the active step by default
+
+        queueActns = [self.treeModel.actvStepIndx if x == 'Fit' else x for x in queueActns]
+        if len(queueFiles) > 1: queueActns.insert(0, 'Init')
+
+        # Set up the fitting queue
+        self._fittingQueue = [[file, actn] for file in queueFiles for actn in queueActns]
+
+        # Set up the progress bars
+        self.progressBarFiles.setRange(0, len(self._fittingQueue))
+        self.progressBarFiles.setValue(0)
+
+        self.fittingThread.setExitFlag(False)
+
+        self.continueThread()
+
+    def continueThread(self):
+        """Continues fitting the thread if there are any files left."""
+        if len(self._fittingQueue) > 0:
+            fileToFit, actnToRun = self._fittingQueue.pop(0)
+
+            if actnToRun == 'Init':
+                # We are starting to fit a new file and will be running through the list of steps from 0 again... Need to set up the initial values.
+                # Determine the starting values of parameters for the next file in the fittingQueueFiles and KEEP the current values if necessary
+                if config.OPTIM_startFrom == "previous":
+                    sid = fileToFit.selfID()
+                    # Check if the current file is not the first one in the Series. If possible use parameters of the previous file, otherwise keep the current parameters.
+                    if sid[1] > 0:
+                        fileToFit.resetCrntPars(crntParsH = copy.deepcopy(fileToFit.series[sid[0]].data[sid[1]-1].crntParsH) )
+                elif config.OPTIM_startFrom == "default":
+                    fileToFit.resetCrntPars()   # Reset to defaults
+                else: # i.e. settings["startgFromPars"] == "current"
+                    pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
+                self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
+
+                self.continueThread()
+
+            elif isinstance(actnToRun, int):
+                # If it is a step with too many parameters, split it into several steps and add them to the queue
+                print("\nOptimizing step {:d}".format(actnToRun+1))
+                actnToRun = fileToFit.steps[actnToRun]
+
+                if len(actnToRun.parsKeys) > 3:
+                    newSteps = split_steps(fileToFit, actnToRun)
+                    self._fittingQueue[:0] = [[fileToFit, step] for step in newSteps]         # Insert all new steps from the beginning of the queue
+
+                    # Update the progress bar accordingly
+                    oldVal, oldMax = self.progressBarFiles.value(), self.progressBarFiles.maximum()
+                    if oldMax != oldVal:
+                        newVal = oldVal*int(math.ceil((oldMax-oldVal+len(newSteps)-1)/(oldMax-oldVal)))           # newVal = int(math.ceil(oldVal*(oldMax+len(newSteps)-1)/oldMax))
+                        newMax = newVal + (oldMax-oldVal) + len(newSteps) - 1
+
+                        self.progressBarFiles.setMaximum(newMax)
+                        self.progressBarFiles.setValue(newVal)
+                else:
+                    # TODO: Possibly check here that the parsKeys in the step are fittable
+                    self._fittingQueue.insert(0, [fileToFit, actnToRun] )          # Substitute the integer with the step
+
+                self.continueThread()
+
+            else:
+                # It is a usual optimization step or an action (e.g. phasing)
+                self.fittingThread.fit(fileToFit, actnToRun)
+
+        else:
+            # All done. Reset the widgets
+            # This will be executed always when the thread is finished, either normally or by termination.
+            self.plotCurrent(autoRange=False)
+            self.treeModel.notifyDataChanged()
+
+            # Enable controls that can start fitting again
+            self._actions['Fit all steps'].setEnabled(True)
+            self._actions['Fit all files'].setEnabled(True)
+            self._actions['Fit one step'].setEnabled(True)
+            self._actions['Undo'].setEnabled(len(self._undoStack) > 0)
+            self._actions['Redo'].setEnabled(len(self._redoStack) > 0)
+            self.unsetCursor()
+            self.progressBarFiles.setValue(self.progressBarFiles.maximum())
+
+    def onThreadFinished(self):
+        """Called when the fittingThread finishes processing each step. Depending if there are files/steps in queue, may call the startThread/fitqueueActns function again or just display the results."""
+        self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
+
+        if self.fittingThread.isExiting(): self._fittingQueue.clear()
+
+        self.continueThread()
+
+    def stopThread(self):
+        """Stops fitting in the thread."""
+        self.fittingThread.setExitFlag(True)
+        self.fittingThread.quit()
+
+    def sampleStep(self, indx=None, onlyAutoKeys=False):
+        if indx is None: indx = self.treeModel.actvStepIndx        # Fit the active step by default
+        step = self._crnt.steps[indx]
+        samples = self._crnt.sample(frqBlkIds=step.frqBlkIds, parsKeys=None if onlyAutoKeys else step.parsKeys, autoKeys=step.autoKeys, evaluatePriors=True, nwalkers=None, nsteps=250)     # parsKeys=step.parsKeys
+        reportMCMC(samples)
+
+    def onParameterChange(self, key, val):
+        """Sets a new value to the parameter key."""
+
+        oldVal = self._crnt.getCrntVal(key)
+
+        if not np.isclose(val, oldVal):
+
+            self._undoStack.append([ [self._crnt], [{key : oldVal}] ])
+            self._redoStack.clear()
+            self._crnt.setCrntVal(key, val)
+
+        self.startThread(pushUndo=False)
+
+    def onPhased(self, p0deg, p1deg):
+        """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
+        nf = next_pow_of_2( 2**self._crnt.zff * len(self._crnt.t) )     # Determine the number of samples in the FULL signal spectrum (possibly including zero-filling). zff and t are taken from the Series level
+        dt = self._crnt.t[1]-self._crnt.t[0]
+
+        d_theta, d_tau = deg2tau(dt, nf, p0deg, p1deg)
+        if not ( np.isclose(d_theta, 0) and np.isclose(d_tau, 0) ):
+            theta = self._crnt.getCrntVal(key=('.', 'theta', 0))
+            tau = self._crnt.getCrntVal(key=('.', 'tau', 0))
+
+            self._undoStack.append([ [self._crnt], [{('.', 'theta', 0):theta, ('.', 'tau', 0):tau}] ])
+            self._redoStack.clear()
+            self._crnt.setCrntVal(key=('.', 'theta', 0), val = (theta+d_theta + np.pi) % np.pi - np.pi )     # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
+            self._crnt.setCrntVal(key=('.', 'tau', 0), val = tau + d_tau)
+
+        self.startThread(pushUndo=False)
+
+    def fitAllSteps(self, selectedFiles = None):
+        """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
+        # Form the list of steps to Fit
+        s = self.stepsEdit.toPlainText()
+        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhX)|(Rsd)|(Lsh)|(PhA)|(PhA0)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
+        s = "A ".join(re.split("A", s ))      # Prevent any consecutive A's from occuring in the string; separate them with spaces
+        while s.find('(') != -1:    # Randomize all elements in all parentheses
+            beg, end = s.find('('), s.find(')')
+            R = re.split("[ ,]+", s[beg+1:end])    # R = re.split("[^0-9A]+", s[beg+1:end])
+            R = [i for i in R if i != 'A'] + [str(i+1) for i in range(len(self._crnt.steps))]*R.count('A')   # Turn A's into lists of numbers and add them to the array
+            shuffle(R)
+            s = ", ".join((s[:beg], *R, s[end+1:]))
+        L = re.split("[ ,]+",s)     #  L = re.split("[^0-9A]+", s)   # regex matches any non-digit character followed by any number (1+) of non-digit characters
+        stepIdsToFit = [int(j)-1 if re.match('[0-9]+', j) else j for c in L for j in {'A':[str(i+1) for i in range(len(self._crnt.steps))]}.get(c, [c]) if j != '']    # replace 'A' with the list of all items
+
+        # Set up the fitting queue making sure that there are no repeated files
+        if selectedFiles is None:
+            selectedFiles = [self._crnt]         # Fit all steps of the current file only
+        selectedIDs = [ddd.selfID() for ddd in selectedFiles if isinstance(ddd, Datum)] \
+                    + [ddd.selfID() for sss in selectedFiles for ddd in sss.data if isinstance(sss, Series)]      # Expand all Series
+        selectedIDs = sorted(list(set(selectedIDs)))
+        queueFiles = [self._crnt.series[sid[0]].data[sid[1]] for sid in selectedIDs]
+
+        # Call the fitting function
+        self.startThread(queueFiles, stepIdsToFit)
+
+    def fitAllFiles(self):
+        """Fits all steps for all Files in the current Series. The starting values on the next step are copied from the current found values. Starting values for each file are determined by the settings and are set by the FittingThread."""
+
+        if isinstance(self._crnt, Series):
+            selectedFiles = [i for i in self._crnt.data]
+
+        elif isinstance(self._crnt, Datum):
+            selectedFiles = [i for i in self._crnt.parent.data]
+
+        else: return 0
+        self.fitAllSteps(selectedFiles)
+
+    def saveResults(self):
+        """Saves the current results of computation into a file."""
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.xlsx)')
+        if filename:
+            if filename == '' : filename = 'results.xlsx'
+            if filename[-5:] != '.xlsx': filename += '.xlsx'
+
+        # # Write the results to a file
+        # tab = []
+        # for sss in self._crnt.series:
+        #     for ddd in sss.data:
+        #         row = [sss.name, ddd.name, '{:.6f}'.format(np.linalg.norm(ddd.yT))]
+        #         ampl, vars, names = [], [], []
+        #         for name in ddd.repRootNames:
+        #             if name not in ddd.xclRootNames:
+        #                 try:
+        #                     row += ['{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].mean), '{:.6f}'.format(ddd.smplDistF[(name, 'ampl', 0)].var)]
+        #                     if name != 'Water':
+        #                         ampl.append(ddd.smplDistF[(name, 'ampl', 0)].mean)
+        #                         vars.append(ddd.smplDistF[(name, 'ampl', 0)].var)
+        #                         names.append(name)
+        #                 except KeyError:
+        #                     row += ['{:.6f}'.format(ddd.crntParsH[name]['ampl'][0]), '---']
+        #                     if name != 'Water':
+        #                         ampl.append(ddd.crntParsH[name]['ampl'][0])
+        #                         vars.append(0.0)
+        #                         names.append(name)
+        #
+        #         # Compute mole fractions
+        #         ampl = np.array(ampl).ravel()
+        #         vars = np.array(vars).ravel()
+        #         m_tot = np.sum(ampl)      # Total intensity
+        #         v_tot = np.sum(vars)      # Total variance of the intensity estimate
+        #         mfrac = ampl / m_tot
+        #         confi = 2 * mfrac * np.sqrt(vars/(ampl**2) + v_tot/(m_tot**2))
+        #         row += [f for mf, ci in zip(mfrac, confi) for f in ( '{:.6f}'.format(mf), '{:.6f}'.format(ci) )]
+        #
+        #         tab.append(row)
+        # head = ['Series', 'Filename', 'Signal norm'] + [f for name in self.repRootNames for f in (name, 'var')] + [f for name in names for f in ('x_'+name, '95% cred.i.')]
+        # try:
+        #     with open(filename, 'w') as fout:
+        #         print(tabulate.tabulate(tab, headers=head), file=fout)        # write results to a text file ...
+        # except PermissionError:
+        #     print('Can not save the results to file.')
+
+        self._crnt.saveResults(filename)
+
+# ------------------------ Parameter list --------------------------------------
+    def updateParsList(self, indxStep = None):
+        """Updates and displays the list of optimizaed parameters on the current step."""
+        self.parsListWidget.clear()
+        items = [node.name for node in stepClass.T.repRoots()]
+        if indxStep is not None:
+            items.extend([str(v) for v in self.steps[indxStep].parsKeys])
+        self.parsListWidget.addItems(items)
+
+    def onSelectParList(self, item):
+        """Handles the selection event of a parameter in the list."""
+        indxRow = self.parsListWidget.row(item)
+        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+        if indxRow < numRepRoots:
+            key = self.parsListWidget.currentItem().text()
+        else:
+            key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
+            slctParSpec = stepClass.getPrior(stepClass, key)
+            self.editMin.setText("{:.4g}".format(slctParSpec.min))
+            self.editMax.setText("{:.4g}".format(slctParSpec.max))
+            self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
+            self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
+            if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
+                self.editPriorMode.setEnabled(True)
+                self.editPriorStdv.setEnabled(True)
+                self.chkboxUseCrnt.setEnabled(True)
+                if slctParSpec.prior['mode'] is None:
+                    self.chkboxUseCrnt.setCheckState(Qt.Checked)
+                    self.editPriorMode.setText(self.editCrntVal.text())
+                    self.editPriorMode.setReadOnly(True)
+                else:
+                    self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
+                    self.editPriorMode.setReadOnly(False)
+                    self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
+                self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
+            else:   # Uniform prior
+                    self.editPriorMode.setDisabled(True)
+                    self.editPriorStdv.setDisabled(True)
+                    self.chkboxUseCrnt.setDisabled(True)
+        self.plotDistr(key)    # plot the prior distribution
+
+    def onPriorNameChanged(self, itemIndx):
+        """Handles the event of changing the name of the prior distribution in the combobox."""
+        priorName = self.cmboxPrior.currentText()
+        if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
+            self.editPriorMode.setEnabled(True)
+            self.editPriorStdv.setEnabled(True)
+            self.chkboxUseCrnt.setEnabled(True)
+            if self.chkboxUseCrnt.isChecked:
+                self.editPriorMode.setText(self.editCrntVal.text())
+                self.editPriorMode.setReadOnly(True)
+            else:
+                self.editPriorMode.setReadOnly(False)
+                self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
+            self.editPriorStdv.setText("{:.4g}".format(0.5))
+        else:   # Uniform prior
+                self.editPriorMode.setDisabled(True)
+                self.editPriorStdv.setDisabled(True)
+                self.chkboxUseCrnt.setDisabled(True)
+        self.saveParsForm()
+
+    def saveParsForm(self):
+        """Saves the parsSpec entered in the resForm1."""
+        indxRow = self.parsListWidget.currentRow()
+        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+        if indxRow < numRepRoots:
+            key = self.parsListWidget.currentItem().text()
+        else:
+            key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
+            priorName = self.cmboxPrior.currentText()
+            if priorName == 'Uniform':
+                prior = {'name':priorName, 'mode':None, 'stdv':None}
+            elif self.chkboxUseCrnt.isChecked():
+                self.editPriorMode.setText(self.editCrntVal.text())
+                self.editPriorMode.setReadOnly(True)
+                prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
+            else:
+                self.editPriorMode.setReadOnly(False)
+                prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
+
+            # Save the parSpec
+            stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
+            # Update the current parameter values
+            self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
+            """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
+            # Display new min/max values in the tree
+            self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
+            self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
+            self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
+            self.treeWidget.blockSignals(False)
+            # Update the rest of parameters based on their values in the tree table
+            for indx, stp in enumerate(self.steps):
+                clmn = indx+3
+                stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
+        # plot the prior distribution
+        self.plotDistr(key)
+
+    def plotDistr(self, key=None):
+        """Plots a prior probability distribution for the parameter key on the middle plot."""
+        # Determine which parameter is selected in the list and plot its samples
+        if key is None:
+            numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+            if self.parsListWidget.currentRow() < numRepRoots:
+                key = self.parsListWidget.currentItem().text()
+            else:
+                key = self.steps[-1].parsKeys[self.parsListWidget.currentRow() - numRepRoots]    # Parameter name
+        # Plot the piror distribution and samples
+        self.axDistr.clear()
+        self.axDistr2.clear()
+        if type(key) is tuple:
+            # Handle adjustible parameters
+            slctParSpec = self.steps[-1].getPrior(key)
+            # Plot the samples
+            if self.steps[-1].sHat is not None:
+                indx = self.steps[-1].sHat['smplKeys'].index(key)       # Index of the sampled parameter in the array of samples
+                smpl_abs = self.steps[-1].sHat['smplVals'][indx, :]
+                self.axDistr2.hist(smpl_abs, bins=50, range=(slctParSpec.min, slctParSpec.max), color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
+            # Plot the prior
+            vals = [slctParSpec.evalPrior(x) for x in np.linspace(-1,1,25)]
+            self.axDistr.plot(np.linspace(slctParSpec.min, slctParSpec.max, 25), vals, color=(0.96, 0.53, 0.20))
+            self.axDistr.set_xlim((slctParSpec.min, slctParSpec.max))
+            self.axDistr.axvline(x=slctParSpec.abs(self.steps[-1].getCrntVal(key)), ymin=0, ymax=0.05, color='r')
+        else:
+            # Handle the amplitudes
+            if self.steps[-1].sHat is not None:
+                indx = self.steps[-1].sHat['labels'].index(key)       # Index of the sampled parameter in the array of samples
+                smpl_abs = np.abs(self.steps[-1].sHat['smplAmpl'][indx,:])
+                self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
+        self.histCanvas.draw()
+
+# --------------------- Adding and removing frequency blocks -------------------
+    def addFreqBlock(self, xmin, xmax):
+        """Adds new optimization range to the current Series and updates the plot."""
+        dref_chsh = 0.0 # self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
+        self.freqTableModel.addFreqBlock(xmin + dref_chsh, xmax + dref_chsh)
+        self.mainFigureWidget.addFreqRange((xmin, xmax))
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def remFreqBlock(self, indx):
+        """Removes a frequency block that covers a location xdata in ppm and updates the plot."""
+        # Find which block (if any) covers the passed location and which one to remove if there are multiple blocks.
+        self.mainFigureWidget.remFreqRange(indx)
+        self.freqTableModel.remFreqBlock(indx)
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def updFreqBlock(self, indx, lims=None, active=None):
+        """Updates the ranges of a frequency block in the model."""
+        if lims is None:
+            lims = (self._crnt.freqBlocks[indx].min, self._crnt.freqBlocks[indx].max)
+        if active is None:
+            active = indx in self._crnt.steps[-1].frqBlkIds
+
+        self._crnt.altFreqBlock(indx=indx, lims=lims)
+
+        # In general, calling both functions below is unnecessary as the changes heve likely been caused by either freqTableModel or mainFigureWidget
+        self.freqTableModel.notifyDataChanged(indx)
+        self.mainFigureWidget.updFreqRange( indx, lims, active )
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def reduceRange(self):
+        """Selects and cuts a region of interest in the spectrum and adjusts the underlying data accordingly."""
+        print('In reduce range')
+
+class MainView_nmrQuant(MainView_Generic):
+    """Main GUI form class."""
+
+    def __init__(self, wsp, expiryTime = np.inf, parent = None):
+        # Initialize the main window
+        super().__init__(wsp, expiryTime, parent)
+
+        ## Install the custom output stream
+        if compile_standalone:
+            sys.stdout = EmittingStream(textWritten=self.normalOutputWritten)
+            sys.stderr = EmittingStream(textWritten=self.errorOutputWritten)
+
+    def __del__(self):
+        # Restore sys.stdout (if used to collect output to the console)
+        if compile_standalone:
+            sys.stdout = sys.__stdout__
+            sys.stderr = sys.__stderr__
+
+    def __getattr__(self, attr):
+        """Called with the dot notation for attributes not found in the class. Access the Workspace directly."""
+        return getattr(self.wsp, attr)
+
+    def normalOutputWritten(self, text):
+        # Used to show text that was written to the console
+        #self.statusBar.showMessage(text)
+        cursor = self.printoutEdit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        cursor.insertText(text)
+        self.printoutEdit.setTextCursor(cursor)
+        self.printoutEdit.ensureCursorVisible()
+
+    def errorOutputWritten(self, text):
+        # Used to show text that was written to the console
+        #self.statusBar.showMessage(text)
+        cursor = self.printoutEdit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        #if err: cursor.insertText("------------ ERROR -------------")
+        cursor.insertText(text)
+        self.printoutEdit.setTextCursor(cursor)
+        self.printoutEdit.ensureCursorVisible()
+
+    def _icon(self, name):
+        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
+
+    def setupGUI(self):
+        """Sets the layout for the main window."""
+        # ------------------- Printout for the console -------------------------
+        self.printoutEdit = QPlainTextEdit()
+        self.printoutEdit.setReadOnly(True)
+        self.printoutEdit.resize(50, 50)
+
+        # ----------------- set up the pie chart figure
+        self.pieFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
+        self.pieCanvas = FigureCanvas(self.pieFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
+        self.pieCanvas.setMaximumHeight(275)
+        self.ax_pie = self.pieFigure.add_subplot(111)    # create axes
+
+        # ------------------ 2. Set up the chemical tree ----------------------
+        self.treeView = ChemTreeView()
+        self.treeModel = ChemTreeModel(self.wsp)
+        self.treeView.setModel(self.treeModel)
+        self.treeModel.requestParameterChange.connect( self.onParameterChange )       # Updates the parameters and evaluates the active step if current values are changed by the user
+        self.treeView.changedSelected.connect(self.selectStems)                       # If new parameter is selected by the user
+        self.treeView.requestAdjustment.connect( lambda actnToRun : self.startThread(queueActns=[actnToRun]) )     # Adjust the phase
+
+        # create a text edit widget to choose the optimization sequence
+        self.stepsEdit = QPlainTextEdit('Please enter a sequence of steps to fit. All steps will be fitted consecutively by default.')  # , e.g.: 1, A, 5, (3, 4, A, 1), 2
+        self.stepsEdit.setMaximumHeight(50)
+
+        # ----------------- Spectrum figure in pyqtgraph -----------------------
+        self.mainFigureWidget = MainSpectrumWidget()
+        self.mainFigureWidget.sigFreqRangeSelected.connect(self.onFreqRangeSelected)
+        self.mainFigureWidget.sigFreqRangeChanged.connect(self.onFreqRangeChanged)
+        self.mainFigureWidget.sigMouseClicked.connect(self.onMouseClicked)
+        self.mainFigureWidget.sigStemsClicked.connect(self.treeView.selectPickedParameter)
+        self.mainFigureWidget.sigStemsDragged.connect(self.treeView.updateValue)
+        self.mainFigureWidget.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+
+        # Create the parameters tab
+        self.tbTree = QToolBar("Tree")                      # Tree toolbar
+        self.tbTree.setIconSize(QtCore.QSize(18,18))
+        self.tbTree.setFloatable(False)
+        self.tbTree.setMovable(False)
+
+        tabParam = QWidget()
+        layParam = QVBoxLayout()
+        tabParam.setLayout(layParam)
+        layParam.addWidget(self.treeView)
+        layParam.addWidget(self.tbTree)
+        layParam.addWidget(self.stepsEdit)
+
+        # ----------------------------------------------------------------------
+        #                            Navigation tab
+        # ----------------------------------------------------------------------
+        # Create the navigation tree
+        self.naviTreeView = NavigationTreeView()
+        self.naviTreeModel = NavigationTreeModel(self.wsp)
+        self.naviSelection = QItemSelectionModel(self.naviTreeModel)
+        self.naviTreeView.setModel(self.naviTreeModel)
+        self.naviTreeView.setSelectionModel(self.naviSelection)
+        # self.naviTreeDelegate = NavigationTreeDelegate()
+        # self.naviTreeView.setItemDelegate(self.naviTreeDelegate)
+        self.naviSelection.currentChanged.connect(self.onCurrentSelectedChanged)
+        self.naviTreeView.requestPasteCrnt.connect(self.treeView.pasteCrntPars)     # Paste copied parameter values to all selected Datums in the naviTreeView
+        self.naviTreeView.requestPasteDflt.connect(self.treeView.pasteDfltPars)
+        self.naviTreeView.requestFitSelected.connect(self.fitAllSteps)
+
+        # Set up the tab
+        tabNavi = QWidget()
+        layNavi = QVBoxLayout()
+        tabNavi.setLayout(layNavi)
+        layNavi.addWidget(self.naviTreeView)
+        layNavi.addWidget(self.pieCanvas)
+        layNavi.setContentsMargins(1,1,1,1)
+
+
+        # ----------------------------------------------------------------------
+        #                            Settings tab
+        # ----------------------------------------------------------------------
+        # A table to display frequency ranges
+        self.freqTableView = FreqTableView()
+        self.freqTableModel = FreqTableModel(self.wsp)
+        self.freqTableView.setModel(self.freqTableModel)
+        self.freqTableModel.freqBlockChanged.connect(self.updFreqBlock)
+
+        # Add the preprocessing parameters tool
+        self.preprocTool = PreprocessingWidget()
+        self.preprocTool.parsChanged.connect(lambda x : self.resetSignals(**x))
+        # self.phasingTool = PhasingWidget(self._crnt, self.canvas, orientation='Horizontal') # set to 'Horizontal' if displayed on the right
+        # self.phasingTool.sigPhasingProgress.connect(self.onPhased)
+
+        # Add Phasing tool
+        self.mainPhasingWidget = PhasingWidget(orientation='Horizontal')
+
+        self.mainFigureWidget.sigPivotDragged.connect(self.mainPhasingWidget.setPivot)
+        self.mainPhasingWidget.sigPhasingProgress.connect(self.mainFigureWidget.replot_yF)
+        self.mainPhasingWidget.sigPhasingComplete.connect(self.onPhased)
+
+        # Set up the tab
+        tabSettings = QWidget()
+        laySettings = QVBoxLayout()
+        tabSettings.setLayout(laySettings)
+        laySettings.addWidget(self.freqTableView)
+        laySettings.addWidget(self.mainPhasingWidget)
+        laySettings.addWidget(self.preprocTool)
+
+        # --------------- Left Widget --------------------
+        widgetLeft = QTabWidget()
+        widgetLeft.setMinimumSize(200, 0)
+        widgetLeft.setMaximumWidth(250)
+        # set up the tabs
+        widgetLeft.setTabPosition(QTabWidget.North)
+        widgetLeft.addTab(tabNavi, 'Navigation')
+        widgetLeft.addTab(tabSettings, 'Settings')
+        # widgetLeft.addTab(tabPhasing, 'Phasing')
+        widgetLeft.setCurrentIndex(0)
+
+        # -------------- Center Widget -------------------
+        # spectrum on top and console on the bottom
+        widgetCenter = QSplitter()
+        widgetCenter.setOrientation(Qt.Vertical)
+        widgetCenter.addWidget(self.mainFigureWidget)
+        widgetCenter.addWidget(self.printoutEdit)
+        widgetCenter.setSizes([1000, 10])
+
+        # --------------- Right Widget -------------------
+        widgetRight = QTabWidget()
+        widgetRight.setMinimumSize(320, 0)
+        widgetRight.setTabPosition(QTabWidget.North)
+        widgetRight.addTab(tabParam, 'Parameters')
+
+        # Put everything together in a QSplitter
+        mainSplitter = QSplitter()
+        mainSplitter.addWidget(widgetLeft)
+        mainSplitter.addWidget(widgetCenter)
+        mainSplitter.addWidget(widgetRight)
+        mainSplitter.setStretchFactor(0, 1)
+        mainSplitter.setStretchFactor(1, 3)
+        mainSplitter.setStretchFactor(2, 1)
+        # mainSplitter.setHandleWidth(1)
+
+        # Set the result in the center of the form
+        self.setCentralWidget(mainSplitter)
+
+        # Call the parent setup GUI function
+        super().setupGUI()
+        self.setWindowTitle("Model-based quantitative NMR analysis ver. {} ({})".format(version, str(date.today())) )
+        self.resize(1400, 800)
+
+    def setup_actions(self):
+        super().setup_actions()
+        # ----------------------- Actions for the plot -------------------------
+        # Add freqBlock action
+        new = QAction(self._icon('add_range.png'), 'Add optimization range', self)
+        new.setShortcut('Ctrl+A')
+        new.setStatusTip('Add optimization range')
+        new.setCheckable(True)
+        self._actions['Add freqBlock'] = new
+
+        # Remove freqBlock action
+        new = QAction(self._icon('remove_range.png'), 'Remove optimization range', self)
+        new.setShortcut('Ctrl+D')
+        new.setStatusTip('Remove optimization range')
+        new.setCheckable(True)
+        self._actions['Remove freqBlock'] = new
+
+        # Modify freqBlocks action
+        new = QAction(self._icon('modify_range.png'), 'Modify optimization ranges', self)
+        new.setStatusTip('Modify optimization ranges')
+        new.setCheckable(True)
+        self._actions['Modify freqBlock'] = new
+
+        # Add all frequency ranges actions to the group
+        self.actnGroupFreqBlocks = QActionGroup(self)
+        self.actnGroupFreqBlocks.addAction(self._actions['Add freqBlock'])
+        self.actnGroupFreqBlocks.addAction(self._actions['Remove freqBlock'])
+        self.actnGroupFreqBlocks.addAction(self._actions['Modify freqBlock'])
+        self.actnGroupFreqBlocks.triggered.connect(self.onFreqRangeControl)
+        self.actnGroupFreqBlocks._previuosAction = None          # Indicator of the previously selected action
+
+        # Show stems
+        new = QAction(self._icon('icon_showStems.png'), 'Show transition lines', self)
+        new.setStatusTip('Show transition lines')
+        new.setCheckable(True)
+        new.triggered.connect(self.toggleStems)
+        self._actions['Show transitions'] = new
+
+        # Show components
+        new = QAction(self._icon('icon_showComponents.png'), 'Show fitted components', self)
+        new.setStatusTip('Show fitted components')
+        new.setCheckable(True)
+        new.triggered.connect(self.toggleComps)
+        self._actions['Show components'] = new
+
+        # Show residual
+        new = QAction(self._icon('icon_plotResidual.png'), 'Show residual', self)
+        new.setStatusTip('Show residual')
+        new.setCheckable(True)
+        new.triggered.connect(self.toggleResid)
+        self._actions['Show residual'] = new
+
+        # Autoscale
+        new = QAction(self._icon('icon_autoScale.png'), 'Autoscale', self)
+        new.setStatusTip('Scale plot to data')
+        new.triggered.connect(self.mainFigureWidget.autoRange)
+        self._actions['Autoscale'] = new
+
+        # Save Image
+        new = QAction(self._icon('icon_saveImage.png'), 'Save image', self)
+        new.setStatusTip('Saves the spectrum as image')
+        new.triggered.connect(self.mainFigureWidget.saveImage)
+        self._actions['Save image'] = new
+
+        # ------------------------ Processing Actions --------------------------
+        # Autophase
+        new = QAction(self._icon('icon_autoPhase.png'), 'Autophase', self)
+        new.setStatusTip('Apply a phase correction algorithm')
+        new.triggered.connect( lambda : self.startThread(queueActns=['PhA']) )
+        self._actions['Autophase both'] = new
+
+        # Set custom lineshape
+        new = QAction(self._icon('icon_customShape.png'), 'Set custom lineshape', self)
+        new.setStatusTip('Apply a custom lineshape derived by deconvolution')
+        new.triggered.connect( lambda _ : self.startThread(queueActns=['Lsh']) )
+        self._actions['Set lineshape'] = new
+
+        new = QAction(self._icon('icon_resetShape.png'), 'Reset the lineshape', self)
+        new.setStatusTip('Remove the custom lineshape - reset to default (Lorentzian)')
+        new.triggered.connect( lambda _ : self.startThread(queueActns=['Lor']) )
+        self._actions['Remove lineshape'] = new
+
+        # ----------------------- Actions for the tree -------------------------
+        # Add step
+        new = QAction(self._icon('icon_addStep.png'), 'Add step', self)
+        new.setStatusTip('Add an optimization step')
+        new.triggered.connect(self.treeModel.addStep)
+        self._actions['Add step'] = new
+
+        # Delete step
+        new = QAction(self._icon('icon_delStep.png'), 'Remove active step', self)
+        new.setStatusTip('Remove an optimization step')
+        new.triggered.connect(self.treeModel.delStep)
+        self._actions['Remove step'] = new
+
+        # Copy All parameters
+        new = QAction(self._icon('icon_copy.png'), 'Copy all parameters', self)
+        new.setStatusTip('Copy current values of all parameters')
+        new.triggered.connect(lambda : self.treeView.copyCrntPars(keys=None))
+        self._actions['Copy all parameters'] = new
+
+        # Paste copied parameters
+        new = QAction(self._icon('icon_pasteCrnt.png'), 'Paste parameters', self)
+        new.setStatusTip('Paste values of copied parameters as current')
+        new.triggered.connect(lambda : self.treeView.pasteCrntPars(datums=None))
+        self._actions['Paste parameters'] = new
+
+        # Toggle LS/TLS
+        new = QAction(self._icon('icon_TLS.png'), 'Use TLS algorithm', self)
+        new.setStatusTip('Use the Total Least Squares algorithm')
+        new.setCheckable(True)
+        self._actions['Toggle TLS'] = new
+        def onToggleTLS():
+            config.SAMPL_funcType = 'TLS' if self._actions['Toggle TLS'].isChecked() else 'LS'
+            self.treeModel.notifyDataChanged()     # Update the TLS line in the chemTree view
+        self._actions['Toggle TLS'].triggered.connect(onToggleTLS)
+
+        # Phase correction actions
+        """self.actnCorrectPh0 = QAction(self._icon('icon_correctPh0.png'), 'Correct ph0', self)
+        self.actnCorrectPh0.setStatusTip('Correct zero-order phasing.')
+        self.actnCorrectPh0.triggered.connect(self.correct_phase)"""
+
+    def assign_actions(self):
+        """Assigns actions to the lements of toolbars."""
+        # ------------------------- Set up the toolbars ------------------------
+        menubar = self.menuBar()
+        tbMain = self.addToolBar("File")               # Main toolbar
+
+        # ------------------------- set the menubar ----------------------------
+        fileMenu = menubar.addMenu('&File')
+        for actn in ['Import file','Remove file','Load workspace','Save workspace', 'Exit']:
+            fileMenu.addAction(self._actions[actn])
+        helpMenu = menubar.addMenu('&Help')
+        helpMenu.addAction(self._actions['Show about'])
+
+        # ------------------------- Set the main toolbar -----------------------
+        for actn in ['Clear workspace','Import file','Remove file','Show settings',None,
+                     'Load workspace','Save workspace', None, 'Add freqBlock', 'Remove freqBlock',
+                     'Modify freqBlock', 'Show transitions', 'Show components', 'Show residual',
+                     'Autoscale', None, 'Undo', 'Redo', None, 'Autophase both', 'Set lineshape', 'Remove lineshape',
+                     'Fit one step', 'Fit all steps', 'Fit all files', None,
+                     'Report results', 'Save results', 'Exit']:
+            if actn is not None:
+                tbMain.addAction(self._actions[actn])
+            else: tbMain.addSeparator()
+
+        # ------------------------- Set the tree toolbar -----------------------
+        for actn in ['Load tree', 'Add step', 'Remove step', None, 'Copy all parameters',
+                     'Paste parameters', None, 'Fit one step', 'Fit all steps', 'Fit all files', 'Stop thread']:
+            if actn is not None:
+                self.tbTree.addAction(self._actions[actn])
+            else: self.tbTree.addSeparator()
+
+    # ----------------- Signals from the main Spectrum Widget ------------------
+
+    def onFreqRangeSelected(self, lims):
+        # print('Selected a frequency block', lims)
+        self._actions['Add freqBlock'].setChecked(False)           # Make sure that the buton is not pressed
+        self.mainFigureWidget.setSelectorFlag(False)      # Exit the selection mode
+        self.addFreqBlock(*lims)                          # Add new Frequency block
+
+        self.actnGroupFreqBlocks._previuosAction = None
+
+    def onFreqRangeChanged(self, indx, lims):
+        # print('Frequency block has changed', indx, lims)
+        self._actions['Modify freqBlock'].setChecked(False)
+        self.mainFigureWidget.setCursor(mode='normal')
+        self.updFreqBlock(indx, lims)
+
+        self.actnGroupFreqBlocks._previuosAction = None
+
+    def onMouseClicked(self, pos):
+        # print('Mouse clicked', pos)
+        # Process the mouse click differently according to the current state
+        if self._actions['Remove freqBlock'].isChecked():    # Remove freqBlock request
+            self.mainFigureWidget.setCursor(mode='normal')
+            # Find which block was clicked on (the narrowest block that covers the clicked position)
+            scores = [blk.max-blk.min if blk.min < pos.x() < blk.max else np.inf for blk in self._crnt.freqBlocks]
+            indx = min(enumerate(scores), key=itemgetter(1))[0]      # Find the index of the minimum
+            if indx > 0:    # Don't remove the allFrequencies block
+                self._actions['Remove freqBlock'].setChecked(False)     # Unpress the button
+                self.remFreqBlock(indx)
+
+            self.actnGroupFreqBlocks._previuosAction = None
+
+    def onFreqRangeControl(self, actn):
+        """Called when the action group of freqRange controls is triggered"""
+        if self.actnGroupFreqBlocks._previuosAction == actn:
+            # Turn off the buttons
+            actn.setChecked(False)
+            self.mainFigureWidget.setMovableFreqBlocks(False)
+            self.mainFigureWidget.setSelectorFlag(False)
+            self.mainFigureWidget.setCursor(mode='normal')
+            self.actnGroupFreqBlocks._previuosAction = None
+            return 0
+
+        elif self._actions['Modify freqBlock'].isChecked():
+            # Changing frequency blocks
+            self.mainFigureWidget.setMovableFreqBlocks(True)
+            self.mainFigureWidget.setSelectorFlag(False)
+            self.mainFigureWidget.setCursor(mode='hand')
+
+        elif self._actions['Add freqBlock'].isChecked():
+            # Adding new frequency block
+            self.mainFigureWidget.setSelectorFlag(True)
+            self.mainFigureWidget.setMovableFreqBlocks(False)
+            self.mainFigureWidget.setCursor(mode='hand')
+
+        elif self._actions['Remove freqBlock'].isChecked():
+            # Removing a frequency block
+            self.mainFigureWidget.setMovableFreqBlocks(False)
+            self.mainFigureWidget.setSelectorFlag(False)
+            self.mainFigureWidget.setCursor(mode='hand')
+
+        self.actnGroupFreqBlocks._previuosAction = actn
+
+    # -------------------- Processing keyboard interactions --------------------
+
+    def keyPressEvent(self, ev):
+        # self.scene().keyPressEvent(ev)
+        # self.sigKeyPress.emit(ev)
+        # print('Key pressed ', ev.key())
+        pass
+
+    # ------------------------- Other utility methods --------------------------
+
+    def onImportData(self):
+        """Runs a dialog to select a new file."""
+        # TODO! Will be removed
+        self.naviTreeView.onImportData(crnt_series=self._crnt)
+
+    def removeCurrent(self):
+        """Removes current selection (Series or Datum)."""
+        if self._crnt != self.wsp:
+            self.naviTreeModel.remItems([self._crnt])
+            self.naviSelection.clear()    # Select the entire workspace
+
+    def setCurrent(self, newCrnt=None):
+        """Sets the _crnt Datum and updates the plot, tables, etc. accordingly."""
+
+        # Set self._crnt to the new Series/Datum or the entire workspace
+        if newCrnt is None:
+            try:
+                newCrnt = self.wsp.series[0].data[0]
+            except IndexError:
+                self._crnt = self.wsp
+                return None
+
+        # Compute the model signal if there is None
+        try:
+            if newCrnt.zF is None:
+                step = newCrnt.steps[-1]
+                newCrnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
+                #TODO: Possibly check which step to evaluate if steps use different frequency ranges
+        except AttributeError:
+            pass
+
+        # Update the necessary display widgets
+        self.treeModel.setNewDatum(newCrnt)
+        self.freqTableModel.setNewDatum(newCrnt)
+        self.preprocTool.setNewDatum(newCrnt)
+        # self.phasingTool.setNewDatum(newCrnt)
+
+        # Highlight the current Datum in the Navigation widget if it was seletected programmatically
+        self.naviTreeView.selectCurrentDatum(newCrnt.selfID())
+
+        if isinstance(self._crnt, Datum) and isinstance(newCrnt, Datum) and self._crnt.parent == newCrnt.parent:
+            resetView = False
+        else: resetView = True
+        self._crnt = newCrnt
+        self.plotCurrent(autoRange=resetView)
+
+    def onCurrentSelectedChanged(self, index):
+        """Slot for the signal indicating the change in the currently selected Series/Datum"""
+
+        self.setCurrent(newCrnt = index.internalPointer() if index.isValid() else None)
+
+    def loadChemTree(self):
+        """Calls a dialog and loads a new chemical tree from file."""
+        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")
+
+        T = loadTree(filename)
+
+        self.treeModel.resetChemTree(T)
+
+    def onSaveWspAction(self):
+        """Saves the workspace including the stepClass class and the steps array."""
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')
+        if filename:
+            if filename[-4:] != '.wsp': filename += '.wsp'
+
+            # Pack the logic of the workspace
+            dataPack = self.wsp.pack()
+
+            # Pack the settings
+            stngPack = copy.deepcopy(settings)
+            stngView = {'stepsEditText' : self.stepsEdit.toPlainText(),\
+                        'hiddenTreeViewNodes' : [node.name for node in self.treeModel.TP.items() if node.hidden]}
+            stngConfig = config.as_dict()
+
+            stngPack['_view'] = stngView
+            stngPack['_config'] = stngConfig
+
+            with open(filename, 'wb') as fp:
+                dill.dump([dataPack, stngPack], fp)
+
+    def onLoadWspAction(self):
+        """Loads the workspace including the stepClass class and the steps array."""
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")
+        if filename:
+            with open(filename, 'rb') as fp:
+                dataUnPack = dill.load(fp)
+
+            # Reset the settings and the Workspace
+            self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
+
+    def onResetWspAction(self, newWorkspace=None, newSettings=None):
+        """Clears the workspace including the stepClass, signals and the tree."""
+        self.naviTreeModel.beginResetModel()
+
+        # Update the global settings
+        settings.clear()
+        settings.update({"ax0Limits": None,
+                        "ax1Limits": {'ylim':(0, 5)},
+                        "ax2Limits": None,
+                        "startFromPars" : "current",          # Starting values of parameters when fitting multiple files (current, previous, default) - will be copied from crntParsH of this file, previous file or dfltParsH
+                        "autoPhase" : False,
+                        "autoPick" : False})
+        if newSettings is not None:
+            try:
+                stngView = newSettings.pop('_view')
+            except KeyError:
+                stngView = None
+            try:
+                stngConfig = newSettings.pop('_config')
+            except KeyError:
+                stngConfig = None
+            settings.update(newSettings)
+        else:
+            settings.update({"HCmode":"1H"})
+            stngView, stngConfig = None, None
+        settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
+
+        # Reset the undo and redo stacks
+        self._undoStack.clear()
+        self._actions['Undo'].setEnabled(False)
+        self._redoStack.clear()
+        self._actions['Redo'].setEnabled(False)
+
+        # Reset the workspace
+        self.wsp.reset()
+        if newWorkspace is not None:
+            self.wsp.unpack(newWorkspace)
+
+        # Reset the tree model
+        self.treeModel.fullReset(self._crnt)
+
+        self.naviTreeModel.endResetModel()
+
+        self.setCurrent()          # Sets the current display to the first Datum or the entire workspace if there is no Datum
+
+        # Update the views (e.g. shown/hidden rows, etc.)
+        if stngView is not None:
+            self.stepsEdit.setPlainText(stngView['stepsEditText'])
+            for node in stngView['hiddenTreeViewNodes']:
+                self.treeModel.TP[node].hidden = True
+            self.treeView.hideExcessiveRows()
+
+        # Update the global config
+        if stngConfig is not None:
+            config.from_dict(config, stngConfig)
+        self._actions['Toggle TLS'].setChecked(config.SAMPL_funcType == 'TLS')
+
+    def resetSignals(self, zff=None, apod=None, flagAdapFreq=None):
+        self._crnt.resetFreqs(zff, apod)
+
+        if flagAdapFreq is not None:
+            for dat in self._crnt.parent.data:
+                dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
+
+        self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
+        self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
+
+    def showSettingsDialog(self):
+        """Shows an input dialog and updates settings"""
+        accepted, newSettings = SettingsDialog.run(oldSettings={'HCmode': self.wsp.HCmode})
+
+        if accepted:
+            self.treeModel.setHCmode(newSettings['HCmode'])
+
+    def showAboutMessage(self):
+        """Displays the About message."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+
+        msg.setText("Quantitative NMR analysis with quantum mechanical models.")
+        msg.setInformativeText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
+        msg.setWindowTitle("About qNMR")
+        # msg.setDetailedText("The details are as follows:")
+        msg.setStandardButtons(QMessageBox.Close)
+
+        msg.exec_()            # Returns the values of pressed button
+
+    def onAssigned(self):
+        """Updates the tree and plots when model peaks have been assigned to picked peaks."""
+        self.plotCurrent(autoRange=False)
+        self.treeWidget.showStep()
+        #self.phasingTool.setVals(self.steps[0])
+        #dataFiles[self.indxCrntFile].update()
+        pass
+
+    def pullUndo(self):
+        """Restores the last state from the Undo stack."""
+        dats_list, pars_list = self._undoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        self._redoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
+
+        # Set the stored values to the Datums
+        for dat, par in zip(dats_list, pars_list):
+            dat.setCrntVals(par)
+
+        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
+
+    def pullRedo(self):
+        """Restores the last state from the Redo stack."""
+        dats_list, pars_list = self._redoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        self._undoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
+
+        # Set the stored values to the Datums
+        for dat, par in zip(dats_list, pars_list):
+            dat.setCrntVals(par)
+
+        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
+
+# ------------------------ Parameter list --------------------------------------
+    def updateParsList(self, indxStep = None):
+        """Updates and displays the list of optimizaed parameters on the current step."""
+        self.parsListWidget.clear()
+        items = [node.name for node in stepClass.T.repRoots()]
+        if indxStep is not None:
+            items.extend([str(v) for v in self.steps[indxStep].parsKeys])
+        self.parsListWidget.addItems(items)
+
+    def onSelectParList(self, item):
+        """Handles the selection event of a parameter in the list."""
+        indxRow = self.parsListWidget.row(item)
+        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+        if indxRow < numRepRoots:
+            key = self.parsListWidget.currentItem().text()
+        else:
+            key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
+            slctParSpec = stepClass.getPrior(stepClass, key)
+            self.editMin.setText("{:.4g}".format(slctParSpec.min))
+            self.editMax.setText("{:.4g}".format(slctParSpec.max))
+            self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
+            self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
+            if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
+                self.editPriorMode.setEnabled(True)
+                self.editPriorStdv.setEnabled(True)
+                self.chkboxUseCrnt.setEnabled(True)
+                if slctParSpec.prior['mode'] is None:
+                    self.chkboxUseCrnt.setCheckState(Qt.Checked)
+                    self.editPriorMode.setText(self.editCrntVal.text())
+                    self.editPriorMode.setReadOnly(True)
+                else:
+                    self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
+                    self.editPriorMode.setReadOnly(False)
+                    self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
+                self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
+            else:   # Uniform prior
+                    self.editPriorMode.setDisabled(True)
+                    self.editPriorStdv.setDisabled(True)
+                    self.chkboxUseCrnt.setDisabled(True)
+        self.plotDistr(key)    # plot the prior distribution
+
+    def onPriorNameChanged(self, itemIndx):
+        """Handles the event of changing the name of the prior distribution in the combobox."""
+        priorName = self.cmboxPrior.currentText()
+        if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
+            self.editPriorMode.setEnabled(True)
+            self.editPriorStdv.setEnabled(True)
+            self.chkboxUseCrnt.setEnabled(True)
+            if self.chkboxUseCrnt.isChecked:
+                self.editPriorMode.setText(self.editCrntVal.text())
+                self.editPriorMode.setReadOnly(True)
+            else:
+                self.editPriorMode.setReadOnly(False)
+                self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
+            self.editPriorStdv.setText("{:.4g}".format(0.5))
+        else:   # Uniform prior
+                self.editPriorMode.setDisabled(True)
+                self.editPriorStdv.setDisabled(True)
+                self.chkboxUseCrnt.setDisabled(True)
+        self.saveParsForm()
+
+    def saveParsForm(self):
+        """Saves the parsSpec entered in the resForm1."""
+        indxRow = self.parsListWidget.currentRow()
+        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+        if indxRow < numRepRoots:
+            key = self.parsListWidget.currentItem().text()
+        else:
+            key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
+            priorName = self.cmboxPrior.currentText()
+            if priorName == 'Uniform':
+                prior = {'name':priorName, 'mode':None, 'stdv':None}
+            elif self.chkboxUseCrnt.isChecked():
+                self.editPriorMode.setText(self.editCrntVal.text())
+                self.editPriorMode.setReadOnly(True)
+                prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
+            else:
+                self.editPriorMode.setReadOnly(False)
+                prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
+
+            # Save the parSpec
+            stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
+            # Update the current parameter values
+            self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
+            """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
+            # Display new min/max values in the tree
+            self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
+            self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
+            self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
+            self.treeWidget.blockSignals(False)
+            # Update the rest of parameters based on their values in the tree table
+            for indx, stp in enumerate(self.steps):
+                clmn = indx+3
+                stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
+        # plot the prior distribution
+        self.plotDistr(key)
+
+    def plotDistr(self, key=None):
+        """Plots a prior probability distribution for the parameter key on the middle plot."""
+        # Determine which parameter is selected in the list and plot its samples
+        if key is None:
+            numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+            if self.parsListWidget.currentRow() < numRepRoots:
+                key = self.parsListWidget.currentItem().text()
+            else:
+                key = self.steps[-1].parsKeys[self.parsListWidget.currentRow() - numRepRoots]    # Parameter name
+        # Plot the piror distribution and samples
+        self.axDistr.clear()
+        self.axDistr2.clear()
+        if type(key) is tuple:
+            # Handle adjustible parameters
+            slctParSpec = self.steps[-1].getPrior(key)
+            # Plot the samples
+            if self.steps[-1].sHat is not None:
+                indx = self.steps[-1].sHat['smplKeys'].index(key)       # Index of the sampled parameter in the array of samples
+                smpl_abs = self.steps[-1].sHat['smplVals'][indx, :]
+                self.axDistr2.hist(smpl_abs, bins=50, range=(slctParSpec.min, slctParSpec.max), color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
+            # Plot the prior
+            vals = [slctParSpec.evalPrior(x) for x in np.linspace(-1,1,25)]
+            self.axDistr.plot(np.linspace(slctParSpec.min, slctParSpec.max, 25), vals, color=(0.96, 0.53, 0.20))
+            self.axDistr.set_xlim((slctParSpec.min, slctParSpec.max))
+            self.axDistr.axvline(x=slctParSpec.abs(self.steps[-1].getCrntVal(key)), ymin=0, ymax=0.05, color='r')
+        else:
+            # Handle the amplitudes
+            if self.steps[-1].sHat is not None:
+                indx = self.steps[-1].sHat['labels'].index(key)       # Index of the sampled parameter in the array of samples
+                smpl_abs = np.abs(self.steps[-1].sHat['smplAmpl'][indx,:])
+                self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
+        self.histCanvas.draw()
+
+# ------------------------ Functions for plotting ------------------------------
+    def plotCurrent(self, autoRange=True):
+        """Plots signals corresponding to the currently opened file and current parameters."""
+        if isinstance(self._crnt, Series):
+            self.mainFigureWidget.reset()
+            self.plotPieChart(reset=True)
+
+        elif isinstance(self._crnt, Datum):
+            f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
+
+            # Compute the stems
+            if self._actions['Show transitions'].isChecked():
+                allStems = self._crnt.stems_for_plot()
+            else: allStems = None
+
+            # Plotting function
+            self.mainFigureWidget.plot(f, yFph, xF,
+                zF = zF if self._actions['Show components'].isChecked() else None,
+                stems = allStems if self._actions['Show transitions'].isChecked() else None,
+                freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[-1].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)],
+                indx_colr=[i for i, name in enumerate(self._crnt.repRootNames) if not self._crnt.isXclRootName(name)])   # if i in self._crnt.steps[-1].frqBlkIds])
+
+            if autoRange:
+                self.mainFigureWidget.autoRange()
+
+            # Output the found results
+            self.plotPieChart()
+
+            # Update the phasing widget
+            self.mainPhasingWidget.setData(f, yFph, xF,
+                freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[-1].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)])
+
+        else:
+            self.mainFigureWidget.reset()
+            self.plotPieChart(reset=True)
+
+    def toggleStems(self):
+        """Plots stem lines to indicate modeled peaks."""
+        try:
+            self.mainFigureWidget.showStems(flag=self._actions['Show transitions'].isChecked())
+        except:
+            # if self._actions['Show transitions'].isChecked():
+            self.plotCurrent(autoRange=False)
+
+    def toggleComps(self):
+        """Plots the constituent peaks for each model component"""
+        # If no components have been computed so far, will evaluate them first.
+        # TODO! Use customized exceptions
+        try:
+            self.mainFigureWidget.showComponents(flag=self._actions['Show components'].isChecked())
+        except:
+            if self._actions['Show components'].isChecked():
+                self.plotCurrent(autoRange=False)
+
+    def toggleResid(self):
+        """Show or hide the residual plot."""
+        self.mainFigureWidget.showResidual(flag=self._actions['Show residual'].isChecked())
+
+    def selectStems(self, key_crnt, key_prev=None):
+        """Shows which stems are affected when a row is selected in the tree."""
+        if self._actions['Show transitions'].isChecked():
+            if key_prev is not None and key_prev[1] in ['chshQD', 'alphQD']:
+                self.mainFigureWidget.highlightStems((key_prev[0], 'chshQD', key_prev[2]), False)
+            if key_crnt is not None and key_crnt[1] in ['chshQD', 'alphQD']:
+                self.mainFigureWidget.highlightStems((key_crnt[0], 'chshQD', key_crnt[2]), True)
+
+    def plotPieChart(self, reset=False):
+        """Plots a pie chart that represents the found component concentrations."""
+
+        def hover(evt):
+            if evt.inaxes == self.ax_pie:
+                # Find which bar contains the event
+                for indx, patch in enumerate(bars.patches):
+                    if patch.contains(evt)[0]:
+                        newMessage = '{:s}    {:.3g}%'.format(labels[indx], 100*cnct[indx])
+                        if self.statusBar.currentMessage() != newMessage:
+                            self.statusBar.showMessage(newMessage)
+                        return
+
+            self.statusBar.clearMessage()
+
+        self.ax_pie.clear()
+
+        # Remove the reference to the hovering event
+        try:
+            self.pieCanvas.mpl_disconnect(self._cid_hover)
+        except AttributeError: pass
+
+        if not reset:
+            data = [(self._crnt.crntParsH[lbl]['ampl'][0], str(self.wsp.T[lbl])) for lbl in self.wsp.repRootNames if lbl not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(lbl)]     # All concentrations expcept water, chlorophorm, etc...
+            cnct = np.abs([d[0] for d in data])
+            cnct = np.where(np.isnan(cnct), 0.0, cnct)
+            if sum(cnct) != 0:
+                cnct = cnct / sum(cnct)
+            labels = [d[1] for d in data]
+            bars = self.ax_pie.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
+                color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(name)])
+            self.ax_pie.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
+            ttl = self.ax_pie.set_title('Relative concentrations, %', fontsize=12)
+            ttl.set_position((0.5, 1.03))
+            # wedges, texts, autotexts = self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
+            # self.ax_pie.legend(wedges, labels,
+            #   loc="bottom",
+            #   bbox_to_anchor=(0, 0.1, 0.5, 1))
+            # self.ax_pie.axis('equal')
+
+            self._cid_hover = self.pieCanvas.mpl_connect("motion_notify_event", hover)
+
+        self.pieCanvas.draw()
+
+# --------------------- Adding and removing frequency blocks -------------------
+    def addFreqBlock(self, xmin, xmax):
+        """Adds new optimization range to the current Series and updates the plot."""
+        dref_chsh = 0.0 # self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
+        self.freqTableModel.addFreqBlock(xmin + dref_chsh, xmax + dref_chsh)
+        self.mainFigureWidget.addFreqRange((xmin, xmax))
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def remFreqBlock(self, indx):
+        """Removes a frequency block that covers a location xdata in ppm and updates the plot."""
+        # Find which block (if any) covers the passed location and which one to remove if there are multiple blocks.
+        self.mainFigureWidget.remFreqRange(indx)
+        self.freqTableModel.remFreqBlock(indx)
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def updFreqBlock(self, indx, lims=None, active=None):
+        """Updates the ranges of a frequency block in the model."""
+        if lims is None:
+            lims = (self._crnt.freqBlocks[indx].min, self._crnt.freqBlocks[indx].max)
+        if active is None:
+            active = indx in self._crnt.steps[-1].frqBlkIds
+
+        self._crnt.altFreqBlock(indx=indx, lims=lims)
+
+        # In general, calling both functions below is unnecessary as the changes heve likely been caused by either freqTableModel or mainFigureWidget
+        self.freqTableModel.notifyDataChanged(indx)
+        self.mainFigureWidget.updFreqRange( indx, lims, active )
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def reduceRange(self):
+        """Selects and cuts a region of interest in the spectrum and adjusts the underlying data accordingly."""
+        print('In reduce range')
+
 class MainView(QMainWindow):
     """Main GUI form class."""
 
@@ -4557,7 +6318,6 @@ class MainView(QMainWindow):
         else:
             settings.update({"HCmode":"1H"})
             stngView, stngConfig = None, None
-        settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
 
         # Reset the undo and redo stacks
         self._undoStack.clear()
@@ -5195,7 +6955,8 @@ if __name__ == '__main__':
         msg.show()         # msg.exec_()            # Returns the values of pressed button
     else:
         wsp = Workspace()
-        main_view = MainView(wsp, expiryTime)
+        main_view = MainView_nmrQuant(wsp, expiryTime)
+        # main_view = MainView_Generic(wsp, expiryTime)
         main_view.show()
 
     app.exec_()

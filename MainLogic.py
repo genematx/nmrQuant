@@ -1735,6 +1735,7 @@ class Datum():
         try:
             self.xclRootNames.remove(name)
         except KeyError:
+            self.setCrntVal(key=(name, 'ampl', 0), val=0.0)
             self.xclRootNames.add(name)
         self.resetSignals()
 
@@ -1744,6 +1745,7 @@ class Datum():
             return 0
 
         if flag:
+            self.setCrntVal(key=(name, 'ampl', 0), val=0.0)
             self.xclRootNames.add(name)
         else:
             try:
