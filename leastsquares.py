@@ -648,7 +648,6 @@ def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=Non
     """Computes the value of the Gaussian likelihood function. iG - inverse covariance matrix of the noise.
        ampl0 - array of intial amplitudes, entries which are initialized to None will be estimated in closed form.
        If nonnegative=True, first na amplitudes will be forced to have non-negative values."""
-
     # 0. Prepare the inputs
     n, k = Z.shape     # Number of samples and (model signals)
     isReal = np.isreal(Z).all() and np.isreal(y).all() and (ampl0 is None or np.isreal(ampl0).all())    # Determine if the problem is real or complex-valued

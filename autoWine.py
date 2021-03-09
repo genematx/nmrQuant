@@ -1275,7 +1275,7 @@ class MainViewWine_backup(QMainWindow):
 
         # ------------------------ Actions and toolbars ------------------------
         tbMain = self.addToolBar("File")               # Main toolbar
-
+        
         # Add clear action
         clearAction = QAction(QIcon('icons\icon_new.png'), 'Clear workspace', self)
         clearAction.setStatusTip('Clear the workspace')
@@ -1338,7 +1338,6 @@ class MainViewWine_backup(QMainWindow):
         self.actnResetFit = QAction(self._icon('icon_magic.png'), 'Reset the fit', self)
         self.actnResetFit.setStatusTip('Resets the fitted parameters to default values but keeps loaded spectra in the workspace')
         self.actnResetFit.triggered.connect(lambda _ : init_autoWine(self.wsp, resetSeries=False))
-
         # Stop fitting action
         actnstopThread = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
         actnstopThread.setStatusTip('Stop fitting')
@@ -1369,7 +1368,6 @@ class MainViewWine_backup(QMainWindow):
         tbMain.addAction(actnstopThread)
 
         # ----------------------------------------------------------------------
-
         # Set up the navigation and results widgets
         tabNavi, tabRest = QWidget(), QWidget()
         layNavi, layRest = QHBoxLayout(), QHBoxLayout()
@@ -1411,7 +1409,6 @@ class MainViewWine_backup(QMainWindow):
         if compile_reduced:
             tbMain.hide()
             tabNavi.hide()
-
     # -------------------- Processing keyboard interactions --------------------
 
     def keyPressEvent(self, ev):
@@ -3163,7 +3160,7 @@ class MainViewWine(MainView_Generic):
             # self.setCurrent(resetView=True)
 
             self.fitAllFiles()
-
+            
 if __name__ == '__main__':
     app = 0
     app = QApplication(sys.argv)
