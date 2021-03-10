@@ -255,10 +255,10 @@ class SettingsDialog(QDialog):
         elif config.OPTIM_startFrom == 'previous':
             self.rbtnStartFromPrevious.setChecked(True)
         else: self.rbtnStartFromCurrent.setChecked(True)    # if config.OPTIM_startFrom == 'current'
-        self.chkboxAutoPhasing = QCheckBox("Auto phase each spectrum")
-        self.chkboxAutoPhasing.setChecked(settings["autoPhase"])
-        self.chkboxAutoPicking = QCheckBox("Pick peaks automatically")
-        self.chkboxAutoPicking.setChecked(settings["autoPick"])
+        # self.chkboxAutoPhasing = QCheckBox("Auto phase each spectrum")
+        # self.chkboxAutoPhasing.setChecked(settings["autoPhase"])
+        # self.chkboxAutoPicking = QCheckBox("Pick peaks automatically")
+        # self.chkboxAutoPicking.setChecked(settings["autoPick"])
         groupLayout = QVBoxLayout()
         groupLayout.addWidget(self.rbtnStartFromCurrent)
         groupLayout.addWidget(self.rbtnStartFromPrevious)
@@ -351,8 +351,8 @@ class SettingsDialog(QDialog):
         elif self.rbtnStartFromDefault.isChecked():
             config.OPTIM_startFrom = 'default'
         else: config.OPTIM_startFrom = 'current'
-        settings.update({"autoPhase" : self.chkboxAutoPhasing.isChecked(),
-                         "autoPick" : self.chkboxAutoPicking.isChecked()})
+        # settings.update({"autoPhase" : self.chkboxAutoPhasing.isChecked(),
+        #                  "autoPick" : self.chkboxAutoPicking.isChecked()})
 
         # Update the QD settings
         config.QD_RerunQDchshThreshold = self.editRerunThreshold.value()
@@ -3045,477 +3045,6 @@ class ChemTreeView(QTreeView):
         # Emit the signal to recompute the model
         self.model().requestParameterChange.emit(stemKey, val+delta)
 
-class PeakPickingWidget(QWidget):
-
-    RANGE_MAX = 64
-    RANGE_MIN = -64
-    assigned = pyqtSignal()
-
-    class PeakTableModel(QtCore.QAbstractTableModel):
-
-        def __init__(self, colors = [[]], headers = [], parent = None):
-            QtCore.QAbstractTableModel.__init__(self, parent)
-            self.__colors = colors
-            self.__headers = headers
-
-        def rowCount(self, parent):
-            return len(self.__colors)
-
-        def columnCount(self, parent):
-            return len(self.__colors[0])
-
-        def flags(self, index):
-            return QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-
-        def data(self, index, role):
-
-            if role == QtCore.Qt.EditRole:
-                row = index.row()
-                clmn = index.column()
-                return self.__colors[row][column].name()
-
-            if role == QtCore.Qt.ToolTipRole:
-                row = index.row()
-                clmn = index.column()
-                return "Hex code: " + self.__colors[row][column].name()
-
-            if role == QtCore.Qt.DecorationRole:
-
-                row = index.row()
-                clmn = index.column()
-                value = self.__colors[row][column]
-
-                pixmap = QtGui.QPixmap(26, 26)
-                pixmap.fill(value)
-
-                icon = QtGui.QIcon(pixmap)
-
-                return icon
-
-            if role == QtCore.Qt.DisplayRole:
-
-                row = index.row()
-                clmn = index.column()
-                value = self.__colors[row][column]
-
-                return value.name()
-
-        def setData(self, index, value, role = QtCore.Qt.EditRole):
-            if role == QtCore.Qt.EditRole:
-
-                row = index.row()
-                clmn = index.column()
-
-                color = QtGui.QColor(value)
-
-                if color.isValid():
-                    self.__colors[row][column] = color
-                    self.dataChanged.emit(index, index)
-                    return True
-            return False
-
-        def headerData(self, section, orientation, role):
-
-            if role == QtCore.Qt.DisplayRole:
-
-                if orientation == QtCore.Qt.Horizontal:
-
-                    if section < len(self.__headers):
-                        return self.__headers[section]
-                    else:
-                        return "not implemented"
-                else:
-                    return "Color {}".format(section)    # QtCore.QString("Color %1").arg(section)
-
-        #=====================================================#
-        #INSERTING & REMOVING
-        #=====================================================#
-        def insertRows(self, position, rows, parent = QtCore.QModelIndex()):
-            self.beginInsertRows(parent, position, position + rows - 1)
-
-            for i in range(rows):
-
-                defaultValues = [QtGui.QColor("#000000") for i in range(self.columnCount(None))]
-                self.__colors.insert(position, defaultValues)
-
-            self.endInsertRows()
-
-            return True
-
-        def insertColumns(self, position, columns, parent = QtCore.QModelIndex()):
-            self.beginInsertColumns(parent, position, position + columns - 1)
-
-            rowCount = len(self.__colors)
-
-            for i in range(columns):
-                for j in range(rowCount):
-                    self.__colors[j].insert(position, QtGui.QColor("#000000"))
-
-            self.endInsertColumns()
-
-            return True
-
-    class PeakTreeModel(QtCore.QAbstractItemModel):
-        """A treeView representation class"""
-
-        def __init__(self, parent = None):
-            super().__init__()     # QtCore.QAbstractItemModel.__init__(self)
-            self._indxRoot = QtCore.QModelIndex()    # "Invalid" index to point to the root of the display
-            self._tree = stepClass.mdldPeaks         # A hierarchical dictionary of modelled peaks
-
-        def headerData(self, section, orientation, role):
-            pass
-
-        def columnCount(self, parent):
-            return 4 + len(steps)
-
-        def rowCount(self, index):
-            """Number of rows (children) for each item in the tree. INPUTS: QModelIndex. OUTPUT: int"""
-            if index.isValid():
-                return len(index.internalPointer())
-            else:
-                return len(self._tree)    # Number of rows in the display root
-
-        def parent(self, index):
-            """Should return QModelIndex of the parent of the node with the given QModelIndex. INPUTS: QModelIndex. OUTPUT: QModelIndex"""
-            if index.isValid():
-                item = index.internalPointer()
-                if isinstance(item, dict):
-                    if item in self._tree.values():
-                        return self._indxRoot
-                elif isinstance(item, list):
-                    for rep in self._tree.values():
-                        if item in rep.values():
-                            parent = rep
-                            row = [k for k in self._tree.keys()].index(parent)
-                            return self.createIndex(row, 0, parent)
-                else:   # If it's a peakSpec instance
-                    for rep in self._tree.values():
-                        for leaf in rep.values():
-                            if item in leaf.values():    # Iterate over groups of peaks
-                                parent = leaf
-                                row = [k for k in rep.keys()].index(parent)
-                                return self.createIndex(row, 0, parent)
-
-            #else: print("parent: index is invalid")"""
-            return self._indxRoot
-
-        def index(self, row, column, prnt=None):
-            """Should return a QModelIndex that corresponds to the given row, clmn and parent node. INPUTS: int, int, QModelIndex. OUTPUT: QModelIndex"""
-            if prnt == self._indxRoot:         # Parent is the root
-                key = [k for k in self._tree.keys()][row]
-                if key:
-                    return self.createIndex(row, column, self._tree[key])      # An inner dictionary; parent is the display root
-            elif prnt.isValid():    # Inner dictionaries
-                parent = prnt.internalPointer()
-                if isinstance(parent, dict):                    # Parent is an inner dictionary
-                    key = [k for k in parent.keys()][row]
-                    if key:
-                        return self.createIndex(row, column, parent[key])
-                else:    # parent is a list
-                    if len(parent) > row:
-                        return self.createIndex(row, column, parent[row])      # return index of a peakSpec
-
-            return QtCore.QModelIndex()     # Return invalid index by default
-
-            #if not self.hasIndex(row, column, prnt):
-            #    print("doesn't have this index")
-            #    return self._rootIndex
-
-        # --------------------------------- M A I N   D I S P L A Y   F U N C T I O N ----------------------------------
-        def data(self, index, role):
-            if not index.isValid():
-                return None
-
-            #print(self.TP)
-
-
-
-            node = index.internalPointer()
-            if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole, QtCore.Qt.CheckStateRole]:
-                if node.nodeType == 'param':
-                    if index.column() == 0:
-                        return node.alias if node.alias != '' else str(node.name[1])
-                    #elif index.column() == 1:
-                    #    return "{:.4f}".format(getattr(self.D[node.name[0]], node.name[1])[node.name[2]].min)
-                    #elif index.column() == 2:
-                    #    return "{:.4f}".format(getattr(self.D[node.name[0]], node.name[1])[node.name[2]].max)
-                    elif index.column() > 0:
-                        return index.column()
-                        #return QtCore.Qt.Checked
-                else:
-                    if index.column() == 0:
-                        return node.alias if node.alias != '' else str(node.name)
-                    else: return None
-
-                if index.column() > 2:
-                        return index.column()
-
-            return None
-
-        def flags(self, index):
-
-            if index.column() == 0:
-                return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-            elif index.column() in [1, 2]:
-                return QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-            else:
-                return QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-
-        def setData(self, index, value, role = QtCore.Qt.EditRole):
-            """Stores changed data."""
-            if index.isValid():
-
-                if role == QtCore.Qt.EditRole:
-
-                    node = index.internalPointer()
-                    if node.nodeType == 'param':
-                        # update parameter ranges
-                        absRange = list(getattr(self.T[node.name[0]], node.name[1])[node.name[2]])
-                        if index.column() in [1, 2]:
-                            absRange[index.column()-1] = float(value)
-                            getattr(self.T[node.name[0]], node.name[1])[node.name[2]] = parsSpec(*absRange)
-                    else:
-                        pass
-
-
-
-
-                    return True
-            return False
-
-        #=====================================================#
-        #INSERTING & REMOVING
-        #=====================================================#
-
-        """INPUTS: int, int, QModelIndex"""
-        def insertRows(self, position, rows, parent=QtCore.QModelIndex()):
-
-            parentNode = self.getNode(parent)
-
-            self.beginInsertRows(parent, position, position + rows - 1)
-
-            for row in range(rows):
-
-                childCount = parentNode.childCount()
-                childNode = Node("untitled" + str(childCount))
-                success = parentNode.insertChild(position, childNode)
-
-            self.endInsertRows()
-
-            return success
-
-        """INPUTS: int, int, QModelIndex"""
-        def removeRows(self, position, rows, parent=QtCore.QModelIndex()):
-
-            parentNode = self.getNode(parent)
-            self.beginRemoveRows(parent, position, position + rows - 1)
-
-            for row in range(rows):
-                success = parentNode.removeChild(position)
-
-            self.endRemoveRows()
-
-            return success
-
-        def insertColumns(self, pos=None, n_clm=1, parent = QtCore.QModelIndex()):
-
-            if pos is None: pos = self.columnCount(parent)
-            self.beginInsertColumns(parent, pos, pos+n_clm-1)
-
-            self.steps.append('123')
-
-            self.endInsertColumns()
-
-    class PeakTreeView(QTreeView):
-
-        def __init__(self, parent=None):
-            super().__init__(parent)    # Initialize a QTreeWidget
-
-            self.setAlternatingRowColors(True)
-            self.setHeaderHidden(False)
-            self.setColumnWidth(0, 150)
-
-    def __init__(self, canvas, parent=None):
-        super().__init__(parent)
-        self.canvas = canvas
-        self.ax = self.canvas.figure.get_axes()
-        self.pthres = None
-        self.drange = ()
-
-        self.bttnAutoPick = QPushButton('Pick automatically')
-        self.bttnAutoPick.clicked.connect(self.autoPick)
-        self.bttnManuPick = QPushButton('Pick manually')
-        self.bttnManuPick.clicked.connect(self.manuPick)
-        self.bttnAssignPeaks = QPushButton('Assign')
-        self.bttnAssignPeaks.clicked.connect(self.assignPeaks)
-        self.sliderThresh = QSlider()
-        self.sliderThresh.setRange(self.RANGE_MIN, self.RANGE_MAX)
-        self.sliderThresh.setValue(0)
-        self.sliderThresh.valueChanged.connect(self.onThreshChanged)
-        self.sliderThresh.sliderPressed.connect(self.startPlotting)
-
-        self.pickedTable = QTableWidget()
-        layout = QGridLayout()
-        layout.addWidget(QLabel("Peak picking"), 0, 0, 1, 3, Qt.AlignCenter|Qt.AlignTop)
-        #layout.addWidget(self.pickedTable, 1, 0, 1, 2)
-        layout.addWidget(self.bttnAutoPick, 3, 0, Qt.AlignHCenter)
-        layout.addWidget(self.bttnManuPick, 3, 1, Qt.AlignHCenter)
-        layout.addWidget(self.bttnAssignPeaks, 3, 2, Qt.AlignHCenter)
-        layout.addWidget(self.sliderThresh, 1, 3, 3, 1, Qt.AlignHCenter)
-
-        listView = QtGui.QListView()
-        listView.setAcceptDrops(True);
-        listView.setDragEnabled(True);
-        listView.setDragDropMode(QtGui.QAbstractItemView.InternalMove);
-
-        comboBox = QtGui.QComboBox()
-        self.mdldPeaksTree = self.PeakTreeView()
-
-        layout.addWidget(listView, 1, 0, 1, 2)
-        layout.addWidget(self.mdldPeaksTree, 1, 2)
-        #layout.addWidget(comboBox, 2, 0, 1, 3)
-
-        red   = QtGui.QColor(255,0,0)
-        green = QtGui.QColor(0,255,0)
-        blue  = QtGui.QColor(0,0,255)
-
-        rowCount = 4
-        columnCount = 6
-
-        headers = ["Pallete0", "Colors", "Brushes", "Omg", "Technical", "Artist"]
-        tableData0 = [ [ QtGui.QColor("#FFFF00") for i in range(columnCount)] for j in range(rowCount)]
-
-        model = self.PeakTableModel(tableData0, headers)
-        #model.insertColumns(0, 5)
-
-        #listView.setModel(model)
-        #comboBox.setModel(model)
-        #tableView.setModel(model)
-
-        self.setMaximumWidth(500)
-        self.setLayout(layout)
-
-        self.reset()    # Sets the values for the current file/step
-
-    def autoPick(self):
-        """Automatic peak picking"""
-        print("Automatic peak picking")
-        f = stepClass.f
-        yFph = stepClass.yFph
-        pos, ids, width, amps = ng.analysis.peakpick.pick(yFph.real, pthres = self.pthres, algorithm='downward', cluster='False', table=False)      # , algorithm='connected'
-        stepClass.pckdPeaks = [peakSpec(freq=f[p[0]], intn = a, fwhm=w[0] / np.pi) for p, w, a in zip(pos, width, amps) if w[0] > 0]
-        self.startPlotting()
-
-    def startPlotting(self):
-        # remember the axis settings
-        if settings["ax0Limits"] is not None:
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-            indxPlot = np.flatnonzero((stepClass.f<=max(settings["ax0Limits"]["xlim"]))*(stepClass.f>=min(settings["ax0Limits"]["xlim"])))
-            supsRatio = math.ceil(indxPlot.size / (2**13))   # Subsampling ratio; plot no more than 2^12 points
-            indxPlot = np.append(indxPlot[:-1:supsRatio], indxPlot[-1])  # Make sure that the first and the last indices of each group are included
-            self.f = stepClass.f[indxPlot]
-            self.yFph = stepClass.yFph[indxPlot]
-        else:
-            self.f = stepClass.f
-            self.yFph = stepClass.yFph
-
-        self.plot()
-
-    def plot(self):
-        """Plots the phased spectrum and picked peaks on top of it."""
-        self.ax[0].clear()     # discards the old graph
-        self.ax[0].plot(self.f, self.yFph.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
-
-        # Plot the threshold
-        self.ax[0].plot([self.f[0], self.f[-1]], [self.pthres]*2, '-', color='r')
-
-        # Plot the peaks
-        if len(stepClass.pckdPeaks) > 0:
-            markerline, stemlines, baseline = self.ax[0].stem([peak.shft for peak in stepClass.pckdPeaks], [peak.intn/peak.fwhm/np.pi for peak in stepClass.pckdPeaks], basefmt=" ")     # , label=node.name if j==0 else ''
-            plt.setp(stemlines, linewidth=1, color=(0.5, 0.5, 0.5), picker = 2)    # Picking tolerance in px
-            plt.setp(markerline, markerfacecolor = (0.5, 0.5, 0.5), linestyle='None', color=(0.5, 0.5, 0.5), markersize=2)      # , picker=self.onStemPick
-
-        self.ax[0].legend(loc=0)
-
-        # Set the updated limits
-        if settings["ax0Limits"] is not None:
-            self.ax[0].set_xlim(settings["ax0Limits"]["xlim"])
-            self.ax[0].set_ylim(settings["ax0Limits"]["ylim"])
-        else:
-            self.ax[0].relim()    # recompute the ax.dataLim
-            self.ax[0].margins(0, 0.05)    # x and y margins in percentages
-            self.ax[0].autoscale()    # update ax.viewLim using the new dataLim
-            #self.ax[0].autoscale_view(tight=True, scalex=True, scaley=True)
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-        self.ax[0].ticklabel_format(scilimits=(-3,3))
-        self.ax[0].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-
-        self.canvas.draw()    # refresh canvas
-        return 0
-
-    def plotPicked(self):
-        settings["ax1Limits"] = {"xlim":self.ax[1].get_xlim(), "ylim":self.ax[1].get_ylim()}
-        self.ax[1].clear()
-        self.allStems = {}     # Dictionary that stores references to all stem lines
-
-        markerline, stemlines, baseline = self.ax[1].stem([peak.shft for peak in stepClass.pckdPeaks], [peak.intn for peak in stepClass.pckdPeaks], basefmt=" ")     # , label=node.name if j==0 else ''
-        plt.setp(stemlines, linewidth=1, color=(0.5, 0.5, 0.5), picker = 2)    # Picking tolerance in px
-        plt.setp(markerline, markerfacecolor = (0.5, 0.5, 0.5), linestyle='None', color=(0.5, 0.5, 0.5), markersize=2)      # , picker=self.onStemPick
-
-        self.ax[1].set_xlim(settings["ax1Limits"]["xlim"])     # Set the saved limits
-        self.ax[1].set_ylim(settings["ax1Limits"]["ylim"])     # Set the saved limits
-        self.ax[1].set_navigate(False)
-
-        self.canvas.draw()
-
-    def manuPick(self):
-        """Manual peak picking"""
-        print("Manual peak picking")
-        pass
-
-    def assignPeaks(self):
-        """Assigns model peaks to one of the picked peaks."""
-        #self.autoPick()
-        steps[0].assign()
-        self.assigned.emit()    # Tell the parent form to update the tree widget
-
-    def onThreshChanged(self, val):
-        """Reads new value from the slider sets the threshold, picks new peaks, and updates the plot."""
-        pthres_rel = (val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN)   # Relative range (0, 1)
-        self.pthres = pthres_rel * (self.drange[1] - self.drange[0]) + self.drange[0]
-
-        # Automatic peak picking
-        f = stepClass.f
-        yFph = stepClass.yFph
-        pos, ids, width, amps = ng.analysis.peakpick.pick(yFph.real, pthres = self.pthres, algorithm='downward', cluster='False', table=False)      # , algorithm='connected'
-        stepClass.pckdPeaks = [peakSpec(freq=f[p[0]], intn = a, fwhm=w[0] / np.pi) for p, w, a in zip(pos, width, amps) if w[0] > 0]
-
-        self.plot()
-
-    def reset(self):
-        """Resets the sliders to display the phasing parameters for the currently open file/step."""
-        self.sliderThresh.blockSignals(True)
-
-        #self.mdldPeaksTree.setModel(self.PeakTreeModel())
-        print(stepClass.mdldPeaks)
-
-        # Range of displayed values
-        if stepClass.yF is not None:
-            self.drange = np.percentile(abs(stepClass.yF), (90, 99.99))
-            self.pthres = self.drange[0] + 0.05 * (self.drange[1] - self.drange[0])
-
-            # Set the slider
-            pthres_rel = (self.pthres - self.drange[0]) / (self.drange[1] - self.drange[0])
-            val = pthres_rel * (self.RANGE_MAX - self.RANGE_MIN) + self.RANGE_MIN
-            self.sliderThresh.setValue(val)
-        else:
-            self.drange = self.ax[0].get_ylim()    # Display range
-            self.pthres = None
-            self.sliderThresh.setValue((self.RANGE_MAX - self.RANGE_MIN)/2)
-
-        self.sliderThresh.blockSignals(False)
-
 class PhasingWidget(QWidget):
     """A widget that contains scrollers/buttons for phasing and that interacts with a matplotlib canvas to plot the results."""
 
@@ -3911,6 +3440,8 @@ class MainView_Generic(QMainWindow):
         super().__init__(parent)
         self.setAcceptDrops(True)      # Allow drag-and-drop
         self.setupGUI()
+        self.setup_actions()
+        self.assign_actions()
 
         # Start the fitting thread
         self.fittingThread = FittingThread()
@@ -3969,10 +3500,6 @@ class MainView_Generic(QMainWindow):
         #rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
         #rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
         #rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
-
-        # ------------------------- Set up the toolbars ------------------------
-        self.setup_actions()
-        self.assign_actions()
 
         # ---------------------- Set up the status bar -------------------------
         self.statusBar= QStatusBar()
@@ -4384,7 +3911,7 @@ class MainView_Generic(QMainWindow):
                         fileToFit.resetCrntPars(crntParsH = copy.deepcopy(fileToFit.series[sid[0]].data[sid[1]-1].crntParsH) )
                 elif config.OPTIM_startFrom == "default":
                     fileToFit.resetCrntPars()   # Reset to defaults
-                else: # i.e. settings["startgFromPars"] == "current"
+                else:
                     pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
                 self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
 
@@ -4737,6 +4264,46 @@ class MainView_Generic(QMainWindow):
     def reduceRange(self):
         """Selects and cuts a region of interest in the spectrum and adjusts the underlying data accordingly."""
         print('In reduce range')
+
+# ----------------------- Handling Drag-and-Drop events ------------------------
+    def dragEnterEvent(self, evt):
+        if evt.mimeData().hasUrls():
+            evt.acceptProposedAction()
+
+    def dragMoveEvent(self, evt):
+        if evt.mimeData().hasUrls():
+            evt.acceptProposedAction()
+
+    def dropEvent(self, evt):
+        # Load the files
+        filePathList, self.DATA_PATH = [], None
+        for url in evt.mimeData().urls():
+            filePath = url.toLocalFile()
+
+            # If its a workspace, load it and return
+            if (not os.path.isdir(filePath)) and filePath.endswith('.wsp'):
+                with open(filePath, 'rb') as fp:
+                    dataUnPack = dill.load(fp)
+
+                # Reset the settings and the Workspace
+                self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
+                return
+
+            # Assemble a list of spinsolve folders
+            filePathList = read_spinsolve_subfolders(filePath, filePathList)
+
+        # Set the DATA_PATH to the dropped directory or to the parent directory, if several folders were dropped
+        if len(filePathList) == 1:
+            self.DATA_PATH = os.path.dirname(filePathList[0])
+        else:
+            self.DATA_PATH = os.path.dirname(os.path.dirname(filePathList[0]))
+        self.loadManyFiles(filePathList)
+
+    def loadManyFiles(self, filePathList):
+        """Loads files from several folders."""
+        # Load the new files
+        for filePath in filePathList:
+            dat = self.addDatumFromFile(filePath)
 
 class MainView_nmrQuant(MainView_Generic):
     """Main GUI form class."""
@@ -6457,7 +6024,7 @@ class MainView(QMainWindow):
                         fileToFit.resetCrntPars(crntParsH = copy.deepcopy(fileToFit.series[sid[0]].data[sid[1]-1].crntParsH) )
                 elif config.OPTIM_startFrom == "default":
                     fileToFit.resetCrntPars()   # Reset to defaults
-                else: # i.e. settings["startgFromPars"] == "current"
+                else:
                     pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
                 self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
 
