@@ -1158,6 +1158,11 @@ class MainViewWine(MainView_Generic):
 
     def setupGUI(self):
         """Sets the layout for the main window."""
+        # Call the parent setup GUI function, Here setup_actions and assign_actions will be called
+        super().setupGUI()
+        self.setWindowTitle("Automated qNMR analysis of fermented beverages ver. {} ({})".format(version, str(date.today())) )
+        self.resize(1200, 700)
+
         # ----------------- set up the pie chart figure
         self.resFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
         self.resCanvas = FigureCanvas(self.resFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
@@ -1204,11 +1209,6 @@ class MainViewWine(MainView_Generic):
         layMain.addWidget(self.mainFigureWidget)
         widgetMain.setLayout(layMain)
         self.setCentralWidget(widgetMain)    # Set the result in the center of the window
-
-        # Call the parent setup GUI function, Here setup_actions and assign_actions will be called
-        super().setupGUI()
-        self.setWindowTitle("Automated qNMR analysis of fermented beverages ver. {} ({})".format(version, str(date.today())) )
-        self.resize(1200, 700)
 
         if compile_reduced:
             tbMain.hide()
@@ -1266,56 +1266,8 @@ class MainViewWine(MainView_Generic):
     # ------------------------- Other utility methods --------------------------
     def addDatumFromFile(self, path):
         """Imports a new spectrum and adds it to the workspace and the list widget of data."""
-        crnt_series = self.wsp.series[0]
-        dic = None
+        dat = super().addDatumFromFile(path)
 
-        if path[-3:] == '.1d':
-
-            yT, c0, f0, dt, dic = read_spinsolve(path)
-
-            nt = yT.shape[0]
-            t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-            name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
-
-        # Read an Mnova corrected FID file
-        elif path[-4:] in ['.txt']:
-            with open(path, 'rb') as fp:
-                # Read the file header line by line
-                for line in fp:
-                    pair = line.decode().strip().split('=')
-                    if 'DataPoints' in pair[0]:
-                        break           # The next line will be the first data point -- stop reading the header
-                    elif 'Size' in pair[0]:
-                        nt = int(pair[1])
-                    elif 'SpectrometerFrequency' in pair[0]:
-                        c0 = float(pair[1])
-                    elif 'Hz' in pair[0]:
-                        f0 = -float(pair[1])
-                    elif 'SpectralWidth' in pair[0]:
-                        dt = 1 / float(pair[1])
-
-                # Read the remainder of the file into a np array
-                data = np.fromfile(fp, sep='\t')
-
-            # Form the arrays
-            t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
-            yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
-
-            ## Subsample if the frequency range is too large
-            #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-            #t = t[::k]
-            #yT = yT[::k, :]
-
-            name = path[path.rfind('\\')+1:path.rfind('.')]
-
-        # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
-        if crnt_series.c0 is None:
-            crnt_series.c0 = c0
-            crnt_series.f0 = f0
-            crnt_series.t = t
-            crnt_series.fullReset()
-
-        dat = crnt_series.addDatum(yT, name = name, extra=dic)
         dat.extra.update({'mass_frac_MalAc':0.0, 'masses_au': {}, 'mass_total_au':0.0, 'density':1000.0, 'fitted':False, 'sigma_est':0.0})
         if 'startTime' in dic.keys():
             # TODO: Try dateutil to automatically parse dates in different formats
@@ -1331,7 +1283,7 @@ class MainViewWine(MainView_Generic):
 
     def loadManyFiles(self, filePathList):
         """Loads files from several folders."""
-        # TODO! Thus can be reorganized into several functions (e.g. for compile_reduced and compiled_full) or combined with dropEvent...
+        # TODO! This can be reorganized into several functions (e.g. for compile_reduced and compiled_full) or combined with dropEvent...
 
         # Reset the workspace if there are any files to be added in the reduced version
         if compile_reduced and len(filePathList) > 0:
@@ -1356,12 +1308,6 @@ class MainViewWine(MainView_Generic):
             # self.setCurrent(resetView=True)
 
             self.fitAllFiles()
-
-    def onImportData(self):
-        """Runs a dialog to select a new file."""
-        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "Spinsolve FID (*.1d)"):   # ;;JEOL FID (*.jdf)
-            dat = self.addDatumFromFile(newFilePath)
-        return dat
 
     def removeCurrent(self):
         """Removes currently selected spectrum."""

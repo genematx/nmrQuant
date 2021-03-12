@@ -1857,7 +1857,7 @@ class chemNode(treeNode):
         "Computes the node's response in the frequency domain assuming that all nodes have updated uPoles."
         # # Check if the signal needs to be completely reevaluated
         newHash = arrhash(f)
-        newLeafPoles = np.concatenate([np.array(leaf.uPoles) for leaf in self.leaves()]).ravel()      # New poles for all leaves
+        newLeafPoles = np.concatenate([np.array(leaf.uPoles).ravel() for leaf in self.leaves()])#.ravel()      # New poles for all leaves
 
         if allowShift and newHash == self._oldHash:
             try:
@@ -2452,6 +2452,9 @@ def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, lshapeOrder=2, gamma=0
 #@profile
 def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
     """Evaluate the entire tree of chemNodes. Returns the time-domain response for the specified (reported) nodes in the tree. tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
+    if pars is None:
+        pars = defaultTreePars(tree)
+
     root = tree.findRoot()
 
     # A set of excluded RootNames

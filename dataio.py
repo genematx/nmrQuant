@@ -228,13 +228,157 @@ def read_spinsolve(path):
 
 def read_spinsolve_subfolders(rootPath, pathList=None):
     """Recursively opens folders and returns paths to data.1d files, if found."""
+    # TODO! Make this function more robust
     if pathList is None: pathList = []
 
     if os.path.isdir(rootPath):
-        if ( 'PROTON' in os.path.basename(rootPath) or 'PRESAT' in os.path.basename(rootPath) ) and 'data.1d' in os.listdir(rootPath):
+        if (( 'PROTON' in os.path.basename(rootPath) or 'PRESAT' in os.path.basename(rootPath) ) and 'data.1d' in os.listdir(rootPath)) or \
+           (( 'Enhanced' not in os.path.basename(rootPath) ) and 'data.1d' in os.listdir(rootPath)):
             pathList.append(os.path.join(rootPath, 'data.1d'))
         else:
             for file in os.listdir(rootPath):
                 read_spinsolve_subfolders(os.path.join(rootPath, file), pathList)
 
     return pathList
+
+def read_any_file(path):
+    """Reads any file format and returns an FID dataset and a dictionary of parameters."""
+
+    dic = {}
+
+    if path[-6:] == '.pyfid':
+        with open(path, 'rb') as fp:
+            data = [float(x.strip()) if i != 5 else x.strip() for i, x in enumerate(fp.readlines())]
+
+        c0, f0, nt = data[0], data[1], int(data[4])     # Number of time points
+
+        t = np.array(data[6:nt+6]).reshape(-1,1)
+        yT = (np.array(data[nt+6:2*nt+6]) + 1j*np.array(data[-nt:])).reshape(-1,1)
+        name = path[path.rfind('\\')+1:path.rfind('.')]
+
+    # Read a JCAMP-DX file
+    elif path[-3:] == '.dx' or path[-4:] == '.jdx':
+
+        dic, data = ng.jcampdx.read(path)
+        #c0 = float(dic['$BF1'][0])
+        #fcar = float(dic['$REFERENCEPOINT'][0])
+        #swh = float(dic['$SW'][0]) * c0
+        #nt = float(dic['$TD'][0])
+
+        udic = ng.jcampdx.guess_udic(dic,data)[0]     # Dictionary of universal parameters
+        print(data)
+
+        c0 = float(udic['obs'])
+        fcar = float(udic['car'])
+        swh = float(udic['sw'])
+        nt = float(udic['size'])
+        f0 = swh/2-fcar      # Frequency shift in Hz
+        dt = 1 / swh;         # Sampling period (dwell time)
+
+        t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+        yT = (np.array(data[0]) - 1j*np.array(data[1])).reshape(-1,1)
+
+        # Subsample if the frequency range is too large
+        k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+        t = t[::k]
+        yT = yT[::k, :]
+
+        name = os.path.split(os.path.dirname(path))[1]
+
+    # Read a Bruker FID file
+    elif path[-3:] == 'fid':
+
+        dic, data = ng.fileio.bruker.read(path[:-3])
+
+        acqus = dic['acqus']
+        ntgrp = int(round(acqus['GRPDLY']))    # Number of time samples of the Bruker filter response;
+        swh = acqus['SW_h']     # Spectral width in Hz
+        f0 = acqus['O1']        # Offset in Hz
+        c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
+        dt = 1 / swh         # Sampling period (dwell time)
+        tau = acqus['DE'] * (1e-06)   # Ringdown time delay in sec
+
+        yT = data[ntgrp:].reshape(-1, 1)
+        # nt = min(16384, len(yT))
+        nt = len(yT)
+        t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+        # yT = yT[:nt].reshape(-1, 1)
+
+        ## Subsample if the frequency range is too large
+        #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+        #t = t[::k]
+        #yT = yT[::k, :]
+
+        name = os.path.split(os.path.dirname(path))[1]
+
+    # Read a JEOL FID file
+    elif path[-3:] == 'jdf':
+        print(path)
+        #
+        # dic, data = ng.fileio.bruker.read(path[:-3])
+        #
+        # acqus = dic['acqus']
+        # ntgrp = acqus['GRPDLY']    # Number of time samples of the Bruker filter response;
+        # swh = acqus['SW_h']     # Spectral width in Hz
+        # f0 = acqus['O1']        # Offset in Hz
+        # c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
+        # dt = 1 / swh         # Sampling period (dwell time)
+        # tau = acqus['DE'] * (1e-06)   # Ringdown time delay in sec
+        #
+        # yT = data[ntgrp:].reshape(-1, 1)
+        # # nt = min(16384, len(yT))
+        # nt = len(yT)
+        # t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+        # # yT = yT[:nt].reshape(-1, 1)
+        #
+        # ## Subsample if the frequency range is too large
+        # #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+        # #t = t[::k]
+        # #yT = yT[::k, :]
+        #
+        # name = os.path.split(os.path.dirname(path))[1]
+        pass
+
+    # Read a Spinsolve data.1d file
+    elif path[-3:] in ['.1d', '.2d']:
+
+        yT, c0, f0, dt, dic = read_spinsolve(path)
+
+        nt = yT.shape[0]
+        t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+        name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
+
+    # Read an Mnova corrected FID file
+    elif path[-4:] in ['.txt']:
+        with open(path, 'rb') as fp:
+            # Read the file header line by line
+            for line in fp:
+                pair = line.decode().strip().split('=')
+                if 'DataPoints' in pair[0]:
+                    break           # The next line will be the first data point -- stop reading the header
+                elif 'Size' in pair[0]:
+                    nt = int(pair[1])
+                elif 'SpectrometerFrequency' in pair[0]:
+                    c0 = float(pair[1])
+                elif 'Hz' in pair[0]:
+                    f0 = -float(pair[1])
+                elif 'SpectralWidth' in pair[0]:
+                    dt = 1 / float(pair[1])
+
+            # Read the remainder of the file into a np array
+            data = np.fromfile(fp, sep='\t')
+
+        # Form the arrays
+        t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
+        yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
+
+        ## Subsample if the frequency range is too large
+        #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+        #t = t[::k]
+        #yT = yT[::k, :]
+
+        name = path[path.rfind('\\')+1:path.rfind('.')]
+
+    dic.update({'name':name, 'c0':c0, 'f0':f0, 'dt':dt})
+    
+    return t, yT, dic
