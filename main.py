@@ -3480,6 +3480,11 @@ class MainView_Generic(QMainWindow):
 
         t, yT, dic = read_any_file(path)
         c0, f0, dt, name = dic['c0'], dic['f0'], dic['dt'], dic['name']
+        if 'startTime' in dic.keys():
+            # TODO: Try dateutil to automatically parse dates in different formats
+            timeParsed = time.strptime(dic['startTime'].split('.')[0], '%Y-%m-%dT%H:%M:%S')         # Convert the time format from e.g. "2021-02-14T13:21:33.653" to '%Y%m%d-%H%M%S'
+            timeString = time.strftime('%Y%m%d-%H%M%S', timeParsed)
+            dic.update({'acqu_time' : timeString})
 
         if len(self.wsp.series) == 0:
             self.wsp.addSeries()
@@ -3858,7 +3863,7 @@ class MainView_Generic(QMainWindow):
 
             self._undoStack.append([ [self._crnt], [{('.', 'theta', 0):theta, ('.', 'tau', 0):tau}] ])
             self._redoStack.clear()
-            self._crnt.setCrntVal(key=('.', 'theta', 0), val = (theta+d_theta + np.pi) % np.pi - np.pi )     # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
+            self._crnt.setCrntVal(key=('.', 'theta', 0), val = (theta+d_theta + np.pi/2) % np.pi - np.pi/2 )     # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
             self._crnt.setCrntVal(key=('.', 'tau', 0), val = tau + d_tau)
 
         self.startThread(pushUndo=False)

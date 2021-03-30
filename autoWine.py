@@ -671,20 +671,25 @@ def wine_results(data, massFracIS_grav=None):
     return result
 
 def get_wine_name(DDD):
-    """Assigns a specific Datum to a particular wine sample, based on its name and presence/absence of an internal standard."""
+    """
+        Assigns a specific Datum to a particular wine sample, based on its name and presence/absence of an internal standard.
+        INPUTS: DDD - a Datum containing analysis of a wine sample.
+        OUTPUT: wine_name - a string corresponding to the name of the sample.
+    """
     if DDD.extra['Sample'] is not None:
-        data_name = DDD.extra['Sample'].split('-')
+        data_name = DDD.extra['Sample']
     else:
-        data_name = DDD.name.split('-')
+        data_name = DDD.name
+    data_name = data_name.split('-')
 
     wine_name = data_name[0][:-2] if data_name[0][-2:] == '.0' else data_name[0]
     try:
-        if data_name[1][:2] == 'IS':
+        if 'IS' in data_name[1]:
             wine_name = '-'.join([wine_name, data_name[1]])
     except IndexError: pass
 
-    if len(data_name) > 2:
-        wine_name = '-'.join([wine_name, *data_name[2:]])
+    # if len(data_name) > 2:
+    #     wine_name = '-'.join([wine_name, *data_name[2:]])
 
     return wine_name
 
@@ -1268,15 +1273,12 @@ class MainViewWine(MainView_Generic):
         """Imports a new spectrum and adds it to the workspace and the list widget of data."""
         dat = super().addDatumFromFile(path)
 
+        crnt_series = self.wsp.series[0]
+
         dat.extra.update({'mass_frac_MalAc':0.0, 'masses_au': {}, 'mass_total_au':0.0, 'density':1000.0, 'fitted':False, 'sigma_est':0.0})
-        if 'startTime' in dic.keys():
-            # TODO: Try dateutil to automatically parse dates in different formats
-            timeParsed = time.strptime(dic['startTime'].split('.')[0], '%Y-%m-%dT%H:%M:%S')         # Convert the time format from e.g. "2021-02-14T13:21:33.653" to '%Y%m%d-%H%M%S'
-            timeString = time.strftime('%Y%m%d-%H%M%S', timeParsed)
-            dat.extra.update({'acqu_time' : timeString})
 
         # Add new entry to the data List
-        newItem = QListWidgetItem(self._icon('icon_gof_none.png'), name, parent=self.dataListWidget)
+        newItem = QListWidgetItem(self._icon('icon_gof_none.png'), dat.name, parent=self.dataListWidget)
         self.setCurrent(resetView=True if len(crnt_series.data)==1 else False)     # Set the last spectrum as current
 
         return dat

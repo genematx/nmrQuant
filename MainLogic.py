@@ -64,10 +64,19 @@ class freqSpec():
     def __init__(self, min=-np.inf, max=np.inf, bslnOrder=(None, None)):
         self.min = min
         self.max = max
-        self.bslnOrder = bslnOrder
+        self.bslnOrder = self._parse_bslnOrder(bslnOrder)
         self._indxFreq = None
         self._bF = None          # An array of baselines
         self._fhash = None       # Hash value for the previously computed f
+
+    @staticmethod
+    def _parse_bslnOrder(bslnOrder):
+        """Checks that the entered baseline order is a 2-tuple of integers."""
+        if isinstance(bslnOrder, int):
+            return (bslnOrder, bslnOrder)
+        elif len(bslnOrder) == 2:
+            return bslnOrder
+        else: raise RuntimeError
 
     def repr(self):
         return '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
@@ -104,7 +113,7 @@ class freqSpec():
             self.min = min(lims)
             self.max = max(lims)
         if bslnOrder is not None:
-            self.bslnOrder = bslnOrder
+            self.bslnOrder = self._parse_bslnOrder(bslnOrder)
 
         self._bF = None                # Remove all precomputed baselines
         self._indxFreq = None
@@ -541,7 +550,7 @@ class Workspace():
         # Set parameters of the sampling algorithm
         ndim = len(initVals)          # Number of dimensions (number of parameters to sample over)
         if nwalkers is None: nwalkers = 4*ndim             # Number of walkers
-        if nsteps is None: nsteps = min(int(1000/nwalkers), 330)      # Number of steps
+        if nsteps is None: nsteps = max(min(150, int(1000/nwalkers)), 350)      # Number of steps
         nsteps = max(1, nsteps)       # Make sure at least one step is taken
         bounds = np.array(bounds)
         delta = np.abs(bounds[:,1] - bounds[:,0])
@@ -2338,9 +2347,17 @@ class Datum():
         p0, p1 = nmrglue.process.proc_autophase.automatic_ps(yF.ravel(), 'acme', p0=-p0deg, p1=-p1deg, fit_Ph1=fit_Ph1)     # 'peak_minima'
         p0deg, p1deg = -p0, -p1
 
+        # # Check if the phase needs to be flipped
+        # yFph = nmrglue.proc_base.ps(yF.reshape(-1,1), p0=p0deg, p1=p1deg)    # Phased data
+        # print('Phasing')
+        # print(yFph.real)
+        # if np.median(yFph.real) - np.min(yFph.real) > np.max(yFph.real) - np.median(yFph.real):
+        #     p0deg = p0deg+180
+        #     print('Here')
+
         # Convert the found values
         theta, tau = deg2tau(dt, nf, p0deg, p1deg)
-        theta = (theta + np.pi) % np.pi - np.pi    # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
+        theta = (theta + np.pi/2) % np.pi - np.pi/2    # make sure the phase stays in the (-90.0, 90.0) interval
 
         self.setCrntVal(key = ('.', 'theta', 0), val = theta)
         self.setCrntVal(key = ('.', 'tau', 0), val = tau)
