@@ -656,16 +656,13 @@ def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=Non
     n, k = Z.shape     # Number of samples and (model signals)
     isReal = np.isreal(Z).all() and np.isreal(y).all() and (ampl0 is None or np.isreal(ampl0).all())    # Determine if the problem is real or complex-valued
     #gamma0 = max(min(gamma0, 1-1e-12), 1e-12)    # Make sure gamma is within allowed bounds
-
-    # print('In log_likelihood')
-
+    
     # Initialize the array of amplitudes
     if ampl0 is None:
         ampl0 = np.array([None]*k)
     ampl0 = ampl0.reshape(-1, 1)
     if na is None:
         na = k
-    # print(ampl0.ravel())
     if funcType == 'LS':
         mc, fun_Sc, Q, logdetG = ll_ls(Z, y, ampl0, m0, iS0, Gy, robust=robust)
         gamma = gamma0
@@ -697,9 +694,6 @@ def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=Non
     # # Constrain amplitudes to non-negative values and re-estimate them using fewer components
     theta_0 = np.asscalar( 1/2*np.angle(mc[:na].T.dot(mc[:na])) )   # Global phase estimated from the complex valued amplitudes
     m_ampl[:na] = (mc[:na]*np.exp(-1j*theta_0)).real                                   # #m_ampl[:na] = m_ampl[:na].real
-    # print(m_ampl[:na].ravel())
-    # print(m_ampl.ravel())
-    # print('\n')
     if m_ampl[:na].sum() < 0:      # Make sure that all amplitudes are positive
         m_ampl *= -1
         mc *= -1

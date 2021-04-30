@@ -3631,7 +3631,6 @@ class MainView_Generic(QMainWindow):
         else:
             settings.update({"HCmode":"1H"})
             stngView, stngConfig = None, None
-        settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
 
         # Reset the undo and redo stacks
         self._undoStack.clear()
