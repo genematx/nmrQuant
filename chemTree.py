@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 import numpy as np
 import scipy.sparse as sps
 import json
@@ -1725,7 +1725,7 @@ class chemNode(treeNode):
         self._reported = True
         self.chsh = chsh if chsh is not None else [parsSpec(min=-0.5, max=0.5)]
         self.alph = alph if alph is not None else [parsSpec(min=-1., max=5., dval=0.0)]
-        self.ampl = ampl if ampl is not None else [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=1.0)]
+        self.ampl = ampl if ampl is not None else [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=0.0)]
         self.phase = phase if phase is not None else [parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)]
         self.intn = intn         # Global intensity
         self.sT = []             # self-response
@@ -1857,7 +1857,7 @@ class chemNode(treeNode):
         "Computes the node's response in the frequency domain assuming that all nodes have updated uPoles."
         # # Check if the signal needs to be completely reevaluated
         newHash = arrhash(f)
-        newLeafPoles = np.concatenate([np.array(leaf.uPoles) for leaf in self.leaves()]).ravel()      # New poles for all leaves
+        newLeafPoles = np.concatenate([np.array(leaf.uPoles).ravel() for leaf in self.leaves()])#.ravel()      # New poles for all leaves
 
         if allowShift and newHash == self._oldHash:
             try:
@@ -2452,6 +2452,9 @@ def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, lshapeOrder=2, gamma=0
 #@profile
 def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
     """Evaluate the entire tree of chemNodes. Returns the time-domain response for the specified (reported) nodes in the tree. tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
+    if pars is None:
+        pars = defaultTreePars(tree)
+
     root = tree.findRoot()
 
     # A set of excluded RootNames
@@ -2588,7 +2591,7 @@ def loadTree(fname):
 
         # Compatibility check: Make sure that each node in the tree has an ampl and a phase attributes
         for node in T.items():
-            if not hasattr(node, 'ampl'): node.ampl = [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=1.0)]
+            if not hasattr(node, 'ampl'): node.ampl = [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=0.0)]
             if not hasattr(node, '_oldHash'): node._oldHash = None
             if not hasattr(node, '_oldLeafPoles'): node._oldLeafPoles = None
             if not hasattr(node, '_t_shift'): node._t_shift = None

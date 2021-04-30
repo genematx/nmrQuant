@@ -645,21 +645,24 @@ def ll_tls_eval(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=
     return Q, logdetGc, grad(dQda, dQdg, dlda, dldg, d2lda2, d2Qda2)
 
 def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=None, m0=None, iS0=None, a_sigma2_0=2.0, b_sigma2_0=10.0, funcType='LS', constr=False, robust=False, nonnegative=True, na=None):
-    """Computes the value of the Gaussian likelihood function. iG - inverse covariance matrix of the noise.
-       ampl0 - array of intial amplitudes, entries which are initialized to None will be estimated in closed form.
-       If nonnegative=True, first na amplitudes will be forced to have non-negative values."""
+    """
+       Computes the value of the Gaussian likelihood function. iG - inverse co-
+       variance matrix of the noise.
+       ampl0 - array of intial amplitudes, entries which are initialized to None
+               will be estimated in closed form.
+       If nonnegative=True, first na amplitudes will be forced to have non-negative values.
+       """
     # 0. Prepare the inputs
     n, k = Z.shape     # Number of samples and (model signals)
     isReal = np.isreal(Z).all() and np.isreal(y).all() and (ampl0 is None or np.isreal(ampl0).all())    # Determine if the problem is real or complex-valued
     #gamma0 = max(min(gamma0, 1-1e-12), 1e-12)    # Make sure gamma is within allowed bounds
-
+    
     # Initialize the array of amplitudes
     if ampl0 is None:
         ampl0 = np.array([None]*k)
     ampl0 = ampl0.reshape(-1, 1)
     if na is None:
         na = k
-
     if funcType == 'LS':
         mc, fun_Sc, Q, logdetG = ll_ls(Z, y, ampl0, m0, iS0, Gy, robust=robust)
         gamma = gamma0
