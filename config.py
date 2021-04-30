@@ -34,7 +34,7 @@ colrseq = [(0.1216,    0.4706,    0.7059),\
     (0.9843,    0.6039,    0.6000),\
     (0.9922,    0.7490,    0.4353),\
     (0.7922,    0.6980,    0.8392),\
-    (1.0000,    0.0000,    0.6000)]*2      # Sequence of colors to plot the results
+    (1.0000,    0.0000,    0.6000)]*3      # Sequence of colors to plot the results
 
 colr_freqBlocks = [255, 245, 175, 25]
 colr_freqBlocks_inactive = [255, 245, 175, 3]

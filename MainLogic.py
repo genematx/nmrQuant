@@ -217,7 +217,7 @@ class Workspace():
         except KeyError:
             if key[1] == 'ampl':
                 # Default prior for amplitudes
-                return parsSpec(distr='Gaussian', p1=0, p2=np.inf, dval=0.)
+                return parsSpec(distr='Gaussian', p1=0, p2=np.inf, dval=0.0)
             elif key[1] == 'phase':
                 # Default prior for amplitudes
                 return parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)
@@ -337,7 +337,8 @@ class Workspace():
 
         if amplitudes:
             # Include the amplitude parameters for all reported nodes
-            parsKeys.extend([(name, 'ampl', 0) for name in self.repRootNames])
+            desc_names = [desc.name for desc in node.descendants()]+[node.name]       # Names of all descendant nodes and self
+            parsKeys.extend([(name, 'ampl', 0) for name in self.repRootNames if name in desc_names])
 
         return parsKeys
 
@@ -414,47 +415,64 @@ class Workspace():
 
     def renameTreeNode(self, oldName, newName):
         # Rename all children, if it's a spin system node
-        if isinstance(self.T[oldName], chemNodeQD):
-            for chld in self.T[oldName].children():
-                suffix = chld.name[chld.name.rfind('-'):]
-                self.renameTreeNode(chld.name, newName + suffix)
+        # if isinstance(self.T[oldName], chemNodeQD):
+        #     for chld in self.T[oldName].children():
+        #         suffix = chld.name[chld.name.rfind('-'):]
+        #         self.renameTreeNode(chld.name, newName + suffix)
 
+        # List all top levels of al parameter keys that will neeed to be updated
+        parsKeysTopOld = [desc.name for desc in self.T[oldName].descendants(include_self=True)]
+
+        # Rename the node in the tree
         try:
             self.T[oldName].rename(newName)
         except:
             print("Could not rename the node {} to {}.".format(oldName, newName))
             return 0
 
+        parsKeysTopNew = [desc.name for desc in self.T[newName].descendants(include_self=True)]
+
         # Update the parameters of all series/datasets
         for oldParsH in [dat.crntParsH for ser in self.series for dat in ser.data]:
-            oldParsH[newName] = oldParsH[oldName]
-            oldParsH.pop(oldName)
+            for oldTopKey, newTopKey in zip(parsKeysTopOld, parsKeysTopNew):
+                oldParsH[newTopKey] = oldParsH[oldTopKey]
+                oldParsH.pop(oldTopKey)
 
         # Update parameter specification dictionaries
         for psdict in [self.parsSpecDict]+[ser.parsSpecDict for ser in self.series]+[dat.parsSpecDict for ser in self.series for dat in ser.data]:
             for key, val in psdict.items():
-                if key[0] == oldName:
-                    psdict[(newName, key[1], key[2])] = val
-                    psdict.pop(key)
+                for oldTopKey, newTopKey in zip(parsKeysTopOld, parsKeysTopNew):
+                    if key[0] == oldTopKey:
+                        psdict[(newTopKey, key[1], key[2])] = val
+                        psdict.pop(key)
 
         # Update parameter names in the specification of steps
         for ser in self.series:
             for step in ser.steps:
-                for key in step.parsKeys:
-                    if key[0] == oldName:
-                        step.parsKeys.remove(key)
-                        step.parsKeys.add((newName, key[1], key[2]))
-                for key in step.autoKeys:
-                    if key[0] == oldName:
-                        step.autoKeys.remove(key)
-                        step.autoKeys.add((newName, key[1], key[2]))
+                for oldTopKey, newTopKey in zip(parsKeysTopOld, parsKeysTopNew):
+                    for key in step.parsKeys:
+                        if key[0] == oldTopKey:
+                            step.parsKeys.remove(key)
+                            step.parsKeys.add((newTopKey, key[1], key[2]))
+                    for key in step.autoKeys:
+                        if key[0] == oldTopKey:
+                            step.autoKeys.remove(key)
+                            step.autoKeys.add((newTopKey, key[1], key[2]))
 
         # Update the list of reported roots
-        try:
-            self.repRootNames[self.repRootNames.index(oldName)] = newName
-        except ValueError: pass
+        for oldTopKey, newTopKey in zip(parsKeysTopOld, parsKeysTopNew):
+            try:
+                self.repRootNames[self.repRootNames.index(oldTopKey)] = newTopKey
+            except ValueError: pass
 
-        # TODO: Update the list of Ignored roots
+        # Update the list of Ignored roots
+        for ser in self.series:
+            for dat in ser.data:
+                for oldTopKey, newTopKey in zip(parsKeysTopOld, parsKeysTopNew):
+                    try:
+                        dat.xclRootNames.remove(oldTopKey)
+                        dat.xclRootNames.add(newTopKey)
+                    except KeyError: pass
 
         return True
 
@@ -767,7 +785,7 @@ class Workspace():
             T.setTreeBook()
         # Compatibility check: Make sure that each node in the tree has an ampl and a phase attributes
         for node in T.items():
-            if not hasattr(node, 'ampl'): node.ampl = [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=1.0)]
+            if not hasattr(node, 'ampl'): node.ampl = [parsSpec(min=0., max=np.inf, distr='Gaussian', p1=0.0, p2=np.inf, dval=0.0)]
             if not hasattr(node, 'phase'): node.phase = [parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)]
             if not hasattr(node, '_oldHash'): node._oldHash = None
             if not hasattr(node, '_oldLeafPoles'): node._oldLeafPoles = None
@@ -2638,12 +2656,10 @@ class Datum():
 
     def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
-
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds)
         result = {}
         self.smplDistF.clear()             # Clear the characteristics of marginal distributions
         reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
-
         # If no parameters are set for sampling, just evaluate the marginal posterior
         if len(parsKeys) == 0:
             # # Define the spectrum shifting range for faster computations
@@ -2713,7 +2729,7 @@ class Datum():
         result[key] = np.array([blbWlkr['theta'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).ravel()
         self.smplDistF[key] = smplSpec_from_data(result[key])
 
-        return(result)
+        return result
 
     def sweep(self, key, lims=None, npts=50, reoptimize=False, frqBlkIds=None, freqMask=None, evaluatePriors=False):
         # Evaluates the posterior and computes the amplitudes while sweeping the parameter parKey in the range lims

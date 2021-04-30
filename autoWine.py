@@ -41,6 +41,7 @@ DATA_PATH = None
 version = '0.1.0'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 compile_reduced = False       # Compiles the reduced version of the program (with limited control options)
+IS_BEER = False
 
 cursord = {
     cursors.MOVE: Qt.SizeAllCursor,
@@ -64,22 +65,22 @@ steps = []
 from PyQt4.QtCore import Qt
 
 # Some definitions
-labels = ['Ethanol','Glucose','Fructose','Sucrose','Sorbitol',
-        'Glycerol', 'Methanol', '2,3-Butanediol',
-        'Acetic acid', 'Citric acid', 'Lactic acid', 'Malic acid', 'Succinic acid', 'Tartaric acid', 'Peak 1', 'Peak 2']    # Ordred keys/labels
+labels = ['Ethanol','Glucose','Fructose','Sucrose','Maltose','Maltotriose','Lactose','Sorbitol',
+          'Glycerol', 'Methanol', '2,3-Butanediol',
+          'Acetic acid', 'Citric acid', 'Lactic acid', 'Malic acid', 'Succinic acid', 'Tartaric acid', 'Peak 1', 'Peak 2']    # Ordred keys/labels
 labels_volatile = ['Ethanol', 'Methanol', '2,3-Butanediol', 'Acetic acid']
-labels_fromdry = ['Succinic acid', '2,3-Butanediol', 'Tartaric acid', 'Citric acid', 'Malic acid', 'Glucose', 'Fructose', 'Sucrose', 'Sorbitol', 'Lactic acid']       # Which chemicals to estimate from evaporated samples
-abbrev = {'Ethanol':'EthOH', 'Glucose':'Glu', 'Fructose':'Fru', 'Sucrose':'Suc', 'Sorbitol':'SrbOH',
+labels_fromdry = ['Succinic acid', '2,3-Butanediol', 'Tartaric acid', 'Citric acid', 'Malic acid', 'Glucose', 'Fructose', 'Sucrose', 'Maltose','Maltotriose','Lactose','Sorbitol', 'Lactic acid']       # Which chemicals to estimate from evaporated samples
+abbrev = {'Ethanol':'EthOH', 'Glucose':'Glu', 'Fructose':'Fru', 'Sucrose':'Suc', 'Maltose':'Mlt','Maltotriose':'Mtr','Lactose':'Lac','Sorbitol':'SrbOH',
         'Glycerol':'GlyOH', 'Methanol':'MetOH', '2,3-Butanediol':'BudOH',
         'Lactic acid':'LacAc', 'Acetic acid':'AceAc', 'Malic acid':'MalAc', 'Citric acid':'CitAc', 'Succinic acid':'SccAc', 'Tartaric acid':'TrtAc', 'Peak 1':'noAsgn_1', 'Peak 2':'noAsgn_2'}     # Concentrations in g/kg
-prefcol = {'Ethanol':None, 'Glucose':None, 'Fructose':None, 'Sucrose':None, 'Sorbitol':None,
-           'Glycerol':None, 'Methanol':None, '2,3-Butanediol':'BudOH',
-           'Lactic acid':None, 'Acetic acid':'AceAc', 'Malic acid':'MalAc', 'Citric acid':'CitAc', 'Succinic acid':'SccAc', 'Tartaric acid':None, 'Peak 1':None, 'Peak 2':None}     # Preferred colors for each species
-molWeight = {'Ethanol':46.07, 'Glucose':180.16, 'Fructose':180.16, 'Sucrose':342.2965, 'Sorbitol':182.17,
+prefcol = {'Ethanol':None, 'Glucose':np.array((56, 108, 176))/255, 'Fructose':np.array((255, 127, 14))/255, 'Sucrose':np.array((51, 160, 44))/255, 'Maltose':None,'Maltotriose':None,'Lactose':None,'Sorbitol':np.array((152, 78, 163))/255,
+           'Glycerol':None, 'Methanol':np.array((227, 26, 28))/255, '2,3-Butanediol':np.array((188, 189, 34))/255,'Maltodextrins':np.array((214, 39, 40))/255,
+           'Lactic acid':None, 'Acetic acid':None, 'Malic acid':None, 'Citric acid':None, 'Succinic acid':None, 'Tartaric acid':None, 'Peak 1':None, 'Peak 2':None}     # Preferred colors for each species
+molWeight = {'Ethanol':46.07, 'Glucose':180.16, 'Fructose':180.16, 'Sucrose':342.2965, 'Maltose':342.3,'Maltotriose':504.437,'Lactose':342.3,'Sorbitol':182.17,
            'Glycerol':92.09382, 'Methanol':32.04, '2,3-Butanediol':90.121,
            'Lactic acid':90.08, 'Acetic acid':60.052, 'Malic acid':134.0874, 'Maleic acid':116.07, 'Citric acid':192.124,
            'Water':18.01, 'Succinic acid':118.09, 'Alanine':89.09, 'Proline':115.13, 'TMSP':146.26, 'Tartaric acid':150.087, 'Peak 1':100.0, 'Peak 2':100.0}     # Molar weights for each species
-nH_labile = {'Ethanol':1, 'Glucose':5, 'Fructose':5, 'Sucrose':8, 'Sorbitol':6,
+nH_labile = {'Ethanol':1, 'Glucose':5, 'Fructose':5, 'Sucrose':8, 'Maltose':8,'Maltotriose':11,'Lactose':8,'Sorbitol':6,
              'Glycerol':3, 'Methanol':1, '2,3-Butanediol':2,
              'Lactic acid':2, 'Acetic acid':1, 'Malic acid':3, 'Maleic acid':2, 'Citric acid':4,
              'Water':2, 'Succinic acid':2, 'Alanine':2, 'Proline':2, 'TMSP':0, 'Tartaric acid':4, 'Peak 1':1, 'Peak 2':1}     # Number of labile protons (OH, NH2, NH3)
@@ -138,15 +139,15 @@ def make_parser():
 def cww2pvv(wconc):
     """Converts a dictionary of concentrations expressed in g/kg to %v/v of ethanol, actual alcoholic strength, and total alcoholic strength."""
     act_alc_vv = 1.2241*(wconc['Ethanol']+wconc['Glycerol']+wconc['Methanol']+wconc['2,3-Butanediol'])*100+0.1182
-    tot_alc_vv = act_alc_vv + 0.06*(wconc['Fructose']+wconc['Glucose']+wconc['Sucrose'])*est_density(wconc)
+    tot_alc_vv = act_alc_vv + 0.06*(wconc['Fructose']+wconc['Glucose']+wconc['Maltose']+wconc['Maltotriose']+wconc['Lactose']+wconc['Sucrose'])*est_density(wconc)
 
     return act_alc_vv, tot_alc_vv
 
 def est_density(wconc):
     """Estimates density (expressed in g/L) of an aqueous solution having wconc weight concentrations of solutes."""
     # Mass fractions of each component
-    x_Eth, x_Gly, x_Glu, x_Fru, x_Suc = wconc['Ethanol'], wconc['Glycerol'], wconc['Glucose'], wconc['Fructose'], wconc['Sucrose']
-    x_H2O = 1 - (x_Eth + x_Gly + x_Glu + x_Fru + x_Suc)
+    x_Eth, x_Gly, x_Glu, x_Fru, x_Suc, x_Mlt, x_Mtr, x_Lac = wconc['Ethanol'], wconc['Glycerol'], wconc['Glucose'], wconc['Fructose'], wconc['Sucrose'], wconc['Maltose'], wconc['Maltotriose'], wconc['Lactose']
+    x_H2O = 1 - (x_Eth + x_Gly + x_Glu + x_Fru + x_Suc + (x_Mlt + x_Mtr + x_Lac) )
 
     if x_H2O == 1:
         return 1000.0
@@ -158,8 +159,11 @@ def est_density(wconc):
         d_Fru = 141.5*((x_Fru/x_H2O)**2) + 388.7*(x_Fru/x_H2O) + 998.2
         d_Suc = 152.7*((x_Suc/x_H2O)**2) + 383.4*(x_Suc/x_H2O) + 998.2
 
+        # OTHER SUGARS ONLY APPROXIMATELY!!!
+        d_Other = 160*(((x_Mlt+x_Mtr+x_Lac)/x_H2O)**2) + 380*((x_Mlt+x_Mtr+x_Lac)/x_H2O) + 998
+
         # Find the resulting total density by weighting according to the mass fractions
-        d_Tot = (d_Eth*x_Eth + d_Gly*x_Gly + d_Glu*x_Glu + d_Fru*x_Fru + d_Suc*x_Suc) / (1-x_H2O)
+        d_Tot = (d_Eth*x_Eth + d_Gly*x_Gly + d_Glu*x_Glu + d_Fru*x_Fru + d_Suc*x_Suc + d_Other*(x_Mlt+x_Mtr+x_Lac) ) / (1-x_H2O)
 
         return d_Tot
 
@@ -172,6 +176,15 @@ def start_fit(DDD):
     # Reset the definitions of the extra parameters
     DDD.extra.update({'mass_frac_MalAc':0.0, 'masses_au': {}, 'mass_total_au':0.0, 'density':1000.0, 'fitted':False, 'sigma_est':0.0})
 
+    # Exclude certain species from the fit
+    if DDD.parent.parent.extra['autoBeer']:
+        DDD.setXclRootName('Tartaric acid', flag=True)
+        DDD.setXclRootName('Sorbitol', flag=True)
+    else:
+        DDD.setXclRootName('Maltose', flag=True)
+        DDD.setXclRootName('Maltotriose', flag=True)
+        DDD.setXclRootName('Lactose', flag=True)
+
     # Measure the noise level in the spectrum
     DDD.extra['sigma_est'] = np.sqrt( DDD.measure_noise(lims=(-10, -2)) )
 
@@ -179,7 +192,7 @@ def fit_global_chsh(DDD):
     """Aligns the spectrum by adjusting its gloabl chemical shift."""
     # Turn on autofitting for some components
     autoKeys = [('.', 'sigma2', 0)]
-    for name in ['Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol']:
+    for name in ['Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol', 'Maltose', 'Maltotriose', 'Lactose']:
         autoKeys.append((name, 'ampl', 0))
     if 'DRY' not in DDD.name:
         autoKeys.append( ('Ethanol', 'ampl', 0) )
@@ -234,10 +247,17 @@ def fit_ethanol_CH3(DDD):
 def fit_sugars(DDD):
     # Get rough estimate of intensities of all major components in the sugars region
     DDD.evaluate(autoKeys=[('.', 'sigma2', 0), ('Glucose', 'ampl', 0), ('Sucrose', 'ampl', 0), ('Fructose', 'ampl', 0),
-                           ('Sorbitol', 'ampl', 0), ('Glycerol', 'ampl', 0)], frqBlkIds=[3])
-    mfrac = DDD.report_moleFrac(names = ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol'])
-    mfrac['Sugars'] = mfrac['Fructose']+mfrac['Glucose']+mfrac['Sucrose']+mfrac['Sorbitol']
+                           ('Sorbitol', 'ampl', 0), ('Glycerol', 'ampl', 0), ('Maltose', 'ampl', 0), ('Maltotriose', 'ampl', 0), ('Lactose', 'ampl', 0)], frqBlkIds=[3])
+    mfrac = DDD.report_moleFrac(names = ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol', 'Maltose', 'Maltotriose', 'Lactose'])
+    mfrac['Sugars'] = mfrac['Fructose']+mfrac['Glucose']+mfrac['Sucrose']+mfrac['Sorbitol']+mfrac['Maltose']+mfrac['Maltotriose']+mfrac['Lactose']
     mfrac_sorted = sorted(['Sugars', 'Ethanol', 'Glycerol'], key=lambda x : mfrac[x], reverse=True)
+
+    # Try fitting all sugars first
+    autoKeys = [ (name, 'ampl', 0) for name in ['Fructose', 'Glucose', 'Sucrose', 'Maltose', 'Maltotriose', 'Lactose'] \
+                 if DDD.getCrntVal(key=(name, 'ampl', 0)) > DDD.extra['sigma_est'] ]
+    for _ in range(2):
+        DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3,5,9,14])
+        DDD.optimize(parsKeys=[('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[3,5,9,14])
 
     # Find the global position/width for sugars
     if DDD.getCrntVal(key=('Glucose', 'ampl', 0)) + DDD.getCrntVal(key=('Sucrose', 'ampl', 0)) > DDD.extra['sigma_est']:
@@ -257,7 +277,7 @@ def fit_sugars(DDD):
     else:
         # Use them all
         # TODO! Possibly needs refinement
-        autoKeys = [('.', 'sigma2', 0), ('Fructose', 'ampl', 0), ('Sucrose', 'ampl', 0), ('Glucose', 'ampl', 0), ('Sorbitol', 'ampl', 0), ('Glycerol', 'ampl', 0)]
+        autoKeys = [('.', 'sigma2', 0), ('Fructose', 'ampl', 0), ('Sucrose', 'ampl', 0), ('Glucose', 'ampl', 0), ('Sorbitol', 'ampl', 0), ('Glycerol', 'ampl', 0), ('Maltose', 'ampl', 0), ('Maltotriose', 'ampl', 0), ('Lactose', 'ampl', 0)]
         DDD.optimize(parsKeys=[('Sugars', 'chsh', 0), ('Sugars', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[3])
         for _ in range(2):
             DDD.optimize(parsKeys=[('Sugars', 'chsh', 0)], autoKeys=autoKeys, frqBlkIds=[3])
@@ -302,12 +322,12 @@ def fit_sugars(DDD):
 
     # --------------------------------------------------------------------------
     for _ in range(2):
-        mfrac = DDD.report_moleFrac(names = ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol'])
-        mfrac['Sugars'] = mfrac['Fructose']+mfrac['Glucose']+mfrac['Sucrose']+mfrac['Sorbitol']
+        mfrac = DDD.report_moleFrac(names = ['Ethanol', 'Glycerol', 'Fructose', 'Glucose', 'Sucrose', 'Sorbitol', 'Maltose', 'Maltotriose','Lactose'])
+        mfrac['Sugars'] = mfrac['Fructose']+mfrac['Glucose']+mfrac['Sucrose']+mfrac['Sorbitol']+mfrac['Maltose']+mfrac['Maltotriose']+mfrac['Lactose']
         mfrac_sorted = sorted(['Sugars', 'Ethanol', 'Glycerol'], key=lambda x : mfrac[x], reverse=True)
 
         autoKeys = [('.', 'sigma2', 0)]
-        for name in ['Glucose', 'Fructose', 'Sucrose', 'Sorbitol', 'Glycerol']:
+        for name in ['Glucose', 'Fructose', 'Sucrose', 'Sorbitol', 'Glycerol', 'Maltose', 'Maltotriose','Lactose']:
             if mfrac[name] > 0.01: autoKeys.append( (name, 'ampl', 0) )
         for _ in range(2):
             for name in mfrac_sorted:
@@ -386,8 +406,13 @@ def fit_acids(DDD):
             DDD.optimize(parsKeys=[('Malic acid', 'chshQD', 1), ('Malic acid', 'chshQD', 2)], autoKeys=autoKeys, frqBlkIds=[6])
             DDD.optimize(parsKeys=[('Citric acid', 'chshQD', 0), ('Citric acid', 'chshQD', 1)], autoKeys=autoKeys, frqBlkIds=[6])
 
-        if DDD.getCrntVal(key=('Citric acid', 'ampl', 0)) > DDD.extra['sigma_est'] or DDD.getCrntVal(key=('Malic acid', 'ampl', 0)) > DDD.extra['sigma_est']:
-            DDD.optimize(parsKeys=[('Acids', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
+        if DDD.getCrntVal(key=('Citric acid', 'ampl', 0)) > DDD.extra['sigma_est']:
+            DDD.optimize(parsKeys=[('Citric acid', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
+        if DDD.getCrntVal(key=('Malic acid', 'ampl', 0)) > DDD.extra['sigma_est']:
+            DDD.optimize(parsKeys=[('Malic acid', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
+
+        if (DDD.getCrntVal(key=('Citric acid', 'ampl', 0)) > DDD.extra['sigma_est']) and (DDD.getCrntVal(key=('Malic acid', 'ampl', 0)) > DDD.extra['sigma_est']):
+            DDD.optimize(parsKeys=[('Citric acid', 'alph', 0), ('Malic acid', 'alph', 0)], autoKeys=autoKeys, frqBlkIds=[6])
 
     # Return to the original frequency blocks
     DDD.altFreqBlock(indx=6, lims=(2.5, 3.1))     # Return to the original frequency block
@@ -538,24 +563,37 @@ def finish_fit(DDD):
 
 def wine_results(data, massFracIS_grav=None):
     """
-       Expresses the results in %w/w. Takes into account all files in an array 'data';
-       all files must correspond to the same _original_ with the same amount of internal standard,
-       possibly including spectra without the einternal standard.
-       massFracIS_grav controls how to estimate the concentration of internal standard and can
-       be eitehr None (will be determined from water) or a number corresponding to gravimetric
-       mass fraction of maleic acid wrt the sample.
+       Expresses the results in %w/w. Takes into account all files in an array 'data'
+
+       INPUTS:
+            data -- array of fittedDatums;
+                    all files must correspond to the same _original_ with the same amount of internal standard,
+                    possibly including spectra without the einternal standard.
+            massFracIS_grav controls how to estimate the concentration of internal standard and can
+                    be eitehr None (will be determined from water) or a number corresponding to gravimetric
+                    mass fraction of maleic acid wrt the sample.
+
+        OUTPUT:
+            A dictionary of results with values for each component and additional parameter.
     """
 
     def is_IS(DDD):
         """Determines if the spectrum was acquired with maleic acid as an internal standard."""
         return ('-IS' in DDD.name) or (DDD.extra['masses_au']['Maleic acid'] > DDD.extra['sigma_est'])
 
-    result = {key : 0.0 for key in labels+['Maleic acid', 'Water', 'Alanine']}          # Initialize the results
-    result['data_names'], result['acqu_time'], result['acqu_time_abs'] = [], None, None
+    # Initialize the results
+    result = defaultdict(lambda : None)
+    result.update({key : 0.0 for key in labels+['Maleic acid', 'Water', 'Alanine']})
+    result['data_names'], result['acqu_time'], result['acqu_time_abs'] = [d.name for d in data], None, None
+
+    # Check that all files have been fitted
+    data = [d for d in data if d.extra['fitted']]
+    if len(data) == 0:
+        return result
+
     dat_FULL, dat_MAIN, dat_DRY = None, None, None         # Datums for the full (PROTON, non-PRESAT) spectrum, a spectrum from which the concentrations would be determined (usually, PRESAT), and a spectrum of dried sample (either presat or proton)
     dat_FULL_DRY_D2O, dat_PRES_DRY_D2O, dat_FULL_DRY, dat_PRES_DRY, dat_FULL, dat_PRES = None, None, None, None, None, None
     for DDD in data:
-        result['data_names'].append(DDD.name)
         # Determine the type of each dataset
         # TODO: Reorganize this
         if 'DRY' in DDD.name:
@@ -620,13 +658,17 @@ def wine_results(data, massFracIS_grav=None):
             # If it is a PRESAT experiment without internal standard, use the total mass of non-water components as a reference of use an external standard
             if dat_FULL is not None:
                 # TODO: Use constant scaling factor
-                DDD.extra['mass_total_au'] = sum([val for _, val in dat_FULL.extra['masses_au'].items()]) * sum([val for key, val in DDD.extra['masses_au'].items() if key != 'Water']) / sum([val for key, val in dat_FULL.extra['masses_au'].items() if key != 'Water'])
+                DDD.extra['mass_total_au'] = sum([val for _, val in dat_FULL.extra['masses_au'].items()]) * \
+                                            sum([val for key, val in DDD.extra['masses_au'].items() if key != 'Water']) / \
+                                            sum([val for key, val in dat_FULL.extra['masses_au'].items() if key != 'Water'])
 
     # Find the mass fractions of all chemicals
     wconc, brix = {key : 0.0 for key in labels+['Maleic acid', 'Water', 'Alanine']}, 0
     if dat_MAIN is not None and dat_MAIN.extra['mass_total_au'] != 0:
         wconc.update({key:val/dat_MAIN.extra['mass_total_au'] for key, val in dat_MAIN.extra['masses_au'].items()})
-        brix = 100*(dat_MAIN.extra['masses_au']['Glucose']+dat_MAIN.extra['masses_au']['Fructose']+dat_MAIN.extra['masses_au']['Sucrose'])/dat_MAIN.extra['mass_total_au']
+        brix = 100*(dat_MAIN.extra['masses_au']['Glucose']+dat_MAIN.extra['masses_au']['Fructose']+\
+                    dat_MAIN.extra['masses_au']['Maltose']+dat_MAIN.extra['masses_au']['Maltotriose']+dat_MAIN.extra['masses_au']['Lactose']+\
+                    dat_MAIN.extra['masses_au']['Sucrose'])/dat_MAIN.extra['mass_total_au']
         if dat_MAIN.extra['acqu_time'] is not None:
             timeString = dat_MAIN.extra['acqu_time']
         else:
@@ -634,9 +676,11 @@ def wine_results(data, massFracIS_grav=None):
         result['acqu_time'] = timeString
         result['acqu_time_abs'] = time.mktime(time.strptime(timeString, '%Y%m%d-%H%M%S'))         # Time in sec from the start of epoch
 
-    if dat_DRY is not None and dat_DRY.extra['mass_total_au'] != 0:
+    if dat_DRY is not None and dat_MAIN is not None and dat_DRY.extra['mass_total_au'] != 0:
         wconc.update({key:dat_DRY.extra['masses_au'][key]/dat_DRY.extra['mass_total_au'] for key in labels_fromdry})
-        brix = 100*(dat_DRY.extra['masses_au']['Glucose']+dat_DRY.extra['masses_au']['Fructose']+dat_DRY.extra['masses_au']['Sucrose'])/dat_DRY.extra['mass_total_au']
+        brix = 100*(dat_DRY.extra['masses_au']['Glucose']+dat_DRY.extra['masses_au']['Fructose']+\
+                    dat_MAIN.extra['masses_au']['Maltose']+dat_MAIN.extra['masses_au']['Maltotriose']+dat_MAIN.extra['masses_au']['Lactose']+\
+                    dat_DRY.extra['masses_au']['Sucrose'])/dat_DRY.extra['mass_total_au']
 
     # Estimate tartaric acid from DRY, PROTON, D2O, if available
     if dat_FULL_DRY_D2O is not None:
@@ -645,7 +689,7 @@ def wine_results(data, massFracIS_grav=None):
         wconc.update({'Tartaric acid': dat_FULL_DRY_D2O.extra['masses_au']['Tartaric acid']/dat_FULL_DRY_D2O.extra['mass_total_au']})
         result['Tartaric acid from PRESAT'] = False
     else:
-        wconc['Tartaric acid'] = 1.8*wconc['Tartaric acid']
+        wconc['Tartaric acid'] = 1.77*wconc['Tartaric acid']
         result['Tartaric acid from PRESAT'] = True
 
     # Convert the units for alcohol and estimate the density of the sample
@@ -654,7 +698,7 @@ def wine_results(data, massFracIS_grav=None):
     result.update({key:density*val for key, val in wconc.items()})
 
     # Compute the total metrics
-    tot_sugars = sum([result[key] for key in ['Glucose', 'Fructose', 'Sucrose']])
+    tot_sugars = sum([result[key] for key in ['Glucose', 'Fructose', 'Sucrose', 'Maltose', 'Maltotriose', 'Lactose']])
     tot_alc_gL = sum([result[key] for key in ['Ethanol', 'Glycerol', 'Methanol', '2,3-Butanediol']])
     tot_acidity = sum([result[key]*nH_labile[key]/molWeight[key] for key in ['Lactic acid', 'Acetic acid', 'Malic acid', 'Citric acid', 'Succinic acid', 'Tartaric acid'] ])*molWeight['Tartaric acid']/nH_labile['Tartaric acid']
 
@@ -757,8 +801,8 @@ def init_Steps_autoWine(SSS):
                          autoKeys = [('.', 'sigma2', 0), ('Succinic acid', 'ampl', 0)], frqBlkIds=[6], nrep=3, fitEach=True))     # Fit succinic acid
     SSS.steps.append(Step(script=fit_lactic))        # Fits lactic acid and alanine
     SSS.steps.append(Step(script=fit_proline))        # Fits acetic acid and proline
-    # SSS.steps.append(Step(parsKeys=[('Acids', 'alph', 0)],
-    #                       autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
+    SSS.steps.append(Step(parsKeys=[('Acids', 'alph', 0)],
+                          autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
     # # Fit the sugars
     SSS.steps.append(Step(script=fit_sugars))
 
@@ -808,7 +852,8 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
             except KeyError: data_combs[wine_name] = [DDD.selfID()]
 
         # Write the header. Rows and columns are zero indexed.
-        ncol_ampl = len(labels) + 1      # Number of columns for amplitudes (incl. Maleic acid)
+        labels_res = ['Maleic acid']+[lbl for lbl in labels if not self.isXclRootName(lbl)]
+        ncol_ampl = len(labels_res)      # Number of columns for amplitudes (incl. Maleic acid)
         for i, (text, col_width) in enumerate(zip(['','Sample ID', 'Aqusition Date-Time', 'Acquisition time (absolute)', 'Estimated Density, g/L', 'Actual Alcohol, %v/v', 'Potential Alcohol, %v/v', 'BRIX', 'Total acidity (as TrtAc), g/L', 'Total sugars, g/L', 'Grav. massFrac of Maleic Acid, w/w', 'Estm. massFrac of Maleic acid (estm.), w/w'], [3, 12, 5, 5, 10, 10, 10, 10, 10, 7, 10, 10])):
             worksheet.merge_range(0, i, 2, i, text, fmt_center)
             worksheet.set_column(i, i, col_width)
@@ -816,7 +861,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
 
         col = 12
         # Write the amplitude names
-        for lbl in ['Maleic acid']+labels:
+        for lbl in labels_res:
             worksheet.write( 2, col, lbl )
             col += 1
         worksheet.write( 2, col, 'Comment')
@@ -827,7 +872,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
         for i, dat_type in enumerate(['dat_FULL', 'dat_PRES', 'dat_FULL_DRY', 'dat_PRES_DRY', 'dat_FULL_DRY_D2O', 'dat_PRES_DRY_D2O']):
             worksheet.merge_range(0, 14+ncol_ampl*(i+1), 0, 14+ncol_ampl*(i+2)-1, 'Absolute Concentrations, g/L', fmt_center)
             worksheet.merge_range(1, 14+ncol_ampl*(i+1), 1, 14+ncol_ampl*(i+2)-1, dat_type, fmt_center)
-            for lbl in ['Maleic acid']+labels:
+            for lbl in labels_res:
                 worksheet.write( 2, col, lbl )
                 col += 1
 
@@ -851,7 +896,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
 
             # Write the results
             col = 12
-            for lbl in ['Maleic acid']+labels:
+            for lbl in labels_res:
                 fmt = fmt_num3f if results[lbl] != 0 else fmt_num0f
                 if lbl == 'Tartaric acid' and results['Tartaric acid from PRESAT']: fmt = fmt_num3f_ita
                 worksheet.write( row, col, results[lbl], fmt )
@@ -868,7 +913,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
                 # ----------------------------------------------------------------------
                 # Save results for each Datum
                 for DDD_type in ['dat_FULL', 'dat_PRES', 'dat_FULL_DRY', 'dat_PRES_DRY', 'dat_FULL_DRY_D2O', 'dat_PRES_DRY_D2O']:
-                    for lbl in ['Maleic acid']+labels:
+                    for lbl in labels_res:
                         if results[DDD_type] is not None:
                             worksheet.write( row, col, results[DDD_type][lbl], fmt_num3f if results[DDD_type][lbl] != 0 else fmt_num0f )
                         col += 1
@@ -971,6 +1016,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
     config.OPTIM_startFrom = "default"
     config.OPTIM_copyFromPRESAT = True
     wsp.extra['autoWine'] = True
+    wsp.extra['autoBeer'] = IS_BEER
     wsp.saveResults = MethodType(saveResults_wine, wsp)      # Update the saving function
 
     # Reset the series
@@ -983,6 +1029,10 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
     if resetTree:
         # T = loadTree( os.path.join(SCRIPT_PATH, 'autoWineTree.ctr') )
         T = loadTree( 'autoWineTree.ctr' )
+        # if wsp.extra['autoBeer']:
+        T['Sugars'].addChild(loadTree('workspaces\\Trees\\60_Mal.ctr'))
+        T['Sugars'].addChild(loadTree('workspaces\\Trees\\60_Mtr.ctr'))
+        T['Sugars'].addChild(loadTree('workspaces\\Trees\\60_Lac.ctr'))
         wsp.setTree(T)
 
         # # Set distributions' parameters (to be done in the tree)
@@ -1009,6 +1059,11 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
         wsp.setGlobalPrior(key=('Proline', 'chshQD', 5), min=3.32, max=3.39, dval=3.333349418)
         wsp.setGlobalPrior(key=('Proline', 'chshQD', 6), min=3.42, max=3.5, dval=3.48111188)
         wsp.setGlobalPrior(key=('Proline', 'alph', 0), min=-2.0, max=3.00, dval=1.5)
+
+        # Reset all default amplitudes to 0.0
+        for key in wsp.allParsKeys(amplitudes=True):
+            if key[1] == 'ampl':
+                wsp.setGlobalPrior(key=key, dval=0.0)
 
         print('Updated')
 
@@ -1640,13 +1695,15 @@ class MainViewWine(MainView_Generic):
         if isinstance(self._crnt, Datum):
             # Reevaluate the last step to make sure that the baseline is computed correctly
             # if self._crnt.zF is None: self._crnt.evaluate(autoKeys=[], returnSignals=True)
-            if self._crnt.extra['fitted'] and self._crnt.bF_corr is None:
-                self._crnt.steps[-1].run(self._crnt)
+            if self._crnt.extra['fitted']:
+                if self._crnt.bF_corr is None:
+                    self._crnt.steps[-1].run(self._crnt)
 
                 # Output the found results
                 self.plotResultsChart()
+            else: self.plotResultsChart(reset=True)
 
-            # If the file has not bee fitted, zF, bF, and xF will be set to None
+            # If the file has not been fitted, zF, bF, and xF will be set to None
             f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
 
             # Plotting function
@@ -1689,7 +1746,7 @@ class MainViewWine(MainView_Generic):
             if evt.inaxes in ax_bar:
                 # Find which bar contains the event
                 newMessage = ''
-                for indx, patch in enumerate(bars.patches):
+                for indx_bar, patch in enumerate(bars.patches):
                     if patch.contains(evt)[0]:              # Can use this instead of redefining bbox explicitly
                     # bbox = patch.get_bbox()
                     # print(bbox.x0, evt.x, bbox.x1)
@@ -1698,10 +1755,10 @@ class MainViewWine(MainView_Generic):
                     # (x, y) = inv_trans.transform([evt.x, evt.y])
                     # if (bbox.x0 < x) and (x < bbox.x1) and (bbox.y0 < y) and (y < bbox.y1):
                         # define new status bar message
-                        newMessage = '{:s}    {:.3g} g/L'.format(labels[indx], vals[indx])
+                        newMessage = '{:s}    {:.3g} g/L'.format(bar_labels[indx_bar], vals[indx_bar])
 
                         # Show the component (match the index from the labels array with the index in the zF matrix)
-                        self.mainFigureWidget.showComponents(flag=True, indx=self.repRootNames.index(labels[indx]) )
+                        self.mainFigureWidget.showComponents(flag=True, indx=zF_list.index(bar_labels[indx_bar]) )
 
             elif evt.inaxes == ax_pie:
                 newMessage = 'Potential alcoholic strength:  {:.1f} %v/v (actual:  {:.1f} %v/v)'.format(conc_gL['Total Alcohol, %v\v'], conc_gL['Actual Alcohol, %v\v'])
@@ -1752,9 +1809,11 @@ class MainViewWine(MainView_Generic):
         if not reset:
             # Get the concentrations in g/L; choose only related Datums
             wine_name = get_wine_name(self._crnt)
+            zF_list = [name for name in self._crnt.repRootNames if not self._crnt.isXclRootName(name)]    # List of all names in the order of signals in zF matrix
             conc_gL = wine_results(data = [DDD for DDD in self._crnt.parent.data if wine_name == get_wine_name(DDD)])       # Use all datums in the series
+            bar_labels = [lbl for lbl in labels if ('Peak' not in lbl) and not self._crnt.isXclRootName(lbl)]     # Which components to plot on the bar plot
 
-            vals = np.array([conc_gL[lbl] for lbl in labels if 'Peak' not in lbl])
+            vals = np.array([conc_gL[lbl] for lbl in bar_labels])
             vals = np.where(np.isnan(vals), 0.0, vals)
 
             # Define the subplots
@@ -1772,7 +1831,7 @@ class MainViewWine(MainView_Generic):
 
             # ---------------------------- Doughnut chart --------------------------------
             data_pie = [sum([conc_gL[key] for key in ['Ethanol', 'Glycerol', 'Methanol', '2,3-Butanediol']]),
-                    sum([conc_gL[key] for key in ['Glucose', 'Fructose', 'Sucrose', 'Sorbitol']]),
+                    sum([conc_gL[key] for key in ['Glucose', 'Fructose', 'Maltose', 'Maltotriose', 'Lactose', 'Sucrose', 'Sorbitol']]),
                     sum([conc_gL[key] for key in ['Lactic acid', 'Acetic acid', 'Malic acid', 'Citric acid', 'Succinic acid']])]
             act_alc_vv, tot_alc_vv = cww2pvv(conc_gL)        # Actual and total alcoholic strength
 
@@ -1800,7 +1859,6 @@ class MainViewWine(MainView_Generic):
             #         cellDict[(j,i)].set_height(.2)
 
             # ------------------------------- Bar chart ----------------------------------
-            bar_labels = [lbl for lbl in labels if 'Peak' not in lbl]
             for i in range(n_ax-1, -1, -1):
                 ax = ax_bar[i]
                 x = np.arange(len(bar_labels))  # the label locations
