@@ -17,6 +17,9 @@ https://geoffboeing.com/2014/09/using-geopandas-windows/
 6. Cloning an environment in Anaconda
 conda env export > environment.yml
 
+7. Extensions for Jupyter Notebook (e.g. code folding)
+pip install jupyter_contrib_nbextensions
+
 
 To set up the software to be run from the code:
 

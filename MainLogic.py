@@ -10,6 +10,7 @@ import tabulate
 from math import ceil
 import pywt
 import xlsxwriter
+from dataio import read_any_file
 
 # Functions for generating FIDs and optimization
 from scipy import optimize
@@ -178,6 +179,12 @@ class Workspace():
                 output += SSS.log(depth=1)
 
         return output
+
+    def __getattr__(self, attr):
+        """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+
+        if attr == 'wsp':
+            return self
 
     def selfID(self):
         return (None, None)
@@ -866,6 +873,13 @@ class Series():
 
     def __getattr__(self, attr):
         """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+
+        # return references to the parent series or entire workspace
+        if attr == 'ser':
+            return self
+        if attr == 'wsp':
+            return self.parent
+
         return getattr(self.parent, attr)
 
     def log(self, depth=0):
@@ -1507,7 +1521,16 @@ class Datum():
 
     # @profile
     def __getattr__(self, attr):
-        """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+        """Called with the dot notation for attributes not found in the class
+        (e.g. parameters shared between many spectra in the series, c0, f0, etc.).
+
+        """
+
+        # return references to the parent series or entire workspace
+        if attr == 'ser':
+            return self.parent
+        if attr == 'wsp':
+            return self.parent.parent
 
         # Return the adaptive frequency range
         if attr == 'f' and self._f is not None:
@@ -3190,6 +3213,65 @@ def gmm_pdf(x, m, S, w=None):
 def gmm_hdr(m, S, w=None):
     # Computes the highest density regions for the Gaussian mixture model given a density function func and the precision level alpha
     pass
+
+def addDatumFromFile(path, dest):
+    """Add new Datum entries specified by the path to the series object.
+
+    Args:
+        path: str
+            Location of the spectrum file.
+        dest: Series, Datum, or Workspace
+            A series to which the new spectra should be added. If a Datum is
+            passed, the spectrum will be added to its parent Series. If a Workspace
+            is passed, its first Series will be used. If the parameters of the
+            Series are not consistent with the imported spectrum (e.g. field
+            strength c0), will try to find first suitable Series in the Workspace,
+            or create a new one.
+
+    Returns:
+        dat: Datum
+            The newly added Datum. If several spectra were added (e.g. if the
+            file contained a series of spectra, all of them will be added but
+            only the last one will be returned)
+
+    """
+
+    # Read the data
+    t, yT, dic = read_any_file(path)
+    c0, f0, dt, name = dic['c0'], dic['f0'], dic['dt'], dic['name']
+
+    # Determine to which Series it should be added
+    wsp = dest.wsp      # The Workspace
+    ser_ID, _ = dest.selfID()
+
+    if len(wsp.series) == 0:
+        wsp.addSeries()
+
+    if ser_ID is None: ser_ID = -1
+    ser = wsp.series[ser_ID]
+
+    # TODO: Check if new c0/f0 are the same as the old ones when loading the rest of the data
+    # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
+    if ser.c0 is None:
+        ser.c0 = c0
+        ser.f0 = f0
+        ser.t = t
+        ser.fullReset()
+    elif np.abs(ser.c0 - c0) > 1e-3:
+        # Create a new series and put the data into it
+        print('The aquisition parameters do not match the current values. Creating a new Series...')
+        ser = wsp.addSeries()
+        ser.c0 = c0
+        ser.f0 = f0
+        ser.t = t
+        ser.fullReset()
+
+    # Add the data to the current series
+    for i in range(yT.shape[1]):
+        dat = ser.addDatum(yT[:,i].reshape(-1,1),
+                    name = name+str(i+1) if yT.shape[1] > 1 else name, extra=dic)
+
+    return dat
 
 def plotGaussianMixture(m, S, w=None, lims=None, npts=100):
     """Plots a pdf for a mixture of nc Gaussian nd-dimensional components (nd<=2)

@@ -227,7 +227,18 @@ def read_spinsolve(path):
     return yT, c0, f0, dt, dic
 
 def read_spinsolve_subfolders(rootPath, pathList=None):
-    """Recursively opens folders and returns paths to data.1d files, if found."""
+    """Recursively open folders and returns paths to data.1d files, if found.
+
+    Args:
+        rootPath: str
+            Location of the root directory to start the serach from.
+        pathList: list
+            List of individual file paths; will be appended.
+
+    Returns:
+        pathList
+
+    """
     # TODO! Make this function more robust
     if pathList is None: pathList = []
 
@@ -242,11 +253,11 @@ def read_spinsolve_subfolders(rootPath, pathList=None):
     return pathList
 
 def read_any_file(path):
-    """Reads any file format and returns an FID dataset and a dictionary of parameters."""
+    """Read any file format and return an FID dataset and a dictionary of parameters."""
 
     dic = {}
-
-    if path[-6:] == '.pyfid':
+    
+    if path.endswith('.pyfid'):
         with open(path, 'rb') as fp:
             data = [float(x.strip()) if i != 5 else x.strip() for i, x in enumerate(fp.readlines())]
 
@@ -257,7 +268,7 @@ def read_any_file(path):
         name = path[path.rfind('\\')+1:path.rfind('.')]
 
     # Read a JCAMP-DX file
-    elif path[-3:] == '.dx' or path[-4:] == '.jdx':
+    elif path.endswith('.dx') or path.endswith('.jdx'):
 
         dic, data = ng.jcampdx.read(path)
         #c0 = float(dic['$BF1'][0])
@@ -340,7 +351,7 @@ def read_any_file(path):
         pass
 
     # Read a Spinsolve data.1d file
-    elif path[-3:] in ['.1d', '.2d']:
+    elif path.endswith('.1d') or path.endswith('.2d'):
 
         yT, c0, f0, dt, dic = read_spinsolve(path)
 
@@ -349,7 +360,7 @@ def read_any_file(path):
         name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
 
     # Read an Mnova corrected FID file
-    elif path[-4:] in ['.txt']:
+    elif path.endswith('.txt'):
         with open(path, 'rb') as fp:
             # Read the file header line by line
             for line in fp:
@@ -380,5 +391,11 @@ def read_any_file(path):
         name = path[path.rfind('\\')+1:path.rfind('.')]
 
     dic.update({'name':name, 'c0':c0, 'f0':f0, 'dt':dt})
-    
+
+    if 'startTime' in dic.keys():
+        # TODO: Try dateutil to automatically parse dates in different formats
+        timeParsed = time.strptime(dic['startTime'].split('.')[0], '%Y-%m-%dT%H:%M:%S')         # Convert the time format from e.g. "2021-02-14T13:21:33.653" to '%Y%m%d-%H%M%S'
+        timeString = time.strftime('%Y%m%d-%H%M%S', timeParsed)
+        dic.update({'acqu_time' : timeString})
+
     return t, yT, dic
