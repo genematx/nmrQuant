@@ -117,6 +117,7 @@ notebooks/
 *.wsp
 *.ctr
 *.spec       # Files created by pyinstaller
+*.dill
 main.exe
 results.*
 test.py
@@ -125,3 +126,4 @@ test_pyqtgraph.py
 image.eps
 fid/
 release.zip
+BASF_VitA.json

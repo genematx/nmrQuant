@@ -151,44 +151,38 @@ def main(cmdline=None):
 
     in addition to running it from the shell.
     """
-    parser = make_parser()
-
-    opts, args = parser.parse_args(cmdline)
-
-    # if opts.error is not None:
-    #     return opts.error
-    # elif opts.bad_option:
-    #     # you can call parser.error, which will show an error message
-    #     # displays the help, and then exits the program
-    #     parser.error("you called a bad option")
-    # elif opts.make_template:
-    #     pass
-    #     return 0
+    # parser = make_parser()
     #
-    # # # args is now just a list, of everything that wasn't an
-    # # # "option". AKA everything that started with - or --
-    # for i in range(len(args)):
-    #     print("arg {:d}: {:s}".format(i, args[i]))
-    # # print("the number is:", opts.number)
+    # opts, args = parser.parse_args(cmdline)
 
     # -------------------- Execute the script ----------------------
     # dirName =     # 'C:\\Users\\yma80\\Data\\UWA_Sugars\\Raw Data\\1\\1Pulse-H (1 0% - 1)\\1\\'
 
-    wsp, data = script_sugars(opts.directory, True, opts.residual)
+    print('Arguments: ', sys.argv)
 
-    report(data)
+    with open('_testing.txt', 'w') as f:
+        f.write('Arguments: ' + repr(sys.argv))
 
-    # ------------------------- Save the workspace -----------------------------
-    if opts.save:
-        fileName = os.path.join(CALLED_PATH, "workspace_{:s}.wsp".format(time.strftime('%d%m%Y_%H%M%S')))
-        save_workspace(fileName, wsp)
+    # wsp, data = script_sugars(opts.directory, True, opts.residual)
+    #
+    # report(data)
+    #
+    # # ------------------------- Save the workspace -----------------------------
+    # if opts.save:
+    #     fileName = os.path.join(CALLED_PATH, "workspace_{:s}.wsp".format(time.strftime('%d%m%Y_%H%M%S')))
+    #     save_workspace(fileName, wsp)
 
-    print('\nDONE!')
+
 
     # Wait for an input
     # print( CALLED_PATH)
     # print( SCRIPT_PATH )
-#    input()
+    # x = input('Enter something: ')
+    # print('Your input is:', x)
+
+    time.sleep(5)
+
+    print('\nDONE!')
 
     return 0
 
@@ -308,7 +302,6 @@ def make_parser():
 
     usage = """%prog: args
 
-    Sometimes you might explain the purpose of this program as well.
     """
 
     parser = OptionParser(usage)
@@ -364,4 +357,4 @@ if __name__ == "__main__":
     # sys.exit, which you can test for in the shell.
     # program exit codes are usually 0 for ok, and non-zero for something
     # going wrong.
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main(sys.argv))

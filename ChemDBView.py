@@ -595,7 +595,7 @@ class ChemDBView(QtGui.QMainWindow, Ui_MainWindow):
 
     def saveDB(self, fname=None):
         if fname is None:
-            fname = 'chemDB'
+            fname = 'chemDB.json'
         writeChemDB(self.chemDB, fname)
 
 

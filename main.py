@@ -8,26 +8,25 @@ import config
 
 from PyQt4 import QtGui, QtCore, uic
 from PyQt4.QtGui import QAction, QActionGroup, QApplication, QBrush, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QIcon, QInputDialog, QItemSelectionModel, QItemDelegate, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QMainWindow, QPalette, QPen, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget, QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
-from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread
+from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
-from matplotlib import rc, rcParams, gridspec
+from matplotlib import rc, rcParams
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.backend_bases import cursors
 from matplotlib.figure import Figure
-from matplotlib.widgets import SpanSelector
 from operator import itemgetter
 from os import path
-import six
-import tabulate
 from random import shuffle
 import re
 import math
 import os
 import nmrglue as ng
 from datetime import date
-import pyqtgraph as pg
+
+SCRIPT_PATH = os.path.abspath(os.path.dirname(sys.argv[0]))
+CALLED_PATH = os.getcwd()                                          # Where it has been executed from
 
 # Set white background in plots
 pg.setConfigOption('background', 'w')
@@ -36,13 +35,12 @@ pg.setConfigOption('foreground', 'k')
 # Enable antialiasing for prettier plots
 pg.setConfigOptions(antialias=True)
 
-from matplotlib.backend_bases import NavigationToolbar2
 try:
     import matplotlib.backends.qt_editor.figureoptions as figureoptions
 except ImportError:
     figureoptions = None
 
-version = '1.1.0'
+version = '2.0.1'
 compile_standalone = False   # Change to False for debugging/development to output the results into the usual console
 
 cursord = {
@@ -155,6 +153,7 @@ class ChooseFromDBDialog(QDialog):
 
         # Add widgets for entering parameters
         self.cmboxLibs, self.cmboxChem = QComboBox(), QComboBox()
+        self.cmboxLibs.addItem('All species')
         self.cmboxLibs.addItems( sorted([k for k, _ in chemLib.items()]) )
         self.cmboxLibs.currentIndexChanged.connect(self.onLibrarySelected)
         self.cmboxChem.currentIndexChanged.connect(self.onChemicalSelected)
@@ -176,13 +175,18 @@ class ChooseFromDBDialog(QDialog):
 
         # Initialize the comboboxes
         # self.onLibrarySelected(0)
-        self.cmboxLibs.setCurrentIndex( self.cmboxLibs.findText('Built-in models') )    # Find the index of the built-in DB
+        self.cmboxLibs.setCurrentIndex( self.cmboxLibs.findText('All species') )    # Find the index of the built-in DB
+        self.onLibrarySelected(0)
 
     def onLibrarySelected(self, indx):
         """Sets the items fro the second combo box."""
         self.cmboxChem.clear()
         lib_key = self.cmboxLibs.itemText(indx)
-        keysDB = sorted([key for key, val in chemLib[lib_key].items()])
+        try:
+            keysDB = sorted([key for key, val in chemLib[lib_key].items()])
+        except KeyError:
+            # List all species
+            keysDB = sorted(list(set([key for lib_key in chemLib.keys() for key in chemLib[lib_key].keys()])))
         self.cmboxChem.addItems(keysDB)
 
     def onChemicalSelected(self, indx):
@@ -218,7 +222,10 @@ class ChooseFromDBDialog(QDialog):
         libsName = self.cmboxLibs.currentText()
         chemName = self.cmboxChem.currentText()
 
-        return displayName, copy.deepcopy(chemLib[libsName][chemName])
+        try:
+            return displayName, copy.deepcopy(chemLib[libsName][chemName])
+        except KeyError:
+            return displayName, copy.deepcopy([spec for lib_key in chemLib.keys() for key, spec in chemLib[lib_key].items() if key==chemName][0])
 
     # static method to create the dialog and return (name, QDpars, accepted)
     @staticmethod
@@ -248,10 +255,10 @@ class SettingsDialog(QDialog):
         elif config.OPTIM_startFrom == 'previous':
             self.rbtnStartFromPrevious.setChecked(True)
         else: self.rbtnStartFromCurrent.setChecked(True)    # if config.OPTIM_startFrom == 'current'
-        self.chkboxAutoPhasing = QCheckBox("Auto phase each spectrum")
-        self.chkboxAutoPhasing.setChecked(settings["autoPhase"])
-        self.chkboxAutoPicking = QCheckBox("Pick peaks automatically")
-        self.chkboxAutoPicking.setChecked(settings["autoPick"])
+        # self.chkboxAutoPhasing = QCheckBox("Auto phase each spectrum")
+        # self.chkboxAutoPhasing.setChecked(settings["autoPhase"])
+        # self.chkboxAutoPicking = QCheckBox("Pick peaks automatically")
+        # self.chkboxAutoPicking.setChecked(settings["autoPick"])
         groupLayout = QVBoxLayout()
         groupLayout.addWidget(self.rbtnStartFromCurrent)
         groupLayout.addWidget(self.rbtnStartFromPrevious)
@@ -271,7 +278,7 @@ class SettingsDialog(QDialog):
         groupLayout = QFormLayout()
         groupLayout.addRow("Nucleus", self.cmboxHCSelector)
         groupLayout.addRow("Merge resonances closer than, Hz", self.editAggregateThreshold)
-        groupLayout.addRow("Update if chsh changed by, ppm", self.editRerunThreshold)
+        groupLayout.addRow("Update if chsh changed by, Hz", self.editRerunThreshold)
         qdConfigGroup = QGroupBox("QD settings")
         qdConfigGroup.setLayout(groupLayout)
 
@@ -344,8 +351,8 @@ class SettingsDialog(QDialog):
         elif self.rbtnStartFromDefault.isChecked():
             config.OPTIM_startFrom = 'default'
         else: config.OPTIM_startFrom = 'current'
-        settings.update({"autoPhase" : self.chkboxAutoPhasing.isChecked(),
-                         "autoPick" : self.chkboxAutoPicking.isChecked()})
+        # settings.update({"autoPhase" : self.chkboxAutoPhasing.isChecked(),
+        #                  "autoPick" : self.chkboxAutoPicking.isChecked()})
 
         # Update the QD settings
         config.QD_RerunQDchshThreshold = self.editRerunThreshold.value()
@@ -452,6 +459,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
     sigMouseClicked = pyqtSignal(object)               # Returns the position where the click has occured in the main view (x value is in ppm)
     sigStemsClicked = pyqtSignal(object)
     sigStemsDragged = pyqtSignal(object, float)
+    sigPivotDragged = pyqtSignal(float)
 
     def __init__(self, parent=None, title=None):
         super().__init__(parent)
@@ -464,8 +472,9 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self._stems = {}
         self._freqBlocks = []         # List of linearRegionItems that indicate the frequency blocks
 
-        self._selector_flag = False
+        self._state = None
         self._stemDragging_flag = False
+        self._globalChsh_flag = False              # Set TRUE when the global chemical shift is being set by dragging
 
         # Create the main plot for the spectrum
         p0 = SpectrumPlotItem()
@@ -507,11 +516,16 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         updateViews()
         p0.vb.sigResized.connect(updateViews)
 
-
         # self.layout().setSpacing(0.)
         self.setContentsMargins(0., 0., 0., 0.)
 
         self.ci.layout.setRowStretchFactor(0, 10)
+
+        # ----------- Phasing pivot -------------
+        self._phasingPivot = pg.InfiniteLine(pos=0.0, movable=True, pen=pg.mkPen(color=(0,0,255), width=3.0),
+                                             label='Phasing pivot', labelOpts={'angle':90, 'position':0.9, 'anchors':[(0.5, 0), (0.5, 1)] })
+        # self._phasingPivot.addMarker('<|>', position=0.5, size=10.0)
+        self._phasingPivot.sigPositionChangeFinished.connect(self.onPivotDragged)
 
         # -------------- Crosshair --------------
         self._crossLines = {'v0' : pg.InfiniteLine(angle=90, movable=False),
@@ -526,7 +540,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             val.hide()
 
         # --- MouseDrag Event in ViewBox of p0 ---
-        p0.vb.mouseDragEvent = self._onMouseDragEvent        ## get the viewbox from the plot item andset its mouseDragEvent
+        p0.vb.mouseDragEvent = self._onMouseDragEvent        ## get the viewbox from the plot item and set its mouseDragEvent
 
         # Connect mouse signals
         # self.getItem(0,0).scene().sigMouseHover.connect(self._onMouseHover)
@@ -553,7 +567,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self.lr_zoom.setZValue(-10)
         self.lr_zoom.sigRegionChanged.connect(self.updatePlot)
 
-        self.setMinimumSize(900, 480)
+        self.setMinimumSize(750, 450)
 
         self.reset()
 
@@ -584,7 +598,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         """Plots and returns a handle to a group of stem lines for transition peaks."""
         return plot.plot(x=np.repeat(chsh_stems, 2), y=np.dstack((np.zeros(intn_stems.shape[0]), intn_stems)).flatten(), connect='pairs', **kwargs)
 
-    def plot(self, f, yF, xF=None, zF=None, stems=None, freqBlocks=None, indx_colr=None):
+    def plot(self, f, yF, xF=None, zF=None, stems=None, freqBlocks=None, phasingPivot=True, indx_colr=None, show_yaxis=True):
         """Plots the data.
         freBlocks is a list of tuples (min, max, bool), where the last position indicates whether the range is active (fitted) or not."""
 
@@ -602,6 +616,13 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self.lr_zoom.setBounds([f.min(), f.max()])
         self.p0r.setLimits(xMin=min(f), xMax=max(f))
 
+        # Hide the vertical axes
+        if not show_yaxis:
+            p0.getAxis('left').setStyle(showValues=False)
+            p0.getAxis('left').showLabel(False)
+            p1.getAxis('left').setStyle(showValues=False)
+            p1.getAxis('left').showLabel(False)
+
         # Plot the experimental spectrum yF
         self._yF = p0.plot(f, yF.ravel().real, pen={'color': colrseq[0], 'width': 2})
         pz.plot(f, yF.ravel().real, pen={'color':'b', 'width':1})
@@ -616,7 +637,8 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             if indx_colr is None: indx_colr = list(range(zF.shape[1]))
             self._zF = [None]*zF.shape[1]
             for i in range(zF.shape[1]):
-                self._zF[i] = p0.plot(f, zF[:,i].ravel().real, pen={'color':colrseq[indx_colr[i]+2], 'width':1})
+                self._zF[i] = p0.plot(f, zF[:,i].ravel().real, pen={'color':colrseq[indx_colr[i]+2], 'width':1},
+                                      fillLevel=0.0, brush=tuple([*colrseq[indx_colr[i]+2], 100]) )       # brush=(50,50,200,100)
 
         # Plot the ranges
         if freqBlocks is not None:
@@ -630,7 +652,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             if indx_colr is None: indx_colr = list(range(len(stems)))
             for i, st in enumerate(stems):
                 # Loop over the reported nodes
-                scale = np.concatenate([np.array(val[2]) for _, val in st.items()]).max()    # To scale the inensities
+                scale = np.concatenate([np.array(val[2]) for _, val in st.items()]).max()    # To scale the intensities
                 for key, val in st.items():
                     chsh_origin = val[0]
                     chsh_stems=np.array(val[1])
@@ -646,7 +668,20 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
                     self._stems[key].sigStemsDragged.connect(lambda key, delta : self.sigStemsDragged.emit(key, delta))
                     self.p0r.addItem( self._stems[key] )
 
+        # Show the phasing pivot
+        if phasingPivot:
+            pos = self._phasingPivot.getXPos()
+            if pos > max(f) or pos < min(f):
+                pos = (max(f) + min(f))/2
+                self._phasingPivot.setPos(pos)
+                self.sigPivotDragged.emit(pos)     # Notify that the pivot has changed
+            p0.addItem(self._phasingPivot)
+
         self.updatePlot()
+
+    def replot_yF(self, yF):
+        """A slot to be called when the spectrum is being phased. Updates the original spectrum yF."""
+        self._yF.setData(x=self._yF.xData, y=yF.ravel().real)
 
     def _add_lr(self, lims, active=True):
         """Adds a linear region to show a frequency block with certain range."""
@@ -728,12 +763,17 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         for lr in self._freqBlocks[indx]:
             lr.setBrush(color)
 
-    def toggleSelectorFlag(self):
-        self._selector_flag = not(self._selector_flag)
-
     def setSelectorFlag(self, flag=True):
         """If the flag is set, MouseDrag event with pressed left button will be interpreted as the frequency region selection (used to add new block)."""
-        self._selector_flag = flag
+        self.setState(state = 'selectRange' if flag else None)
+
+    def setState(self, state=None):
+        """Sets the state of the MainSpectrumWidget. If state is None - return to the default (display) state.
+        Possible states include:
+         - 'selectRange', in this state, MouseDrag event with pressed left button will be interpreted as the frequency region selection (used to add new block).
+         - 'dragSpectrum'
+         """
+        self._state = state
 
     def toggleMovableFreqBlocks(self):
         """Enables/disables changes to be made to frequency blocks with mouse events."""
@@ -784,7 +824,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
         vb = self.getItem(0,0).vb
 
-        if self._selector_flag and (evt.button() == QtCore.Qt.LeftButton):   # and (ev.modifiers() & QtCore.Qt.ControlModifier):
+        if self._state == 'selectRange' and (evt.button() == QtCore.Qt.LeftButton):   # and (ev.modifiers() & QtCore.Qt.ControlModifier):
             # Adding a new frequency range
             evt.accept()
 
@@ -805,6 +845,11 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         elif self._stemDragging_flag:
             # Dragging a group of stems. Will be handled by the corresponding PlotStemsItem
             pass
+        elif self._state == 'dragSpectrum' and (evt.button() == QtCore.Qt.LeftButton):
+            # Moving the experimental spectrum to set a new global chemical shift
+            print('Setting global chemical shift')
+            evt.accept()
+            print(evt)
         else:
             pg.ViewBox.mouseDragEvent(vb, evt, axis)       # Use the standard method
 
@@ -829,6 +874,10 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             for key, val in self._crossLines.items():
                 val.hide()
 
+    def onPivotDragged(self, pivot):
+        """Called when the pivot is being dragged."""
+        self.sigPivotDragged.emit(pivot.p[0])      # Returns the position along the x axis
+
     def showResidual(self, flag=True):
         if flag:
             p0, p1 = self.getItem(0,0), self.getItem(1, 0)
@@ -842,11 +891,12 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
             p0.setLabel('bottom', 'Chemical shift, ppm')
             p1.hide()
 
-    def showComponents(self, flag=True):
+    def showComponents(self, flag=True, indx=None):
         if len(self._zF) == 0:
             raise Exception('No components exist.')
-        for x in self._zF:
-            if flag:
+
+        for i, x in enumerate(self._zF):
+            if flag and (i==indx or indx is None):
                 x.show()
             else: x.hide()
 
@@ -863,35 +913,38 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         """Highlights/dehighlits stem with a certain key."""
         self._stems[key].highlight(flag)
 
-    def autoRange(self):
-        # Autoscale both x and y
-        self.getItem(0, 0).vb.autoRange()
+    def autoRange(self, xlims=None, ylims=None, margin=0.04):
+        """Adjust the view to the data (frequency blocks); xlims and ylims overrides the limits imposed by the frequency blocks. margin is the amount of extra space on each side of the plotted region, expressed as a ratio to the region width."""
+        self.getItem(0, 0).vb.autoRange()     # Autoscale both x and y
 
-        # Adjust the view to the data (frequency blocks)
-        # boundaries = np.ravel([frqBlk[0].getRegion() for frqBlk in self._freqBlocks if frqBlk[0] is not None])
-        # if len(boundaries) > 1:
-        #     b_min = boundaries.min()
-        #     b_max = boundaries.max()
-        #     self.getItem(0, 0).vb.setRange(xRange=(b_min-(b_max-b_min)*0.04, b_max+(b_max-b_min)*0.04),
-        #                                    yRange=None)
         xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
         set_flag = False
+        if hasattr(xlims, '__iter__'):
+            xmin, xmax = min(xlims), max(xlims)
+            if hasattr(ylims, '__iter__'):
+                ymin, ymax = min(ylims), max(ylims)
+            else:
+                yreg = self._yF.yData[np.logical_and(self._f<xmax, self._f>xmin)]
+                ymin = min(ymin, min(yreg))
+                ymax = max(ymax, max(yreg))
+            set_flag = True
+
         for frqBlk in self._freqBlocks:
             # Check if there is a freq block and if it is active
             if frqBlk[0] is not None and frqBlk[0].active:
-                xreg = frqBlk[0].getRegion()
-                xmin = min(xmin, min(xreg))
-                xmax = max(xmax, max(xreg))
+                    xreg = frqBlk[0].getRegion()
+                    xmin = min(xmin, min(xreg))
+                    xmax = max(xmax, max(xreg))
 
-                yreg = self._yF.yData[np.logical_and(self._f<max(xreg), self._f>min(xreg))]
-                ymin = min(ymin, min(yreg))
-                ymax = max(ymax, max(yreg))
-                set_flag = True
+                    yreg = self._yF.yData[np.logical_and(self._f<max(xreg), self._f>min(xreg))]
+                    ymin = min(ymin, min(yreg))
+                    ymax = max(ymax, max(yreg))
+                    set_flag = True
 
         # self.getItem(0, 0).vb.setRange(xRange=(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04) if set_flag else None)
         if set_flag:
-            self.getItem(0, 0).vb.setXRange(xmin-(xmax-xmin)*0.04, xmax+(xmax-xmin)*0.04)
-            self.getItem(0, 0).vb.setYRange(ymin-(ymax-ymin)*0.02, ymax+(ymax-ymin)*0.04, padding=0)
+            self.getItem(0, 0).vb.setXRange(xmin-(xmax-xmin)*margin, xmax+(xmax-xmin)*margin)
+            self.getItem(0, 0).vb.setYRange(ymin-(ymax-ymin)*(margin/2), ymax+(ymax-ymin)*margin, padding=0)
 
     def saveImage(self):
         """Saves the spectrum as an image file."""
@@ -952,7 +1005,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         self._stems.clear()
         self._freqBlocks.clear()
 
-        self._selector_flag = False
+        self.setState()
 
 class QCheckableComboBox(QComboBox):
     """Checkable ComboBox"""
@@ -1190,11 +1243,6 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         self.wsp = wsp       # A pointer to the workspace
         self._copySettingsFromID = None            # Id of the series from which to copy parameter settings
 
-    def resetWorkspace(self):
-        self.beginResetModel()
-        self.wsp.reset()
-        self.endResetModel()
-
     def headerData(self, section, orientation, role):
         pass
 
@@ -1311,181 +1359,6 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
         self.endInsertRows()
 
-    def addDatumFromFile(self, crnt_series, path):
-        """Adds new Datum entries specified by the path to the series object."""
-
-        if path[-6:] == '.pyfid':
-            with open(path, 'rb') as fp:
-                data = [float(x.strip()) if i != 5 else x.strip() for i, x in enumerate(fp.readlines())]
-
-            c0, f0, nt = data[0], data[1], int(data[4])     # Number of time points
-
-            t = np.array(data[6:nt+6]).reshape(-1,1)
-            yT = (np.array(data[nt+6:2*nt+6]) + 1j*np.array(data[-nt:])).reshape(-1,1)
-            name = path[path.rfind('\\')+1:path.rfind('.')]
-
-        # Read a JCAMP-DX file
-        elif path[-3:] == '.dx' or path[-4:] == '.jdx':
-
-            dic, data = ng.jcampdx.read(path)
-            #c0 = float(dic['$BF1'][0])
-            #fcar = float(dic['$REFERENCEPOINT'][0])
-            #swh = float(dic['$SW'][0]) * c0
-            #nt = float(dic['$TD'][0])
-
-            udic = ng.jcampdx.guess_udic(dic,data)[0]     # Dictionary of universal parameters
-            print(data)
-
-            c0 = float(udic['obs'])
-            fcar = float(udic['car'])
-            swh = float(udic['sw'])
-            nt = float(udic['size'])
-            f0 = swh/2-fcar      # Frequency shift in Hz
-            dt = 1 / swh;         # Sampling period (dwell time)
-
-            t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-            yT = (np.array(data[0]) - 1j*np.array(data[1])).reshape(-1,1)
-
-            # Subsample if the frequency range is too large
-            k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-            t = t[::k]
-            yT = yT[::k, :]
-
-            name = os.path.split(os.path.dirname(path))[1]
-
-        # Read a Bruker FID file
-        elif path[-3:] == 'fid':
-
-            dic, data = ng.fileio.bruker.read(path[:-3])
-
-            acqus = dic['acqus']
-            ntgrp = acqus['GRPDLY']    # Number of time samples of the Bruker filter response;
-            swh = acqus['SW_h']     # Spectral width in Hz
-            f0 = acqus['O1']        # Offset in Hz
-            c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
-            dt = 1 / swh         # Sampling period (dwell time)
-            tau = acqus['DE'] * (1e-06)   # Ringdown time delay in sec
-
-            yT = data[ntgrp:].reshape(-1, 1)
-            # nt = min(16384, len(yT))
-            nt = len(yT)
-            t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-            # yT = yT[:nt].reshape(-1, 1)
-
-            ## Subsample if the frequency range is too large
-            #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-            #t = t[::k]
-            #yT = yT[::k, :]
-
-            name = os.path.split(os.path.dirname(path))[1]
-
-        # Read a JEOL FID file
-        elif path[-3:] == 'jdf':
-            print(path)
-            #
-            # dic, data = ng.fileio.bruker.read(path[:-3])
-            #
-            # acqus = dic['acqus']
-            # ntgrp = acqus['GRPDLY']    # Number of time samples of the Bruker filter response;
-            # swh = acqus['SW_h']     # Spectral width in Hz
-            # f0 = acqus['O1']        # Offset in Hz
-            # c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
-            # dt = 1 / swh         # Sampling period (dwell time)
-            # tau = acqus['DE'] * (1e-06)   # Ringdown time delay in sec
-            #
-            # yT = data[ntgrp:].reshape(-1, 1)
-            # # nt = min(16384, len(yT))
-            # nt = len(yT)
-            # t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-            # # yT = yT[:nt].reshape(-1, 1)
-            #
-            # ## Subsample if the frequency range is too large
-            # #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-            # #t = t[::k]
-            # #yT = yT[::k, :]
-            #
-            # name = os.path.split(os.path.dirname(path))[1]
-            pass
-
-        # Read a Spinsolve data.1d file
-        elif path[-3:] in ['.1d', '.2d']:
-
-            yT, c0, f0, dt, dic = read_spinsolve(path)
-
-            nt = yT.shape[0]
-            t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-            name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
-
-        # Read an Mnova corrected FID file
-        elif path[-4:] in ['.txt']:
-            with open(path, 'rb') as fp:
-                # Read the file header line by line
-                for line in fp:
-                    pair = line.decode().strip().split('=')
-                    if 'DataPoints' in pair[0]:
-                        break           # The next line will be the first data point -- stop reading the header
-                    elif 'Size' in pair[0]:
-                        nt = int(pair[1])
-                    elif 'SpectrometerFrequency' in pair[0]:
-                        c0 = float(pair[1])
-                    elif 'Hz' in pair[0]:
-                        f0 = -float(pair[1])
-                    elif 'SpectralWidth' in pair[0]:
-                        dt = 1 / float(pair[1])
-
-                # Read the remainder of the file into a np array
-                data = np.fromfile(fp, sep='\t')
-
-            # Form the arrays
-            t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
-            yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
-
-            ## Subsample if the frequency range is too large
-            #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-            #t = t[::k]
-            #yT = yT[::k, :]
-
-            name = path[path.rfind('\\')+1:path.rfind('.')]
-
-        # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
-        if crnt_series.c0 is None:
-            crnt_series.c0 = c0
-            crnt_series.f0 = f0
-            crnt_series.t = t
-            crnt_series.fullReset()
-        elif np.abs(crnt_series.c0 - c0) > 1e-3:
-            # Create a new series and put the data into it
-            # TODO: Check if new c0/f0 are the same as the old ones when loading the rest of the data
-            self.addSeries()
-            crnt_series = self.wsp.series[-1]
-            crnt_series.c0 = c0
-            crnt_series.f0 = f0
-            crnt_series.t = t
-            crnt_series.fullReset()
-
-        ser_id = self.wsp.series.index(crnt_series) # Position of the Series in the Workspace
-        index = self.index(ser_id, 0, None)    # Index corresponding to the Series to which the Datum will be added
-
-        self.layoutAboutToBeChanged.emit()
-
-        if len(crnt_series.data) == 0 and yT.shape[1] == 1:   # Adding only a single first Datum; no rows will be added, but need to replace the existing Series row with this new Datum
-            dat = crnt_series.addDatum(yT, name = name)
-        else:
-            # Start adding rows
-            if len(crnt_series.data) == 1:   # Already one node in the series
-                self.beginInsertRows(index, 0, yT.shape[1])        # Parent node, first and last position
-            else:
-                self.beginInsertRows(index, len(crnt_series.data), len(crnt_series.data)+yT.shape[1]-1)        # Parent node, first and last position
-            # Add the rows
-            for i in range(yT.shape[1]):
-                dat = crnt_series.addDatum(yT[:,i].reshape(-1,1), name = name+str(i+1) if yT.shape[1]>1 else name)
-            # Finish adding rows
-            self.endInsertRows()
-
-        self.layoutChanged.emit()    # Tell the view that we need to recompute persistent indices
-
-        return dat
-
     def importData(self, crnt_series=None):
         """Opens a dialog to select a new data file to be added to the parent series."""
         # Create new series if working from the workspace itself
@@ -1499,7 +1372,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
         for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.jdx; *.1d; *.2d; *.txt; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx; *.jdx);;Mnova FID (*.txt);;Bruker FID (fid)"):   # ;;JEOL FID (*.jdf)
             #try:
-            dat = self.addDatumFromFile(crnt_series, newFilePath)
+            dat = self.addDatumFromFile(newFilePath)
             #except:
             #    print("Could not add the file ", newFilePath)
 
@@ -1676,22 +1549,56 @@ class NavigationTreeDelegate(QItemDelegate):
 
 def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
     """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
-    P = viewNode(T.name, nodeType='chemNodeDB' if isinstance(T, chemNodeDB) else 'chemNode')
+    P = viewNode(T.name, nodeType='chemNodeDB' if type(T) in [chemNodeDB, chemNodeQM] else 'chemNode')
     #P.addChild(viewNode(name = tuple([T.name] + ['intn'] + [None]), nodeType='intn', alias='intn' ))
-    if type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
+    if type(T) is chemNodeQM:
+        P.nodeType = 'chemNodeQM'
         P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
 
         if T.childCount() > 1:  # Several chemical shifts; add global parameters
             P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
             P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
 
-        for node in [T]:
-            for par, val in node.default_pars().items():
-                for i in range(len(val)):
-                    if not isinstance(getattr(node, par)[i].label, str):
-                        old = getattr(node, par)
-                        old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
-                        setattr(node, par, old)
+        # Add nodes that can become parents for parameters (combinations of spin systems if any and the QM node itself)
+        prntNodes = [None] * len(T.spsyComb) + [P]
+        parsLists = [[] for _ in range(len(T.spsyComb)+1)]
+        for i_comb, comb in enumerate(T.spsyComb):
+            prntNodes[i_comb] = viewNode(name=(T.name+'-COMB'+str(i_comb+1)), nodeType='chemNode', alias=comb.name)
+            prntNodes[i_comb].addChild(viewNode(name=(T.name+'-COMB'+str(i_comb+1), 'ampl', 0), nodeType='param', alias='intn' ))
+            P.addChild(prntNodes[i_comb])
+
+        # Loop over spin systems and collect all parameters that affect it
+        for i_spsy in range(len(T.spinTopo)):
+            i_comb = -1      # Index to which combination belongs this spin system (the first occurence). Default - the chemNodeQM itself
+            for j, comb in enumerate(T.spsyComb):
+                if i_spsy in comb.indxSpsy: i_comb = j
+
+            # Add new parameters to the list for each combination
+            parsLists[i_comb].extend( [(T.name, 'chshQD', i_parm, T.chshQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
+            parsLists[i_comb].extend( [(T.name, 'alphQD', i_parm, T.alphQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
+            parsLists[i_comb].extend( [(T.name, 'jcplQD', i_parm, T.jcplQD[i_parm].label) for i_parm in T._indxJcpl_by_spsy[i_spsy]] )
+
+        # Add intensity/amplitude parameters and add the nodes to the tree
+        for prnt, parsList_for_prnt in zip(prntNodes, parsLists):
+            parsList_for_prnt.extend( [(chld.name, 'ampl', 0, chld.alias) for chld in T[prnt.name].children() if isinstance(chld, chemNodeQT)] )
+            for pars in sorted(parsList_for_prnt, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
+                try:
+                    prnt.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))
+                except RuntimeError: pass
+
+    elif type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
+        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+
+        if T.childCount() > 1:  # Several chemical shifts; add global parameters
+            P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+            P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+
+        for par, val in T.default_pars().items():
+            for i in range(len(val)):
+                if not isinstance(getattr(T, par)[i].label, str):
+                    old = getattr(T, par)
+                    old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
+                    setattr(T, par, old)
 
         newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in [T] for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
         newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
@@ -1715,7 +1622,7 @@ def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
         P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
         P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
 
-        # Fix faulty labels of parameters and alaises of the terminal nodes
+        # Fix faulty labels of parameters and alises of the terminal nodes
         for node in T.children():
             for par, val in node.default_pars().items():
                 for i in range(len(val)):
@@ -1731,20 +1638,6 @@ def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
         for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):     # Loop over the list of tuples
             P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
     return P
-
-    """
-    # Full parameter tree
-    P = treeNode(T.name)
-    # add the parameters nodes
-    for par, val in sorted(T.default_pars().items(), key = lambda par : [i for i, x in enumerate(myOrder) if x in par[0]][-1] ):
-        print(par, val)
-        for i in range(len(val)):
-            P.addChild(treeNode(name = tuple([T.name] + [par] + [i]) ))
-    # add the children nodes
-    for node in T.children():
-        P.addChild(getDisplayTree(node))
-    return P
-    """
 
 class ChemTreeModel(QtCore.QAbstractItemModel):
     """A treeView representation class"""
@@ -1997,7 +1890,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if clmn == 0 and role == QtCore.Qt.FontRole:
             font = QtGui.QFont()    # Default font
 
-            if node.nodeType in ['chemNode', 'chemNodeDB']:     # Chemical node
+            if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:     # Chemical node
                 if not self.datum.T[node.name].isReported():
                     font.setStyle(QtGui.QFont.StyleItalic)
                 elif node.name in self.datum.repRootNames:
@@ -2010,12 +1903,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 if node.name in self._unfittableParsKeys:
                     font.setStrikeOut(True)
 
-            return font
-
-        # Setup font for the reference parameter
-        if clmn == 4 and role == QtCore.Qt.FontRole and isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
-            font = QtGui.QFont()    # Default font
-            font.setBold(True)
             return font
 
         if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole, QtCore.Qt.ForegroundRole]:
@@ -2046,7 +1933,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 else:
                     pass
 
-            elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
                 if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                     crntVal = self.datum.T[node.name].intn
 
@@ -2065,10 +1952,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             if clmn == 0:
                 if node.nodeType == 'param':
                     if "chshQD" in node.name[1]:
-                        if isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
-                            displayIcon = QIcon("icons\icon_deltaQD_lock.png")
-                        else:
-                            displayIcon = QIcon("icons\icon_deltaQD.png")
+                        displayIcon = QIcon("icons\icon_deltaQD.png")
                     elif node.name[1] == 'ampl':
                         displayIcon = QIcon("icons\icon_ampl.png")
                     elif node.name[1][:6] == "alphQD":
@@ -2078,10 +1962,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     elif node.name[1][:4] == "alph":
                         displayIcon = QIcon("icons\icon_alpha.png")
                     elif node.name[1][:4] == "chsh":
-                        if isinstance(self.datum, Datum) and node.name == self.datum.refChshKey:
-                            displayIcon = QIcon("icons\icon_delta_lock.png")
-                        else:
-                            displayIcon = QIcon("icons\icon_delta.png")
+                        displayIcon = QIcon("icons\icon_delta.png")
                 elif node.nodeType == 'lshape':
                     displayIcon = QIcon('icons\icon_lshape.png')
                 elif node.name == 'lshapeX':
@@ -2115,7 +1996,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 return result | QtCore.Qt.ItemIsSelectable
             elif node.nodeType == 'chemNode':
                 return result | QtCore.Qt.ItemIsEditable # | QtCore.Qt.ItemIsUserCheckable
-            elif node.nodeType == 'chemNodeDB':
+            elif node.nodeType in ['chemNodeDB', 'chemNodeQM']:
                 return result # | QtCore.Qt.ItemIsUserCheckable
             else:
                 return result
@@ -2124,11 +2005,11 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         elif clmn == 4:
             if node.nodeType == 'lshape':
                 return result
-            elif node.nodeType in ['chemNode', 'chemNodeDB']:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:
                 return result | QtCore.Qt.ItemIsEditable
             else:
                 return result | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable
-            """elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4:
+            """elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
             if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                 return QtCore.Qt.ItemIsEditable | result"""
 
@@ -2176,7 +2057,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     # self.dataChanged.emit(index, index)
                     # except: return False
 
-            elif node.nodeType in ['chemNode', 'chemNodeDB'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
+            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                 # self.datum.T[node.name].set_intn(float(value))
                 self.requestParameterChange.emit((node.name, 'intn', 0), float(value))
                 # self.dataChanged.emit(index, index)
@@ -2324,7 +2205,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         elif source == 'DB':
             newName, QDpars, accepted = ChooseFromDBDialog.run( forbidden_names=list(self.datum.T.keys()) )
             if accepted:
-                X = chemNodeDB(newName, QDpars=QDpars)
+                X = chemNodeQM(newName, QDpars=QDpars)      # X = chemNodeDB(newName, QDpars=QDpars)
             else:
                 return 0
         elif source == 'spsy':
@@ -2333,7 +2214,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             jcpl = [parsSpec()]
             chshAsgn = [1, 2]
             jcplAsgn = [[0, 1], [0, 0]]"""
-            chsh = [parsSpec()]*1
+            chsh = [parsSpec(min=-1.0, max=1.0, dval=0.0)]*1
             jcpl = []
             chshAsgn = [1]
             jcplAsgn = None
@@ -2346,7 +2227,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         # Get the node in the parameter tree to which new chemical will be attached
         prnt = index.internalPointer()
 
-        success = self.datum.addTreeNode(prnt.name, X)
+        success = self.datum.addTreeNode(X, prnt.name)
 
         if success:                 # self.datum.T has been updated
             self.beginInsertRows(index, 0, 0) # Parent node, first and last position
@@ -2403,12 +2284,12 @@ class ChemTreeView(QTreeView):
 
     changedParsList = pyqtSignal(int)              # Signalizes to update the parameters list widget and carries the index of the active step
     changedSelected = pyqtSignal(object, object)           # Emits names of the current and previously selected nodes
-    requestAdjustment = pyqtSignal(object)         # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhA'
+    requestAdjustment = pyqtSignal(object)         # Requests the phase correction; object = 'Ph0', 'Ph1', or 'PhX'
 
     class ParsSpecDialog(QDialog):
         """A dialog to set specification for a parameter."""
 
-        def __init__(self, name, param, crntVal=None, isReference=None, parent = None):
+        def __init__(self, name, param, crntVal=None, parent = None):
             super().__init__(parent)
             layoutMain = QVBoxLayout(self)
             layoutForm = QFormLayout()
@@ -2453,18 +2334,11 @@ class ChemTreeView(QTreeView):
             else:
                 actnDfltFromCrnt.triggered.connect(lambda : self.editDfltVal.setValue(crntVal))
 
-            # Checkbox to set the current parameter as a reference
-            self.chckReference = QCheckBox("Use as reference")
-
-
             # OK and Cancel buttons
             self.buttonsBox = QDialogButtonBox(
                 QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
                 Qt.Horizontal, self)
             layoutMain.addLayout(layoutForm)
-            if isReference is not None:          # If the parameter can be set as a reference (e.g. if it is a chemical shift)
-                self.chckReference.setChecked(isReference)
-                layoutMain.addWidget(self.chckReference)
             layoutMain.addWidget(self.chckSeries)
             layoutMain.addWidget(self.buttonsBox)
 
@@ -2519,8 +2393,7 @@ class ChemTreeView(QTreeView):
                     'p1':self.editPriorP1.value(),\
                     'p2':self.editPriorP2.value(),\
                     'dval':self.editDfltVal.value()},\
-                    self.chckSeries.isChecked(), \
-                    self.chckReference.isChecked()
+                    self.chckSeries.isChecked()
 
     class LabelAndButton(QWidget):
         """A widget consisting of a label and a small button, e.g. used to display phase adjustment in the tree."""
@@ -2658,7 +2531,7 @@ class ChemTreeView(QTreeView):
             clmn = index.column()
             row = index.row()
 
-            if node.nodeType in ['chemNode', 'chemNodeDB']:       # Chemical node
+            if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:       # Chemical node
                 key = node.name
 
                 # Add/remove node actions
@@ -2727,13 +2600,15 @@ class ChemTreeView(QTreeView):
                     cfunAction.setStatusTip('Display cost function')
                     cfunAction.triggered.connect(lambda : self.showCfunPopup(key))
                     popMenu.addAction(cfunAction)
+
+                    if key[1] in ['chsh', 'chshQD']:
+                        actnScaleToRef = QAction(QIcon('icons\icon_none.png'), 'Set reference', self)
+                        actnScaleToRef.setStatusTip('Reset all chemical shifts in the model to the reference')
+                        actnScaleToRef.triggered.connect( lambda _ : self.model().datum.shiftToRef(refKey=key) )
+                        popMenu.addAction(actnScaleToRef)
                     popMenu.addSeparator()
 
                 # Define parameter setting actions
-                actnScaleToRef = QAction(QIcon('icons\icon_none.png'), 'Set reference', self)
-                actnScaleToRef.setStatusTip('Reset all chemical shifts in the model to the reference')
-                actnScaleToRef.triggered.connect( self.model().datum.scaleToRef )
-
                 actnPromotePriors = QAction(QIcon('icons\icon_globalPriors.png'), 'Set prior as global' if len(slctdKeys) == 1 else 'Set priors as global', self)
                 actnPromotePriors.setStatusTip('Use this prior for all datasets in the Workspace')
                 actnPromotePriors.triggered.connect(lambda : self.promotePriors(keys=slctdKeys))
@@ -2770,8 +2645,6 @@ class ChemTreeView(QTreeView):
                     popMenu.addAction(actnPasteCrnt)
                     popMenu.addAction(actnPasteDflt)
                     popMenu.addAction(actnResetToDflt)
-                    if node.name == self.model().datum.getRefKey():
-                        popMenu.addAction(actnScaleToRef)
                 if isinstance(self.model().datum, Series):
                     popMenu.addAction(actnPasteCrnt)
                     popMenu.addAction(actnPasteDflt)
@@ -2805,22 +2678,18 @@ class ChemTreeView(QTreeView):
             param = self.model().datum.getPrior(key)
             try:
                 crntVal = self.model().datum.getCrntVal(key)
-                isReference = (self.model().datum.getRefKey() == key) if key[1][:4] == 'chsh' else None
             except AttributeError:
-                crntVal, isReference = None, None
+                crntVal = None
 
-            dialog = self.ParsSpecDialog(key, param, crntVal, isReference, parent=self)
+            dialog = self.ParsSpecDialog(key, param, crntVal, parent=self)
             result = dialog.exec_()
             if result == QDialog.Accepted:    # If OK was clicked
-                newParSpec, resetSeries, setReference = dialog.getSelection()
+                newParSpec, resetSeries = dialog.getSelection()
                 crnt = self.model().datum
                 if isinstance(crnt, Datum) and resetSeries:
                     crnt = crnt.parent
                 else: pass # It is either a Datum and no series flag was set or it is a Series
                 crnt.setPrior(key, **newParSpec, reset=True)
-                if isReference is not None:
-                    crnt.setRefKey(key = key if setReference else None)
-                    # if setReference: self.model().requestParameterChange.emit()            # Update the computed signals
 
     def saveSubtree(self, index):
         """Saves the subtree starting with the node index."""
@@ -2840,7 +2709,17 @@ class ChemTreeView(QTreeView):
         DDD = self.model().datum
         evalPars = copy.deepcopy(DDD.crntParsH)
         actvStep = DDD.steps[-1]
-        costFuncOpti = lambda x : (DDD.getPrior(key).abs(x), DDD.evaluate(evalParsH=updateFromFlat(evalPars, [key], [DDD.getPrior(key).abs(x)]), autoKeys=actvStep.autoKeys, frqBlkIds=actvStep.frqBlkIds)[0])
+
+        if key[1] == 'chsh':
+            allowShift, shiftingRange = True, DDD.getPrior(key).max - DDD.getPrior(key).min
+        elif key[1] == 'alph':
+            allowShift, shiftingRange = True, 0.0
+        else: allowShift, shiftingRange = False, 0.0
+
+        # allowShift, shiftingRange = False, 0.0
+
+        costFuncOpti = lambda x : (DDD.getPrior(key).abs(x), DDD.evaluate(evalParsH=updateFromFlat(evalPars, [key], [DDD.getPrior(key).abs(x)]), autoKeys=actvStep.autoKeys, \
+                                                                          frqBlkIds=actvStep.frqBlkIds, allowShift=allowShift, shiftingRange=shiftingRange)[0])
         self.popupWindow = CfunPopup(costFuncOpti)
         self.popupWindow.show()
 
@@ -2986,515 +2865,22 @@ class ChemTreeView(QTreeView):
         # Emit the signal to recompute the model
         self.model().requestParameterChange.emit(stemKey, val+delta)
 
-class PeakPickingWidget(QWidget):
-
-    RANGE_MAX = 64
-    RANGE_MIN = -64
-    assigned = pyqtSignal()
-
-    class PeakTableModel(QtCore.QAbstractTableModel):
-
-        def __init__(self, colors = [[]], headers = [], parent = None):
-            QtCore.QAbstractTableModel.__init__(self, parent)
-            self.__colors = colors
-            self.__headers = headers
-
-        def rowCount(self, parent):
-            return len(self.__colors)
-
-        def columnCount(self, parent):
-            return len(self.__colors[0])
-
-        def flags(self, index):
-            return QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-
-        def data(self, index, role):
-
-            if role == QtCore.Qt.EditRole:
-                row = index.row()
-                clmn = index.column()
-                return self.__colors[row][column].name()
-
-            if role == QtCore.Qt.ToolTipRole:
-                row = index.row()
-                clmn = index.column()
-                return "Hex code: " + self.__colors[row][column].name()
-
-            if role == QtCore.Qt.DecorationRole:
-
-                row = index.row()
-                clmn = index.column()
-                value = self.__colors[row][column]
-
-                pixmap = QtGui.QPixmap(26, 26)
-                pixmap.fill(value)
-
-                icon = QtGui.QIcon(pixmap)
-
-                return icon
-
-            if role == QtCore.Qt.DisplayRole:
-
-                row = index.row()
-                clmn = index.column()
-                value = self.__colors[row][column]
-
-                return value.name()
-
-        def setData(self, index, value, role = QtCore.Qt.EditRole):
-            if role == QtCore.Qt.EditRole:
-
-                row = index.row()
-                clmn = index.column()
-
-                color = QtGui.QColor(value)
-
-                if color.isValid():
-                    self.__colors[row][column] = color
-                    self.dataChanged.emit(index, index)
-                    return True
-            return False
-
-        def headerData(self, section, orientation, role):
-
-            if role == QtCore.Qt.DisplayRole:
-
-                if orientation == QtCore.Qt.Horizontal:
-
-                    if section < len(self.__headers):
-                        return self.__headers[section]
-                    else:
-                        return "not implemented"
-                else:
-                    return "Color {}".format(section)    # QtCore.QString("Color %1").arg(section)
-
-        #=====================================================#
-        #INSERTING & REMOVING
-        #=====================================================#
-        def insertRows(self, position, rows, parent = QtCore.QModelIndex()):
-            self.beginInsertRows(parent, position, position + rows - 1)
-
-            for i in range(rows):
-
-                defaultValues = [QtGui.QColor("#000000") for i in range(self.columnCount(None))]
-                self.__colors.insert(position, defaultValues)
-
-            self.endInsertRows()
-
-            return True
-
-        def insertColumns(self, position, columns, parent = QtCore.QModelIndex()):
-            self.beginInsertColumns(parent, position, position + columns - 1)
-
-            rowCount = len(self.__colors)
-
-            for i in range(columns):
-                for j in range(rowCount):
-                    self.__colors[j].insert(position, QtGui.QColor("#000000"))
-
-            self.endInsertColumns()
-
-            return True
-
-    class PeakTreeModel(QtCore.QAbstractItemModel):
-        """A treeView representation class"""
-
-        def __init__(self, parent = None):
-            super().__init__()     # QtCore.QAbstractItemModel.__init__(self)
-            self._indxRoot = QtCore.QModelIndex()    # "Invalid" index to point to the root of the display
-            self._tree = stepClass.mdldPeaks         # A hierarchical dictionary of modelled peaks
-
-        def headerData(self, section, orientation, role):
-            pass
-
-        def columnCount(self, parent):
-            return 4 + len(steps)
-
-        def rowCount(self, index):
-            """Number of rows (children) for each item in the tree. INPUTS: QModelIndex. OUTPUT: int"""
-            if index.isValid():
-                return len(index.internalPointer())
-            else:
-                return len(self._tree)    # Number of rows in the display root
-
-        def parent(self, index):
-            """Should return QModelIndex of the parent of the node with the given QModelIndex. INPUTS: QModelIndex. OUTPUT: QModelIndex"""
-            if index.isValid():
-                item = index.internalPointer()
-                if isinstance(item, dict):
-                    if item in self._tree.values():
-                        return self._indxRoot
-                elif isinstance(item, list):
-                    for rep in self._tree.values():
-                        if item in rep.values():
-                            parent = rep
-                            row = [k for k in self._tree.keys()].index(parent)
-                            return self.createIndex(row, 0, parent)
-                else:   # If it's a peakSpec instance
-                    for rep in self._tree.values():
-                        for leaf in rep.values():
-                            if item in leaf.values():    # Iterate over groups of peaks
-                                parent = leaf
-                                row = [k for k in rep.keys()].index(parent)
-                                return self.createIndex(row, 0, parent)
-
-            #else: print("parent: index is invalid")"""
-            return self._indxRoot
-
-        def index(self, row, column, prnt=None):
-            """Should return a QModelIndex that corresponds to the given row, clmn and parent node. INPUTS: int, int, QModelIndex. OUTPUT: QModelIndex"""
-            if prnt == self._indxRoot:         # Parent is the root
-                key = [k for k in self._tree.keys()][row]
-                if key:
-                    return self.createIndex(row, column, self._tree[key])      # An inner dictionary; parent is the display root
-            elif prnt.isValid():    # Inner dictionaries
-                parent = prnt.internalPointer()
-                if isinstance(parent, dict):                    # Parent is an inner dictionary
-                    key = [k for k in parent.keys()][row]
-                    if key:
-                        return self.createIndex(row, column, parent[key])
-                else:    # parent is a list
-                    if len(parent) > row:
-                        return self.createIndex(row, column, parent[row])      # return index of a peakSpec
-
-            return QtCore.QModelIndex()     # Return invalid index by default
-
-            #if not self.hasIndex(row, column, prnt):
-            #    print("doesn't have this index")
-            #    return self._rootIndex
-
-        # --------------------------------- M A I N   D I S P L A Y   F U N C T I O N ----------------------------------
-        def data(self, index, role):
-            if not index.isValid():
-                return None
-
-            #print(self.TP)
-
-
-
-            node = index.internalPointer()
-            if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole, QtCore.Qt.CheckStateRole]:
-                if node.nodeType == 'param':
-                    if index.column() == 0:
-                        return node.alias if node.alias != '' else str(node.name[1])
-                    #elif index.column() == 1:
-                    #    return "{:.4f}".format(getattr(self.D[node.name[0]], node.name[1])[node.name[2]].min)
-                    #elif index.column() == 2:
-                    #    return "{:.4f}".format(getattr(self.D[node.name[0]], node.name[1])[node.name[2]].max)
-                    elif index.column() > 0:
-                        return index.column()
-                        #return QtCore.Qt.Checked
-                else:
-                    if index.column() == 0:
-                        return node.alias if node.alias != '' else str(node.name)
-                    else: return None
-
-                if index.column() > 2:
-                        return index.column()
-
-            return None
-
-        def flags(self, index):
-
-            if index.column() == 0:
-                return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-            elif index.column() in [1, 2]:
-                return QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-            else:
-                return QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-
-        def setData(self, index, value, role = QtCore.Qt.EditRole):
-            """Stores changed data."""
-            if index.isValid():
-
-                if role == QtCore.Qt.EditRole:
-
-                    node = index.internalPointer()
-                    if node.nodeType == 'param':
-                        # update parameter ranges
-                        absRange = list(getattr(self.T[node.name[0]], node.name[1])[node.name[2]])
-                        if index.column() in [1, 2]:
-                            absRange[index.column()-1] = float(value)
-                            getattr(self.T[node.name[0]], node.name[1])[node.name[2]] = parsSpec(*absRange)
-                    else:
-                        pass
-
-
-
-
-                    return True
-            return False
-
-        #=====================================================#
-        #INSERTING & REMOVING
-        #=====================================================#
-
-        """INPUTS: int, int, QModelIndex"""
-        def insertRows(self, position, rows, parent=QtCore.QModelIndex()):
-
-            parentNode = self.getNode(parent)
-
-            self.beginInsertRows(parent, position, position + rows - 1)
-
-            for row in range(rows):
-
-                childCount = parentNode.childCount()
-                childNode = Node("untitled" + str(childCount))
-                success = parentNode.insertChild(position, childNode)
-
-            self.endInsertRows()
-
-            return success
-
-        """INPUTS: int, int, QModelIndex"""
-        def removeRows(self, position, rows, parent=QtCore.QModelIndex()):
-
-            parentNode = self.getNode(parent)
-            self.beginRemoveRows(parent, position, position + rows - 1)
-
-            for row in range(rows):
-                success = parentNode.removeChild(position)
-
-            self.endRemoveRows()
-
-            return success
-
-        def insertColumns(self, pos=None, n_clm=1, parent = QtCore.QModelIndex()):
-
-            if pos is None: pos = self.columnCount(parent)
-            self.beginInsertColumns(parent, pos, pos+n_clm-1)
-
-            self.steps.append('123')
-
-            self.endInsertColumns()
-
-    class PeakTreeView(QTreeView):
-
-        def __init__(self, parent=None):
-            super().__init__(parent)    # Initialize a QTreeWidget
-
-            self.setAlternatingRowColors(True)
-            self.setHeaderHidden(False)
-            self.setColumnWidth(0, 150)
-
-    def __init__(self, canvas, parent=None):
-        super().__init__(parent)
-        self.canvas = canvas
-        self.ax = self.canvas.figure.get_axes()
-        self.pthres = None
-        self.drange = ()
-
-        self.bttnAutoPick = QPushButton('Pick automatically')
-        self.bttnAutoPick.clicked.connect(self.autoPick)
-        self.bttnManuPick = QPushButton('Pick manually')
-        self.bttnManuPick.clicked.connect(self.manuPick)
-        self.bttnAssignPeaks = QPushButton('Assign')
-        self.bttnAssignPeaks.clicked.connect(self.assignPeaks)
-        self.sliderThresh = QSlider()
-        self.sliderThresh.setRange(self.RANGE_MIN, self.RANGE_MAX)
-        self.sliderThresh.setValue(0)
-        self.sliderThresh.valueChanged.connect(self.onThreshChanged)
-        self.sliderThresh.sliderPressed.connect(self.startPlotting)
-
-        self.pickedTable = QTableWidget()
-        layout = QGridLayout()
-        layout.addWidget(QLabel("Peak picking"), 0, 0, 1, 3, Qt.AlignCenter|Qt.AlignTop)
-        #layout.addWidget(self.pickedTable, 1, 0, 1, 2)
-        layout.addWidget(self.bttnAutoPick, 3, 0, Qt.AlignHCenter)
-        layout.addWidget(self.bttnManuPick, 3, 1, Qt.AlignHCenter)
-        layout.addWidget(self.bttnAssignPeaks, 3, 2, Qt.AlignHCenter)
-        layout.addWidget(self.sliderThresh, 1, 3, 3, 1, Qt.AlignHCenter)
-
-        listView = QtGui.QListView()
-        listView.setAcceptDrops(True);
-        listView.setDragEnabled(True);
-        listView.setDragDropMode(QtGui.QAbstractItemView.InternalMove);
-
-        comboBox = QtGui.QComboBox()
-        self.mdldPeaksTree = self.PeakTreeView()
-
-        layout.addWidget(listView, 1, 0, 1, 2)
-        layout.addWidget(self.mdldPeaksTree, 1, 2)
-        #layout.addWidget(comboBox, 2, 0, 1, 3)
-
-        red   = QtGui.QColor(255,0,0)
-        green = QtGui.QColor(0,255,0)
-        blue  = QtGui.QColor(0,0,255)
-
-        rowCount = 4
-        columnCount = 6
-
-        headers = ["Pallete0", "Colors", "Brushes", "Omg", "Technical", "Artist"]
-        tableData0 = [ [ QtGui.QColor("#FFFF00") for i in range(columnCount)] for j in range(rowCount)]
-
-        model = self.PeakTableModel(tableData0, headers)
-        #model.insertColumns(0, 5)
-
-        #listView.setModel(model)
-        #comboBox.setModel(model)
-        #tableView.setModel(model)
-
-        self.setMaximumWidth(500)
-        self.setLayout(layout)
-
-        self.reset()    # Sets the values for the current file/step
-
-    def autoPick(self):
-        """Automatic peak picking"""
-        print("Automatic peak picking")
-        f = stepClass.f
-        yFph = stepClass.yFph
-        pos, ids, width, amps = ng.analysis.peakpick.pick(yFph.real, pthres = self.pthres, algorithm='downward', cluster='False', table=False)      # , algorithm='connected'
-        stepClass.pckdPeaks = [peakSpec(freq=f[p[0]], intn = a, fwhm=w[0] / np.pi) for p, w, a in zip(pos, width, amps) if w[0] > 0]
-        self.startPlotting()
-
-    def startPlotting(self):
-        # remember the axis settings
-        if settings["ax0Limits"] is not None:
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-            indxPlot = np.flatnonzero((stepClass.f<=max(settings["ax0Limits"]["xlim"]))*(stepClass.f>=min(settings["ax0Limits"]["xlim"])))
-            supsRatio = math.ceil(indxPlot.size / (2**13))   # Subsampling ratio; plot no more than 2^12 points
-            indxPlot = np.append(indxPlot[:-1:supsRatio], indxPlot[-1])  # Make sure that the first and the last indices of each group are included
-            self.f = stepClass.f[indxPlot]
-            self.yFph = stepClass.yFph[indxPlot]
-        else:
-            self.f = stepClass.f
-            self.yFph = stepClass.yFph
-
-        self.plot()
-
-    def plot(self):
-        """Plots the phased spectrum and picked peaks on top of it."""
-        self.ax[0].clear()     # discards the old graph
-        self.ax[0].plot(self.f, self.yFph.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
-
-        # Plot the threshold
-        self.ax[0].plot([self.f[0], self.f[-1]], [self.pthres]*2, '-', color='r')
-
-        # Plot the peaks
-        if len(stepClass.pckdPeaks) > 0:
-            markerline, stemlines, baseline = self.ax[0].stem([peak.shft for peak in stepClass.pckdPeaks], [peak.intn/peak.fwhm/np.pi for peak in stepClass.pckdPeaks], basefmt=" ")     # , label=node.name if j==0 else ''
-            plt.setp(stemlines, linewidth=1, color=(0.5, 0.5, 0.5), picker = 2)    # Picking tolerance in px
-            plt.setp(markerline, markerfacecolor = (0.5, 0.5, 0.5), linestyle='None', color=(0.5, 0.5, 0.5), markersize=2)      # , picker=self.onStemPick
-
-        self.ax[0].legend(loc=0)
-
-        # Set the updated limits
-        if settings["ax0Limits"] is not None:
-            self.ax[0].set_xlim(settings["ax0Limits"]["xlim"])
-            self.ax[0].set_ylim(settings["ax0Limits"]["ylim"])
-        else:
-            self.ax[0].relim()    # recompute the ax.dataLim
-            self.ax[0].margins(0, 0.05)    # x and y margins in percentages
-            self.ax[0].autoscale()    # update ax.viewLim using the new dataLim
-            #self.ax[0].autoscale_view(tight=True, scalex=True, scaley=True)
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-        self.ax[0].ticklabel_format(scilimits=(-3,3))
-        self.ax[0].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-
-        self.canvas.draw()    # refresh canvas
-        return 0
-
-    def plotPicked(self):
-        settings["ax1Limits"] = {"xlim":self.ax[1].get_xlim(), "ylim":self.ax[1].get_ylim()}
-        self.ax[1].clear()
-        self.allStems = {}     # Dictionary that stores references to all stem lines
-
-        markerline, stemlines, baseline = self.ax[1].stem([peak.shft for peak in stepClass.pckdPeaks], [peak.intn for peak in stepClass.pckdPeaks], basefmt=" ")     # , label=node.name if j==0 else ''
-        plt.setp(stemlines, linewidth=1, color=(0.5, 0.5, 0.5), picker = 2)    # Picking tolerance in px
-        plt.setp(markerline, markerfacecolor = (0.5, 0.5, 0.5), linestyle='None', color=(0.5, 0.5, 0.5), markersize=2)      # , picker=self.onStemPick
-
-        self.ax[1].set_xlim(settings["ax1Limits"]["xlim"])     # Set the saved limits
-        self.ax[1].set_ylim(settings["ax1Limits"]["ylim"])     # Set the saved limits
-        self.ax[1].set_navigate(False)
-
-        self.canvas.draw()
-
-    def manuPick(self):
-        """Manual peak picking"""
-        print("Manual peak picking")
-        pass
-
-    def assignPeaks(self):
-        """Assigns model peaks to one of the picked peaks."""
-        #self.autoPick()
-        steps[0].assign()
-        self.assigned.emit()    # Tell the parent form to update the tree widget
-
-    def onThreshChanged(self, val):
-        """Reads new value from the slider sets the threshold, picks new peaks, and updates the plot."""
-        pthres_rel = (val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN)   # Relative range (0, 1)
-        self.pthres = pthres_rel * (self.drange[1] - self.drange[0]) + self.drange[0]
-
-        # Automatic peak picking
-        f = stepClass.f
-        yFph = stepClass.yFph
-        pos, ids, width, amps = ng.analysis.peakpick.pick(yFph.real, pthres = self.pthres, algorithm='downward', cluster='False', table=False)      # , algorithm='connected'
-        stepClass.pckdPeaks = [peakSpec(freq=f[p[0]], intn = a, fwhm=w[0] / np.pi) for p, w, a in zip(pos, width, amps) if w[0] > 0]
-
-        self.plot()
-
-    def reset(self):
-        """Resets the sliders to display the phasing parameters for the currently open file/step."""
-        self.sliderThresh.blockSignals(True)
-
-        #self.mdldPeaksTree.setModel(self.PeakTreeModel())
-        print(stepClass.mdldPeaks)
-
-        # Range of displayed values
-        if stepClass.yF is not None:
-            self.drange = np.percentile(abs(stepClass.yF), (90, 99.99))
-            self.pthres = self.drange[0] + 0.05 * (self.drange[1] - self.drange[0])
-
-            # Set the slider
-            pthres_rel = (self.pthres - self.drange[0]) / (self.drange[1] - self.drange[0])
-            val = pthres_rel * (self.RANGE_MAX - self.RANGE_MIN) + self.RANGE_MIN
-            self.sliderThresh.setValue(val)
-        else:
-            self.drange = self.ax[0].get_ylim()    # Display range
-            self.pthres = None
-            self.sliderThresh.setValue((self.RANGE_MAX - self.RANGE_MIN)/2)
-
-        self.sliderThresh.blockSignals(False)
-
 class PhasingWidget(QWidget):
     """A widget that contains scrollers/buttons for phasing and that interacts with a matplotlib canvas to plot the results."""
 
     RANGE_MAX = 64
     RANGE_MIN = -64
-    phased = pyqtSignal(float, float)        # Emmited when phasing is completed; outputs the values of ph0 and ph1 in degrees
-
-    def deg2tau(self, p0deg, p1deg):
-        """Converts the phasing parameters from degrees to their tau and theta representations."""
-        f_Hz = self.datum.f*self.datum.c0 - self.datum.f0
-
-        theta = np.asscalar(p0deg*np.pi/180.0 - p1deg*np.pi/180.0*(f_Hz[0])/(f_Hz[1]-f_Hz[0])/len(f_Hz))
-        tau = np.asscalar( p1deg / (f_Hz[1]-f_Hz[0]) / 360. / len(f_Hz) )
-        return theta, tau
-
-    def tau2deg(self, theta, tau):
-        """Converts from theta/tau representation to phase angles in degrees."""
-        f_Hz = self.datum.f*self.datum.c0 - self.datum.f0
-
-        return p0deg, p1deg
+    sigPhasingProgress = pyqtSignal(object)
+    sigPhasingComplete = pyqtSignal(float, float)          # Emmited when phasing is completed; outputs the values of ph0 and ph1 in degrees
 
     def __init__(self, orientation='Vertical', parent=None):
 
         super().__init__(parent)
-
-        #print(self.__dict__)
-        #self.sliderPh0 = self.ui.findChild(QtGui.QSlider, "sliderPh0")
-        # self.datum = datum
-        # self.canvas = canvas
-        # self.ax = self.canvas.figure.get_axes()
-
         self.p0deg = 0.0     # Phasing parameters in degrees
         self.p1deg = 0.0
-        self.pivot = 0.0     # Pivot point for phasing, float in the range (0.0, 1.0)
+        self.pivot = 0.5     # Pivot point for phasing, float in the range (0.0, 1.0)
 
         self.sliderPh0, self.sliderPh1 = QSlider(), QSlider()
-        self.sliderPh0.setMinimumHeight(120)
-        self.sliderPh1.setMinimumHeight(120)
         self.sliderPh0.setRange(self.RANGE_MIN, self.RANGE_MAX)
         self.sliderPh1.setRange(self.RANGE_MIN, self.RANGE_MAX)
         self.sliderPh0.setValue(0)
@@ -3503,17 +2889,16 @@ class PhasingWidget(QWidget):
         self.sliderPh1.valueChanged.connect(self.onPh1SliderChanged)
         self.sliderPh0.sliderReleased.connect(self.phasingComplete)
         self.sliderPh1.sliderReleased.connect(self.phasingComplete)
-        # self.sliderPh0.sliderPressed.connect(self.startPlotting)
-        # self.sliderPh1.sliderPressed.connect(self.startPlotting)
         self.bttnSetPivot = QPushButton('Pivot')
-        self.bttnSetPivot.clicked.connect(self.setPivot)
         self.bttnAutoPhase = QPushButton('Auto')
-        self.bttnAutoPhase.clicked.connect(self.autoPhase)
+#        self.bttnAutoPhase.clicked.connect(self.autoPhase)
         layout = QGridLayout()
         if orientation == 'Vertical':
             layout.setVerticalSpacing(0)
             self.sliderPh0.setOrientation(Qt.Vertical)
             self.sliderPh1.setOrientation(Qt.Vertical)
+            self.sliderPh0.setMinimumHeight(120)
+            self.sliderPh1.setMinimumHeight(120)
             layout.addWidget(QLabel("Phasing"), 0, 0, 1, 2, Qt.AlignCenter|Qt.AlignTop)
             layout.addWidget(QLabel("ph0"), 1, 0, Qt.AlignCenter|Qt.AlignTop)
             layout.addWidget(QLabel("ph1"), 1, 1, Qt.AlignCenter|Qt.AlignTop)
@@ -3522,36 +2907,65 @@ class PhasingWidget(QWidget):
             #layout.addWidget(self.bttnSetPivot, 3, 0, 1, 2, Qt.AlignCenter)
             layout.addWidget(self.bttnAutoPhase, 4, 0, 1, 2, Qt.AlignCenter)
             self.setMaximumWidth(80)
+            self.setMaximumHeight(250)
         else:
             self.sliderPh0.setOrientation(Qt.Horizontal)
             self.sliderPh1.setOrientation(Qt.Horizontal)
+            self.sliderPh0.setMinimumWidth(120)
+            self.sliderPh1.setMinimumWidth(120)
             layout.addWidget(QLabel("Phasing"), 0, 0, 1, 2, Qt.AlignCenter|Qt.AlignTop)
             layout.addWidget(QLabel("ph0"), 1, 0, Qt.AlignCenter)
             layout.addWidget(QLabel("ph1"), 2, 0, Qt.AlignCenter)
             layout.addWidget(self.sliderPh0, 1, 1, Qt.AlignCenter)
             layout.addWidget(self.sliderPh1, 2, 1,  Qt.AlignCenter)
-            layout.addWidget(self.bttnSetPivot, 2, 2, Qt.AlignCenter)
-            layout.addWidget(self.bttnAutoPhase, 1, 2, Qt.AlignCenter)
+            # layout.addWidget(self.bttnSetPivot, 2, 2, Qt.AlignCenter)
+            # layout.addWidget(self.bttnAutoPhase, 1, 2, Qt.AlignCenter)
+            self.setMaximumHeight(100)
 
-        self.setMaximumHeight(250)
-        #self.resize(50, 200)
+        # Set event filters on the sliders to disallow scrolling with the mouse wheel
+        class scrollEventFilter(QObject):
+
+            def __init__(self, parent=None):
+                super().__init__(parent)
+
+            def eventFilter(self, source, event):
+                if event.type() == QEvent.Wheel:
+                    return True    # True will not propagate the event to the source widget
+
+                return super().eventFilter(source, event)
+
+        self.scrollEventFilterInstance = scrollEventFilter()
+        self.sliderPh0.installEventFilter(self.scrollEventFilterInstance)
+        self.sliderPh1.installEventFilter(self.scrollEventFilterInstance)
+
         self.setLayout(layout)
 
-    def setNewDatum(self, datum):
-        self.datum = datum
-        self.reset()
+    def setData(self, f, yF, xF, freqBlocks, frange=None, pivot=None):
+        """freBlocks is a list of tuples (min, max, bool), where the last position indicates whether the range is active (fitted) or not."""
+        self.yF = yF
+        self.xF = xF
+        self._frange = (min(f), max(f)) if frange is None else frange
+        self.f_norm = (f - self._frange[0]) / (self._frange[1] - self._frange[0])    # Frequency scale normalized to [0, 1]
+
+        if pivot is not None:
+            self.setPivot(pivot)
+
+    def setPivot(self, val):
+        """Sets a pivoting point for phase correction."""
+        self.pivot = np.asscalar( (val - self._frange[0]) / (self._frange[1] - self._frange[0]) )
 
     def onPh0SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph0_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
-        self.p0deg = ph0_rel * 180.0
-
-        # self.plot()
+        self.p0deg = ph0_rel * 5.0
+        yFph = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
+        self.sigPhasingProgress.emit(yFph)
 
     def onPh1SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
         ph1_rel = 2*(val - self.RANGE_MIN) / (self.RANGE_MAX - self.RANGE_MIN) - 1
-        p1deg_new = ph1_rel * 180.0
+        p1deg_new = ph1_rel * 30.0
+
         if self.pivot != 0.0:
             self.sliderPh0.blockSignals(True)
             self.p0deg += self.pivot*(self.p1deg - p1deg_new)     # find the new ph0 value given the current non-zero pivoting point
@@ -3560,94 +2974,59 @@ class PhasingWidget(QWidget):
             self.sliderPh0.blockSignals(False)
         self.p1deg = p1deg_new
 
-        # self.plot()
+        yFph = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
+        self.sigPhasingProgress.emit(yFph)
 
-    def setPivot(self):
-        """Sets a pivoting point for phase correction."""
-        self.pivot = 0.5
+    # def reset(self):
+    #     """Resets the sliders to display the phasing parameters for the currently open file/step."""
+    #     try:
+    #         theta = self.datum.getCrntVal(('.', 'theta', 0))
+    #         tau = self.datum.getCrntVal(('.', 'tau', 0))
+    #     except AttributeError:
+    #         theta, tau = 0., 0.             # If the datum is the entire Workspace
+    #
+    #     self.pivot = 0.0
+    #     self.p0deg = 180 * theta / np.pi
+    #     try:
+    #         self.p1deg = np.asscalar( tau*(self.datum.f[-1]*self.datum.c0-self.datum.f0)*360. )
+    #     except (IndexError, AttributeError) as e:      # If self.datum.f == []
+    #         self.p1deg = 0.
+    #
+    #     # Set the sliders
+    #     self.sliderPh0.blockSignals(True)
+    #     self.sliderPh1.blockSignals(True)
+    #     self.sliderPh0.setValue((self.p0deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
+    #     self.sliderPh1.setValue((self.p1deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
+    #     self.sliderPh0.blockSignals(False)
+    #     self.sliderPh1.blockSignals(False)
 
-    def reset(self):
-        """Resets the sliders to display the phasing parameters for the currently open file/step."""
-        try:
-            theta = self.datum.getCrntVal(('.', 'theta', 0))
-            tau = self.datum.getCrntVal(('.', 'tau', 0))
-        except AttributeError:
-            theta, tau = 0., 0.             # If the datum is the entire Workspace
-
-        self.pivot = 0.0
-        self.p0deg = 180 * theta / np.pi
-        try:
-            self.p1deg = np.asscalar( tau*(self.datum.f[-1]*self.datum.c0-self.datum.f0)*360. )
-        except (IndexError, AttributeError) as e:      # If self.datum.f == []
-            self.p1deg = 0.
-
-        # Set the sliders
-        self.sliderPh0.blockSignals(True)
-        self.sliderPh1.blockSignals(True)
-        self.sliderPh0.setValue((self.p0deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
-        self.sliderPh1.setValue((self.p1deg/180.0+1)*(self.RANGE_MAX - self.RANGE_MIN)/2 + self.RANGE_MIN)
-        self.sliderPh0.blockSignals(False)
-        self.sliderPh1.blockSignals(False)
-
-    def startPlotting(self):
-        self.f = self.datum.f
-        self.yF = self.datum.yF
-        # remember the axis settings
-        if settings["ax0Limits"] is not None:
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-            indxPlot = np.flatnonzero((self.datum.f<=max(settings["ax0Limits"]["xlim"]))*(self.datum.f>=min(settings["ax0Limits"]["xlim"])))
-            supsRatio = math.ceil(indxPlot.size / (2**13))   # Subsampling ratio; plot no more than 2^12 points
-            indxPlot = np.append(indxPlot[:-1:supsRatio], indxPlot[-1])  # Make sure that the first and the last indices of each group are included
-            self.f = self.f[indxPlot]
-            self.yF = self.yF[indxPlot]
-
-        self.plot()
-
-    def plot(self):
-        """Plots the phased spectrum"""
-        self.ax[0].clear()     # discards the old graph
-
-        theta, tau = self.deg2tau(self.p0deg, self.p1deg)
-        ph = np.exp(-1j*2*np.pi * tau * (self.f*self.datum.c0-self.datum.f0) - 1j*theta ).reshape((-1,1))
-        yFph = self.yF * ph
-        self.ax[0].plot(self.f, yFph.real, '-', color=(0,0.58,0.86), linewidth=1.5, label='Measured data')
-
-        self.ax[0].legend(loc=0)
-
-        # Set the updated limits
-        if settings["ax0Limits"] is not None:
-            self.ax[0].set_xlim(settings["ax0Limits"]["xlim"])
-            self.ax[0].set_ylim(settings["ax0Limits"]["ylim"])
-        else:
-            self.ax[0].relim()    # recompute the ax.dataLim
-            self.ax[0].margins(0, 0.05)    # x and y margins in percentages
-            self.ax[0].autoscale()    # update ax.viewLim using the new dataLim
-            #self.ax[0].autoscale_view(tight=True, scalex=True, scaley=True)
-            settings["ax0Limits"] = {"xlim":self.ax[0].get_xlim(), "ylim":self.ax[0].get_ylim()}
-        self.ax[0].ticklabel_format(scilimits=(-3,3))
-        self.ax[0].set_xlabel('Chemical shift, ppm', horizontalalignment='right', x=1.0)
-
-        self.canvas.draw()    # refresh canvas
-        return 0
-
-    def autoPhase(self):
-        """Autophasing"""
-        p0, p1 = ng.process.proc_autophase.automatic_ps(self.datum.yF.ravel(), 'acme', p0=-self.p0deg, p1=-self.p1deg)     # 'peak_minima'
-        self.p0deg, self.p1deg = -p0, -p1
-        self.p0deg = (self.p0deg + 180.0) % 360.0 - 180.0     # make sure the phase stays in the (-180.0, 180.0) interval
-        self.pivot = 0.0
-        print(self.p0deg, self.p1deg)
-
-        theta, tau = self.deg2tau(self.p0deg, self.p1deg)
-        print(theta, tau)
-
-        self.startPlotting()
-        self.phasingComplete()
+    # def autoPhase(self):
+    #     """Autophasing"""
+    #     p0, p1 = ng.process.proc_autophase.automatic_ps(self.datum.yF.ravel(), 'acme', p0=-self.p0deg, p1=-self.p1deg)     # 'peak_minima'
+    #     self.p0deg, self.p1deg = -p0, -p1
+    #     self.p0deg = (self.p0deg + 180.0) % 360.0 - 180.0     # make sure the phase stays in the (-180.0, 180.0) interval
+    #     self.pivot = 0.0
+    #     print(self.p0deg, self.p1deg)
+    #
+    #     theta, tau = self.deg2tau(self.p0deg, self.p1deg)
+    #     print(theta, tau)
+    #
+    #     self.phasingComplete()
 
     def phasingComplete(self):
-        print("Phasing complete:", self.p0deg, self.p1deg)
-        # theta, tau = self.deg2tau(self.p0deg, self.p1deg)
-        self.phased.emit(self.p0deg, self.p1deg) # self.phased.emit(self.p0deg, self.p1deg)
+        # print("Phasing complete:", self.p0deg, self.p1deg)
+        self.sigPhasingComplete.emit(self.p0deg, self.p1deg)
+        returnToZero = True
+        if returnToZero:
+            self.sliderPh0.blockSignals(True)
+            self.sliderPh0.setValue(0)
+            self.sliderPh0.blockSignals(False)
+            self.sliderPh1.blockSignals(True)
+            self.sliderPh1.setValue(0)
+            self.sliderPh1.blockSignals(False)
+
+            self.yF = self.yF * np.exp(-1j*(self.p0deg + self.p1deg*self.f_norm)*np.pi/180)
+            self.p0deg, self.p1deg = 0.0, 0.0
 
 class PreprocessingWidget(QWidget):
     """Handles basic preprocessing operations, e.g. zero-filling and apodization."""
@@ -3811,14 +3190,12 @@ class FittingThread(QThread):
         actnToRun = self._actnToRun
 
         if isinstance(actnToRun, Step):
-            # The action code is an integer - i.e. the number of a step to optimize
-            step = actnToRun
-            # Fit the model parameters
-            fileToFit.optimize(parsKeys=step.parsKeys, autoKeys=step.autoKeys, frqBlkIds=step.frqBlkIds, evaluatePriors=False)
+            # The action code is a Step
+            actnToRun.run(fileToFit)         # Run the step on the given datum
         else:
             step = self._evalStep
 
-            if actnToRun in ['Ph0', 'Ph1', 'PhA']:
+            if actnToRun in ['Ph0', 'Ph1', 'PhX']:
                 # Adjust the phasing parameters
                 fileToFit.adjust_phase(frqBlkIds=step.frqBlkIds, mode=actnToRun)
                 # Re-evaluate the step to update the (marginalized) amplitudes and the signals to be plotted
@@ -3826,6 +3203,9 @@ class FittingThread(QThread):
             elif actnToRun == 'Rsd':
                 # Adjusting the residual
                 fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds)
+            elif actnToRun == 'Bln':
+                # Adjust the baseline without abjusting the residual
+                fileToFit.adjust_residual(frqBlkIds=step.frqBlkIds, correct_comps=False)
             elif actnToRun == 'Lsh':
                 # Adjust the lineshape
                 fileToFit.adjust_shape(frqBlkIds=step.frqBlkIds)
@@ -3838,17 +3218,20 @@ class FittingThread(QThread):
             elif actnToRun == 'Evl':
                 # Only evaluatethe last step
                 fileToFit.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
-            elif actnToRun == 'AuP':
+            elif actnToRun == 'PhA':
                 # Autophasing
                 fileToFit.auto_phase()
+            elif actnToRun == 'PhA0':
+                # Autophasing, only Ph0
+                fileToFit.auto_phase(fit_Ph1=False)
 
 class MySpecPlot(FigureCanvas):
 
     def __init__(self, figure):
         pass
 
-class MainView(QMainWindow):
-    """Main GUI form class."""
+class MainView_Generic(QMainWindow):
+    """Main GUI form class; can be subclassed by more specialized applications with specific GUIs, e.g. wine analysis."""
 
     def __init__(self, wsp, expiryTime = np.inf, parent = None):
         # Set the expiry time/date
@@ -3871,30 +3254,19 @@ class MainView(QMainWindow):
         self._crnt = self.wsp     # Currently opened Series/Datum/or the entire Workspace
         self._undoStack = []      # The stack of previous actions; each entry is a 2-tuple with the first element = the datum, second elent = flat dictionary of previous parameter values
         self._redoStack = []
-
-        # Global settings
-        settings.update({"ax0Limits": None,
-                        "ax1Limits": {'ylim':(0, 5)},
-                        "ax2Limits": None,
-                        "startFromPars" : "current",          # Starting values of parameters when fitting multiple files (current, previous, default) - will be copied from crntParsH of this file, previous file or dfltParsH
-                        "autoPhase" : False,
-                        "autoPick" : False})
-        self.fittingQueueFiles, self.fittingqueueActns = [], []    # List of file indices to be fitted in that order from last to first; if [], the current file will be fitted
+        self._actions = {}
 
         # initialize the main window
-        super(MainView, self).__init__(parent)
-        self.resize(1400, 800)
+        super().__init__(parent)
+        self.setAcceptDrops(True)      # Allow drag-and-drop
         self.setupGUI()
+        self.setup_actions()
+        self.assign_actions()
 
         # Start the fitting thread
         self.fittingThread = FittingThread()
         self.fittingThread.finished.connect(self.onThreadFinished)
         self.fittingThread.terminated.connect(self.onThreadFinished)
-
-        ## Install the custom output stream
-        if compile_standalone:
-            sys.stdout = EmittingStream(textWritten=self.normalOutputWritten)
-            sys.stderr = EmittingStream(textWritten=self.errorOutputWritten)
 
     def __del__(self):
         # Restore sys.stdout (if used to collect output to the console)
@@ -3926,11 +3298,12 @@ class MainView(QMainWindow):
         self.printoutEdit.ensureCursorVisible()
 
     def _icon(self, name):
-        return QIcon(path.join('icons', name))
+        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
 
     def setupGUI(self):
         """Sets the layout for the main window."""
-        self.setWindowTitle("Model-based quantitative NMR analysis ver. {} ({})".format(version, str(date.today())) )
+        self.setWindowTitle("Base class for NMR analysis.".format(version, str(date.today())) )
+        self.resize(750, 500)
 
         # ------------- set the main diagram --------------
         #rc('font', **{'family' : 'sans-serif', 'weight' : 'normal', 'size'   : 10})
@@ -3948,141 +3321,6 @@ class MainView(QMainWindow):
         #rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
         #rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
-        # ------------------------- Set up the toolbars ------------------------
-        menubar = self.menuBar()
-        tbMain = self.addToolBar("File")               # Main toolbar
-        tbTree = QToolBar("Tree")                      # Tree toolbar
-        tbTree.setIconSize(QtCore.QSize(18,18))
-        tbTree.setFloatable(False)
-        tbTree.setMovable(False)
-
-        # ------------------- Printout for the console -------------------------
-        self.printoutEdit = QPlainTextEdit()
-        self.printoutEdit.setReadOnly(True)
-        self.printoutEdit.resize(50, 50)
-
-        # ----------------- set up the pie chart figure
-        self.pieFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
-        self.pieCanvas = FigureCanvas(self.pieFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
-        self.pieCanvas.setMaximumHeight(275)
-        self.ax_pie = self.pieFigure.add_subplot(111)    # create axes
-
-        # ------------------ 2. Set up the chemical tree ----------------------
-        self.treeView = ChemTreeView()
-        self.treeModel = ChemTreeModel(self.wsp)
-        self.treeView.setModel(self.treeModel)
-        self.treeModel.requestParameterChange.connect( self.onParameterChange )       # Updates the parameters and evaluates the active step if current values are changed by the user
-        self.treeView.changedSelected.connect(self.selectStems)                       # If new parameter is selected by the user
-        self.treeView.requestAdjustment.connect( lambda actnToRun : self.startThread(queueActns=[actnToRun]) )     # Adjust the phase
-
-        # create a text edit widget to choose the optimization sequence
-        self.stepsEdit = QPlainTextEdit('Please enter a sequence of steps to fit. All steps will be fitted consecutively by default.')  # , e.g.: 1, A, 5, (3, 4, A, 1), 2
-        self.stepsEdit.setMaximumHeight(50)
-
-        # ----------------- Spectrum figure in pyqtgraph -----------------------
-        self.mainFigureWidget = MainSpectrumWidget()
-        self.mainFigureWidget.sigFreqRangeSelected.connect(self.onFreqRangeSelected)
-        self.mainFigureWidget.sigFreqRangeChanged.connect(self.onFreqRangeChanged)
-        self.mainFigureWidget.sigMouseClicked.connect(self.onMouseClicked)
-        self.mainFigureWidget.sigStemsClicked.connect(self.treeView.selectPickedParameter)
-        self.mainFigureWidget.sigStemsDragged.connect(self.treeView.updateValue)
-        self.mainFigureWidget.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
-
-        # Create the parameters tab
-        tabParam = QWidget()
-        layParam = QVBoxLayout()
-        tabParam.setLayout(layParam)
-        layParam.addWidget(self.treeView)
-        layParam.addWidget(tbTree)
-        layParam.addWidget(self.stepsEdit)
-
-
-        # ----------------------------------------------------------------------
-        #                            Navigation tab
-        # ----------------------------------------------------------------------
-        # Create the navigation tree
-        self.naviTreeView = NavigationTreeView()
-        self.naviTreeModel = NavigationTreeModel(self.wsp)
-        self.naviSelection = QItemSelectionModel(self.naviTreeModel)
-        self.naviTreeView.setModel(self.naviTreeModel)
-        self.naviTreeView.setSelectionModel(self.naviSelection)
-        # self.naviTreeDelegate = NavigationTreeDelegate()
-        # self.naviTreeView.setItemDelegate(self.naviTreeDelegate)
-        self.naviSelection.currentChanged.connect(self.onCurrentSelectedChanged)
-        self.naviTreeView.requestPasteCrnt.connect(self.treeView.pasteCrntPars)     # Paste copied parameter values to all selected Datums in the naviTreeView
-        self.naviTreeView.requestPasteDflt.connect(self.treeView.pasteDfltPars)
-        self.naviTreeView.requestFitSelected.connect(self.fitAllSteps)
-
-        # Set up the tab
-        tabNavi = QWidget()
-        layNavi = QVBoxLayout()
-        tabNavi.setLayout(layNavi)
-        layNavi.addWidget(self.naviTreeView)
-        layNavi.addWidget(self.pieCanvas)
-        layNavi.setContentsMargins(1,1,1,1)
-
-
-        # ----------------------------------------------------------------------
-        #                            Settings tab
-        # ----------------------------------------------------------------------
-        # A table to display frequency ranges
-        self.freqTableView = FreqTableView()
-        self.freqTableModel = FreqTableModel(self.wsp)
-        self.freqTableView.setModel(self.freqTableModel)
-        self.freqTableModel.freqBlockChanged.connect(self.updFreqBlock)
-
-        # Add the preprocessing parameters tool
-        self.preprocTool = PreprocessingWidget()
-        self.preprocTool.parsChanged.connect(lambda x : self.resetSignals(**x))
-        # self.phasingTool = PhasingWidget(self._crnt, self.canvas, orientation='Horizontal') # set to 'Horizontal' if displayed on the right
-        # self.phasingTool.phased.connect(self.onPhased)
-
-        # Set up the tab
-        tabSettings = QWidget()
-        laySettings = QVBoxLayout()
-        tabSettings.setLayout(laySettings)
-        laySettings.addWidget(self.freqTableView)
-        laySettings.addWidget(self.preprocTool)
-
-        self.setupActions(menubar, tbMain, tbTree)
-
-        # --------------- Left --------------------
-        widgetLeft = QTabWidget()
-        widgetLeft.setMinimumSize(200, 0)
-        widgetLeft.setMaximumWidth(250)
-        # set up the tabs
-        widgetLeft.setTabPosition(QTabWidget.North)
-        widgetLeft.addTab(tabNavi, 'Navigation')
-        widgetLeft.addTab(tabSettings, 'Settings')
-        widgetLeft.setCurrentIndex(0)
-
-        # -------------- Center -------------------
-        # spectrum on top and console on the bottom
-        widgetCenter = QSplitter()
-        widgetCenter.setOrientation(Qt.Vertical)
-        widgetCenter.addWidget(self.mainFigureWidget)
-        widgetCenter.addWidget(self.printoutEdit)
-        widgetCenter.setSizes([1000, 10])
-
-        # --------------- Right -------------------
-        widgetRight = QTabWidget()
-        widgetRight.setMinimumSize(320, 0)
-        widgetRight.setTabPosition(QTabWidget.North)
-        widgetRight.addTab(tabParam, 'Parameters')
-
-        # Put everything together in a QSplitter
-        mainSplitter = QSplitter()
-        mainSplitter.addWidget(widgetLeft)
-        mainSplitter.addWidget(widgetCenter)
-        mainSplitter.addWidget(widgetRight)
-        mainSplitter.setStretchFactor(0, 1)
-        mainSplitter.setStretchFactor(1, 3)
-        mainSplitter.setStretchFactor(2, 1)
-        # mainSplitter.setHandleWidth(1)
-
-        # Set the result in the center of the form
-        self.setCentralWidget(mainSplitter)
-
         # ---------------------- Set up the status bar -------------------------
         self.statusBar= QStatusBar()
         self.statusBar.setMaximumHeight(16)
@@ -4092,298 +3330,202 @@ class MainView(QMainWindow):
         self.progressBarFiles.setMaximumWidth(400)
         self.statusBar.addPermanentWidget(self.progressBarFiles)
 
-    def setupActions(self, menubar, tbMain, tbTree):
-        # Add clear action
-        clearAction = QAction(QIcon('icons\icon_new.png'), 'Clear workspace', self)
-        clearAction.setStatusTip('Clear the workspace')
-        clearAction.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None))
+    def setup_actions(self):
+        """Sets up all actions to be used in the GUI."""
+        self._actions.clear()
+
+        # Clear workspace action
+        new = QAction(QIcon('icons\icon_new.png'), 'Clear workspace', self)
+        new.setStatusTip('Clear the workspace')
+        new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None))
+        self._actions['Clear workspace'] = new
+
         # Add import datafile action
-        actnImportData = QAction(self._icon('icon_addFile.png'), 'Import files', self)
-        actnImportData.setStatusTip('Import new data and add them to the current series')
-        actnImportData.triggered.connect(lambda : self.naviTreeView.onImportData(crnt_series=self._crnt))
-        actnRemoveCurrent = QAction(self._icon('icon_removeFile.png'), 'Remove file', self)
-        actnRemoveCurrent.setStatusTip('Remove file from the workspace')
-        actnRemoveCurrent.triggered.connect(self.removeCurrent)
-        showSettingsAction = QAction(self._icon('icon_settings.png'), 'Settings', self)
-        showSettingsAction.setStatusTip('Show settings dialog')
-        showSettingsAction.triggered.connect(self.showSettingsDialog)
-        # Add load Tree action
-        actnLoadTree = QAction(self._icon('icon_hierarchy.png'), 'Load new tree', self)
-        actnLoadTree.setStatusTip('Load a new chemical tree')
-        actnLoadTree.triggered.connect(self.loadChemTree)
-        # Add load action
-        loadAction = QAction(self._icon('icon_load.png'), 'Load workspace', self)
-        loadAction.setStatusTip('Load the workspace')
-        loadAction.triggered.connect(self.onLoadWspAction)
+        new = QAction(self._icon('icon_addFile.png'), 'Import files', self)
+        new.setStatusTip('Import new data and add them to the current series')
+        new.triggered.connect(self.onImportData)
+        self._actions['Import file'] = new
+
+        new = QAction(self._icon('icon_removeFile.png'), 'Remove file', self)
+        new.setStatusTip('Remove file from the workspace')
+        new.triggered.connect(self.removeCurrent)
+        self._actions['Remove file'] = new
+
+        # Show the settings dialog
+        new = QAction(self._icon('icon_settings.png'), 'Settings', self)
+        new.setStatusTip('Show settings dialog')
+        new.triggered.connect(self.showSettingsDialog)
+        self._actions['Show settings'] = new
+
+        # Load Tree action
+        new = QAction(self._icon('icon_hierarchy.png'), 'Load new tree', self)
+        new.setStatusTip('Load a new chemical tree')
+        new.triggered.connect(self.loadChemTree)
+        self._actions['Load tree'] = new
+
+        # Load wokspace action
+        new = QAction(self._icon('icon_load.png'), 'Load workspace', self)
+        new.setStatusTip('Load the workspace')
+        new.triggered.connect(self.onLoadWspAction)
+        self._actions['Load workspace'] = new
+
         # Add save action
-        saveAction = QAction(self._icon('icon_save.png'), 'Save workspace', self)
-        saveAction.setShortcut('Ctrl+S')
-        saveAction.setStatusTip('Save the workspace')
-        saveAction.triggered.connect(self.onSaveWspAction)
+        new = QAction(self._icon('icon_save.png'), 'Save workspace', self)
+        new.setShortcut('Ctrl+S')
+        new.setStatusTip('Save the workspace')
+        new.triggered.connect(self.onSaveWspAction)
+        self._actions['Save workspace'] = new
+
         # Add exit action
-        exitAction = QAction(QIcon('icons\icon_exit.png'), 'Exit', self)
-        exitAction.setShortcut('Ctrl+Q')
-        exitAction.setStatusTip('Exit application')
-        exitAction.triggered.connect(self.close)
+        new = QAction(QIcon('icons\icon_exit.png'), 'Exit', self)
+        new.setShortcut('Ctrl+Q')
+        new.setStatusTip('Exit the application')
+        new.triggered.connect(self.close)
+        self._actions['Exit'] = new
+
         # Show the information dialog action
-        actnAbout = QAction(QIcon('icons\icon_info.png'), 'About', self)
-        actnAbout.setStatusTip('Information about the program')
-        actnAbout.triggered.connect(self.showAboutMessage)
+        new = QAction(QIcon('icons\icon_info.png'), 'About', self)
+        new.setStatusTip('Information about the program')
+        new.triggered.connect(self.showAboutMessage)
+        self._actions['Show about'] = new
 
-        # ----------------------- Actions for the plot -------------------------
-        # Add freqBlock action
-        self.actnAddFreqBlock = QAction(self._icon('add_range.png'), 'Add optimization range', self)
-        self.actnAddFreqBlock.setShortcut('Ctrl+A')
-        self.actnAddFreqBlock.setStatusTip('Add optimization range')
-        self.actnAddFreqBlock.setCheckable(True)
-        # Remove freqBlock action
-        self.actnRemoveFreqBlock = QAction(self._icon('remove_range.png'), 'Remove optimization range', self)
-        self.actnRemoveFreqBlock.setShortcut('Ctrl+D')
-        self.actnRemoveFreqBlock.setStatusTip('Remove optimization range')
-        self.actnRemoveFreqBlock.setCheckable(True)
-        # Modify freqBlocks action
-        self.actnChangeFreqBlock = QAction(self._icon('modify_range.png'), 'Modify optimization ranges', self)
-        self.actnChangeFreqBlock.setStatusTip('Modify optimization ranges')
-        self.actnChangeFreqBlock.setCheckable(True)
-        # Add all frequency ranges actions to the group
-        self.actnGroupFreqBlocks = QActionGroup(self)
-        self.actnGroupFreqBlocks.addAction(self.actnAddFreqBlock)
-        self.actnGroupFreqBlocks.addAction(self.actnRemoveFreqBlock)
-        self.actnGroupFreqBlocks.addAction(self.actnChangeFreqBlock)
-        self.actnGroupFreqBlocks.triggered.connect(self.onFreqRangeControl)
-        self.actnGroupFreqBlocks._previuosAction = None          # Indicator of the previously selected action
-
-        # Show stems
-        self.actnToggleStems = QAction(self._icon('icon_showStems.png'), 'Show transition lines', self)
-        self.actnToggleStems.setStatusTip('Show transition lines')
-        self.actnToggleStems.setCheckable(True)
-        self.actnToggleStems.triggered.connect(self.toggleStems)
-        # Show components
-        self.actnToggleComps = QAction(self._icon('icon_showComponents.png'), 'Show fitted components', self)
-        self.actnToggleComps.setStatusTip('Show fitted components')
-        self.actnToggleComps.setCheckable(True)
-        self.actnToggleComps.triggered.connect(self.toggleComps)
-        # Show residual
-        self.actnToggleResid = QAction(self._icon('icon_plotResidual.png'), 'Show residual', self)
-        self.actnToggleResid.setStatusTip('Show residual')
-        self.actnToggleResid.setCheckable(True)
-        self.actnToggleResid.triggered.connect(self.toggleResid)
-        # Autoscale
-        self.actnAutoRange = QAction(self._icon('icon_autoScale.png'), 'Autoscale', self)
-        self.actnAutoRange.setStatusTip('Scale plot to data')
-        self.actnAutoRange.triggered.connect(self.mainFigureWidget.autoRange)
-        # Save Image
-        self.actnSaveImage = QAction(self._icon('icon_saveImage.png'), 'Save image', self)
-        self.actnSaveImage.setStatusTip('Saves the spectrum as image')
-        self.actnSaveImage.triggered.connect(self.mainFigureWidget.saveImage)
-
-        # ------------------------ Processing Actions --------------------------
-        # Autophase
-        self.actnAutoPhase = QAction(self._icon('icon_autoPhase.png'), 'Autophase', self)
-        self.actnAutoPhase.setStatusTip('Apply a phase correction algorithm')
-        self.actnAutoPhase.triggered.connect( lambda : self.startThread(queueActns=['AuP']) )
-        # Set custom lineshape
-        self.actnSetLshape = QAction(self._icon('icon_customShape.png'), 'Set custom lineshape', self)
-        self.actnSetLshape.setStatusTip('Apply a custom lineshape derived by deconvolution')
-        self.actnSetLshape.triggered.connect( lambda _ : self.startThread(queueActns=['Lsh']) )
-        self.actnResetLshape = QAction(self._icon('icon_resetShape.png'), 'Reset the lineshape', self)
-        self.actnResetLshape.setStatusTip('Remove the custom lineshape - reset to default (Lorentzian)')
-        self.actnResetLshape.triggered.connect( lambda _ : self.startThread(queueActns=['Lor']) )
-
-        # ----------------------- Actions for the tree -------------------------
-        # Add step
-        actnAddStep = QAction(self._icon('icon_addStep.png'), 'Add step', self)
-        actnAddStep.setStatusTip('Add an optimization step')
-        actnAddStep.triggered.connect(self.treeModel.addStep)
-        # Delete step
-        actnDelStep = QAction(self._icon('icon_delStep.png'), 'Remove active step', self)
-        actnDelStep.setStatusTip('Remove an optimization step')
-        actnDelStep.triggered.connect(self.treeModel.delStep)
-        # Copy All parameters
-        actnCopyAllPars = QAction(self._icon('icon_copy.png'), 'Copy all parameters', self)
-        actnCopyAllPars.setStatusTip('Copy current values of all parameters')
-        actnCopyAllPars.triggered.connect(lambda : self.treeView.copyCrntPars(keys=None))
-        # Paste copied parameters
-        actnPastePars = QAction(self._icon('icon_pasteCrnt.png'), 'Paste parameters', self)
-        actnPastePars.setStatusTip('Paste values of copied parameters as current')
-        actnPastePars.triggered.connect(lambda : self.treeView.pasteCrntPars(datums=None))
-        # Toggle LS/TLS
-        self.actnToggleTLS = QAction(self._icon('icon_TLS.png'), 'Use TLS algorithm', self)
-        self.actnToggleTLS.setStatusTip('Use the Total Least Squares algorithm')
-        self.actnToggleTLS.setCheckable(True)
-        def onToggleTLS():
-            config.SAMPL_funcType = 'TLS' if self.actnToggleTLS.isChecked() else 'LS'
-            self.treeModel.notifyDataChanged()     # Update the TLS line in the chemTree view
-        self.actnToggleTLS.triggered.connect(onToggleTLS)
+        # ------------------------ Actions for fitting -------------------------
         # Fit the last step action
-        self.actnFitLastStep = QAction(self._icon('icon_fitOneStep.png'), 'Fit active step', self)
-        self.actnFitLastStep.setStatusTip('Fit the last step')
-        self.actnFitLastStep.triggered.connect( lambda : self.startThread(queueActns=['Fit']) )
+        new = QAction(self._icon('icon_fitOneStep.png'), 'Fit active step', self)
+        new.setStatusTip('Fit the active step')
+        new.triggered.connect( lambda : self.startThread(queueActns=['Fit']) )
+        self._actions['Fit one step'] = new
+
         # Sample action
-        self.actnSample = QAction(self._icon('icon_sample.png'), 'Sample last step with MCMC', self)
-        self.actnSample.setStatusTip('Sample parameters checked on the last step with the MCMC algorithm')
-        self.actnSample.triggered.connect( self.sampleStep )
+        new = QAction(self._icon('icon_sample.png'), 'Sample last step with MCMC', self)
+        new.setStatusTip('Sample parameters checked on the last step with the MCMC algorithm')
+        new.triggered.connect( self.sampleStep )
+        self._actions['Sample step'] = new
+
         # Report without sampling action
-        self.actnReport = QAction(self._icon('icon_report.png'), 'Report results', self)
-        self.actnReport.setStatusTip('Report results without MCMC sampling')
-        self.actnReport.triggered.connect(lambda:self.sampleStep(onlyAutoKeys=True))
+        new = QAction(self._icon('icon_report.png'), 'Report results', self)
+        new.setStatusTip('Report results without MCMC sampling')
+        new.triggered.connect(lambda:self.sampleStep(onlyAutoKeys=True))
+        self._actions['Report results'] = new
+
         # Fit all steps action
-        self.actnFitAllSteps = QAction(self._icon('icon_fitAllSteps.png'), 'Fit all steps', self)
-        self.actnFitAllSteps.setStatusTip('Fit all steps for this file')
-        self.actnFitAllSteps.triggered.connect(lambda _ : self.fitAllSteps(selectedFiles = None))
+        new = QAction(self._icon('icon_fitAllSteps.png'), 'Fit all steps', self)
+        new.setStatusTip('Fit all steps for this file')
+        new.triggered.connect(lambda _ : self.fitAllSteps(selectedFiles = None))
+        self._actions['Fit all steps'] = new
+
         # Fit all files action
-        self.actnFitAllFiles = QAction(self._icon('icon_fitAllFiles.png'), 'Fit all files', self)
-        self.actnFitAllFiles.setStatusTip('Fit all steps for this file')
-        self.actnFitAllFiles.triggered.connect(self.fitAllFiles)
+        new = QAction(self._icon('icon_fitAllFiles.png'), 'Fit all files', self)
+        new.setStatusTip('Fit all steps for this file')
+        new.triggered.connect(self.fitAllFiles)
+        self._actions['Fit all files'] = new
+
         # Undo
-        self.actnUndo = QAction(self._icon('icon_undo.png'), 'Undo', self)
-        self.actnUndo.setStatusTip('Undo the previous change to model parameters')
-        self.actnUndo.triggered.connect(self.pullUndo)
+        new = QAction(self._icon('icon_undo.png'), 'Undo', self)
+        new.setStatusTip('Undo the previous change to model parameters')
+        new.triggered.connect(self.pullUndo)
+        self._actions['Undo'] = new
+
         # Redo
-        self.actnRedo = QAction(self._icon('icon_redo.png'), 'Return', self)
-        self.actnRedo.setStatusTip('Return the undone change to model parameters')
-        self.actnRedo.triggered.connect(self.pullRedo)
+        new = QAction(self._icon('icon_redo.png'), 'Return', self)
+        new.setStatusTip('Return the undone change to model parameters')
+        new.triggered.connect(self.pullRedo)
+        self._actions['Redo'] = new
+
         # Stop fitting action
-        actnstopThread = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
-        actnstopThread.setStatusTip('Stop fitting')
-        actnstopThread.triggered.connect(self.stopThread)
-        # Phase correction actions
-        """self.actnCorrectPh0 = QAction(self._icon('icon_correctPh0.png'), 'Correct ph0', self)
-        self.actnCorrectPh0.setStatusTip('Correct zero-order phasing.')
-        self.actnCorrectPh0.triggered.connect(self.correct_phase)"""
+        new = QAction(self._icon('icon_stopFitting.png'), 'Stop fitting', self)
+        new.setStatusTip('Stop fitting')
+        new.triggered.connect(self.stopThread)
+        self._actions['Stop thread'] = new
+
         # Save current results
-        actnSaveResults = QAction(self._icon('icon_saveResults.png'), 'Save results to file', self)
-        actnSaveResults.setStatusTip('Save all current results to file')
-        actnSaveResults.triggered.connect(self.saveResults)
+        new = QAction(self._icon('icon_saveResults.png'), 'Save results to file', self)
+        new.setStatusTip('Save all current results to file')
+        new.triggered.connect(self.saveResults)
+        self._actions['Save results'] = new
+
+    def assign_actions(self):
+        """Assigns actions to the lements of toolbars."""
+        menubar = self.menuBar()
+        tbMain = self.addToolBar("File")               # Main toolbar
 
         # ------------------------- set the menubar ----------------------------
         fileMenu = menubar.addMenu('&File')
-        fileMenu.addAction(actnImportData)
-        fileMenu.addAction(actnRemoveCurrent)
-        fileMenu.addAction(loadAction)
-        fileMenu.addAction(saveAction)
-        fileMenu.addAction(exitAction)
+        for actn in ['Import file','Remone file','Load workspace','Save workspace', 'Exit']:
+            fileMenu.addAction(self._actions[actn])
         helpMenu = menubar.addMenu('&Help')
-        helpMenu.addAction(actnAbout)
+        helpMenu.addAction(self._actions['Show about'])
 
         # ------------------------- Set the toolbar ----------------------------
-        tbMain.addAction(clearAction)
-        tbMain.addAction(actnImportData)
-        tbMain.addAction(actnRemoveCurrent)
-        tbMain.addAction(showSettingsAction)
-        tbMain.addSeparator()
-        tbMain.addAction(loadAction)
-        tbMain.addAction(saveAction)
-        tbMain.addSeparator()
-        tbMain.addAction(self.actnAddFreqBlock)
-        tbMain.addAction(self.actnRemoveFreqBlock)
-        tbMain.addAction(self.actnChangeFreqBlock)
-        tbMain.addAction(self.actnToggleStems)
-        tbMain.addAction(self.actnToggleComps)
-        tbMain.addAction(self.actnToggleResid)
-        tbMain.addAction(self.actnAutoRange)
-        # tbMain.addAction(self.actnSaveImage)
-        tbMain.addSeparator()
-        tbMain.addAction(self.actnUndo)
-        tbMain.addAction(self.actnRedo)
-        tbMain.addSeparator()
-        tbMain.addAction(self.actnAutoPhase)
-        tbMain.addAction(self.actnSetLshape)
-        tbMain.addAction(self.actnResetLshape)
-        tbMain.addSeparator()
-        tbMain.addAction(self.actnFitLastStep)
-        tbMain.addAction(self.actnFitAllSteps)
-        tbMain.addAction(self.actnFitAllFiles)
-        tbMain.addSeparator()
-        # tbMain.addAction(self.actnSample)
-        tbMain.addAction(self.actnReport)
-        tbMain.addAction(actnSaveResults)
+        for actn in ['Clear workspace','Import file','Remone file','Show settings',None,
+                     'Load workspace','Save workspace', None, 'Undo', 'Redo', None,
+                     'Fit one step', 'Fit all steps', 'Fit all files', None,
+                     'Report results', 'Save results', 'Exit']:
+            if actn is not None:
+                tbMain.addAction(self._actions[actn])
+            else: tbMain.addSeparator()
 
-        # ---------------------- Toolbar for the tree --------------------------
-        tbTree.addAction(actnLoadTree)
-        tbTree.addAction(actnAddStep)
-        tbTree.addAction(actnDelStep)
-        tbTree.addSeparator()
-        tbTree.addAction(actnCopyAllPars)
-        tbTree.addAction(actnPastePars)
-        tbTree.addSeparator()
-        # tbTree.addAction(self.actnToggleTLS)
-        tbTree.addAction(self.actnFitLastStep)
-        tbTree.addAction(self.actnFitAllSteps)
-        tbTree.addAction(self.actnFitAllFiles)
-        tbTree.addAction(actnstopThread)
-        # tbTree.addAction(self.actnSample)
+    # -------------------- Processing keyboard interactions --------------------
 
-    # ----------------- Signals from the main Spectrum Widget ------------------
-
-    def onFreqRangeSelected(self, lims):
-        # print('Selected a frequency block', lims)
-        self.actnAddFreqBlock.setChecked(False)           # Make sure that the buton is not pressed
-        self.mainFigureWidget.setSelectorFlag(False)      # Exit the selection mode
-        self.addFreqBlock(*lims)                          # Add new Frequency block
-
-        self.actnGroupFreqBlocks._previuosAction = None
-
-    def onFreqRangeChanged(self, indx, lims):
-        # print('Frequency block has changed', indx, lims)
-        self.actnChangeFreqBlock.setChecked(False)
-        self.mainFigureWidget.setCursor(mode='normal')
-        self.updFreqBlock(indx, lims)
-
-        self.actnGroupFreqBlocks._previuosAction = None
-
-    def onMouseClicked(self, pos):
-        # print('Mouse clicked', pos)
-        # Process the mouse click differently according to the current state
-        if self.actnRemoveFreqBlock.isChecked():    # Remove freqBlock request
-            self.mainFigureWidget.setCursor(mode='normal')
-            # Find which block was clicked on (the narrowest block that covers the clicked position)
-            scores = [blk.max-blk.min if blk.min < pos.x() < blk.max else np.inf for blk in self._crnt.freqBlocks]
-            indx = min(enumerate(scores), key=itemgetter(1))[0]      # Find the index of the minimum
-            if indx > 0:    # Don't remove the allFrequencies block
-                self.actnRemoveFreqBlock.setChecked(False)     # Unpress the button
-                self.remFreqBlock(indx)
-
-            self.actnGroupFreqBlocks._previuosAction = None
-
-    def onFreqRangeControl(self, actn):
-        """Called when the action group of freqRange controls is triggered"""
-        if self.actnGroupFreqBlocks._previuosAction == actn:
-            # Turn off the buttons
-            actn.setChecked(False)
-            self.mainFigureWidget.setMovableFreqBlocks(False)
-            self.mainFigureWidget.setSelectorFlag(False)
-            self.mainFigureWidget.setCursor(mode='normal')
-            self.actnGroupFreqBlocks._previuosAction = None
-            return 0
-
-        elif self.actnChangeFreqBlock.isChecked():
-            # Changing frequency blocks
-            self.mainFigureWidget.setMovableFreqBlocks(True)
-            self.mainFigureWidget.setSelectorFlag(False)
-            self.mainFigureWidget.setCursor(mode='hand')
-
-        elif self.actnAddFreqBlock.isChecked():
-            # Adding new frequency block
-            self.mainFigureWidget.setSelectorFlag(True)
-            self.mainFigureWidget.setMovableFreqBlocks(False)
-            self.mainFigureWidget.setCursor(mode='hand')
-
-        elif self.actnRemoveFreqBlock.isChecked():
-            # Removing a frequency block
-            self.mainFigureWidget.setMovableFreqBlocks(False)
-            self.mainFigureWidget.setSelectorFlag(False)
-            self.mainFigureWidget.setCursor(mode='hand')
-
-        self.actnGroupFreqBlocks._previuosAction = actn
+    def keyPressEvent(self, ev):
+        # self.scene().keyPressEvent(ev)
+        # self.sigKeyPress.emit(ev)
+        # print('Key pressed ', ev.key())
+        pass
 
     # ------------------------- Other utility methods --------------------------
 
+    def addDatumFromFile(self, path):
+        """Adds new Datum entries specified by the path to the series object."""
+
+        t, yT, dic = read_any_file(path)
+        c0, f0, dt, name = dic['c0'], dic['f0'], dic['dt'], dic['name']
+        if 'startTime' in dic.keys():
+            # TODO: Try dateutil to automatically parse dates in different formats
+            timeParsed = time.strptime(dic['startTime'].split('.')[0], '%Y-%m-%dT%H:%M:%S')         # Convert the time format from e.g. "2021-02-14T13:21:33.653" to '%Y%m%d-%H%M%S'
+            timeString = time.strftime('%Y%m%d-%H%M%S', timeParsed)
+            dic.update({'acqu_time' : timeString})
+
+        if len(self.wsp.series) == 0:
+            self.wsp.addSeries()
+        ser_ID, _ = self._crnt.selfID()
+        if ser_ID is None: ser_ID = -1
+        crnt_series = self.wsp.series[ser_ID]
+
+        # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
+        if crnt_series.c0 is None:
+            crnt_series.c0 = c0
+            crnt_series.f0 = f0
+            crnt_series.t = t
+            crnt_series.fullReset()
+        elif np.abs(crnt_series.c0 - c0) > 1e-3:
+            # Create a new series and put the data into it
+            # TODO: Check if new c0/f0 are the same as the old ones when loading the rest of the data
+            self.addSeries()
+            crnt_series = self.wsp.series[-1]
+            crnt_series.c0 = c0
+            crnt_series.f0 = f0
+            crnt_series.t = t
+            crnt_series.fullReset()
+
+        # Add the data to the current series
+        for i in range(yT.shape[1]):
+            dat = crnt_series.addDatum(yT[:,i].reshape(-1,1), name = name+str(i+1) if yT.shape[1] > 1 else name, extra=dic)
+
+        return dat
+
+    def onImportData(self):
+        """Runs a dialog to select a new file."""
+        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "Spinsolve FID (*.1d)"):   # ;;JEOL FID (*.jdf)
+            dat = self.addDatumFromFile(newFilePath)
+        return dat
+
     def removeCurrent(self):
-        """Removes current selection (Series or Datum)."""
-        if self._crnt != self.wsp:
-            self.naviTreeModel.remItems([self._crnt])
-            self.naviSelection.clear()    # Select the entire workspace
+        """Removes currently selected spectrum."""
+        crntID = self._crnt.selfID()
+        if crntID[0] == 0 and crntID[1] is not None:
+            self.wsp.series[0].data[crntID[1]].remove()
+            self.dataListWidget.takeItem(crntID[1])
 
     def setCurrent(self, newCrnt=None):
         """Sets the _crnt Datum and updates the plot, tables, etc. accordingly."""
@@ -4489,13 +3631,12 @@ class MainView(QMainWindow):
         else:
             settings.update({"HCmode":"1H"})
             stngView, stngConfig = None, None
-        settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
 
         # Reset the undo and redo stacks
         self._undoStack.clear()
-        self.actnUndo.setEnabled(False)
+        self._actions['Undo'].setEnabled(False)
         self._redoStack.clear()
-        self.actnRedo.setEnabled(False)
+        self._actions['Redo'].setEnabled(False)
 
         # Reset the workspace
         self.wsp.reset()
@@ -4519,7 +3660,7 @@ class MainView(QMainWindow):
         # Update the global config
         if stngConfig is not None:
             config.from_dict(config, stngConfig)
-        self.actnToggleTLS.setChecked(config.SAMPL_funcType == 'TLS')
+        self._actions['Toggle TLS'].setChecked(config.SAMPL_funcType == 'TLS')
 
     def resetSignals(self, zff=None, apod=None, flagAdapFreq=None):
         self._crnt.resetFreqs(zff, apod)
@@ -4530,17 +3671,6 @@ class MainView(QMainWindow):
 
         self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
         self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
-
-    def onPhased(self, theta, tau):
-        """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
-        # Update current parameter; convert phases from degrees to radians for ph0 (theta) and sec for ph1 (tau)
-        # theta = ph0*np.pi/180.
-        # tau = np.asscalar( ph1/(self._crnt.f[-1]*self._crnt.c0-self._crnt.f0)/360. )
-        self._crnt.setCrntVal(('.', 'theta', 0), theta)
-        self._crnt.setCrntVal(('.', 'tau', 0), tau)
-
-        self.treeModel.notifyDataChanged()
-        self.plotCurrent(autoRange=False)
 
     def showSettingsDialog(self):
         """Shows an input dialog and updates settings"""
@@ -4595,13 +3725,13 @@ class MainView(QMainWindow):
     # ------------------ Working with the fitting thread -----------------------
 
     def startThread(self, queueFiles=None, queueActns=None, pushUndo=True):
-        """Fits the files in the self.fittingQueueFiles list. Must be called only when appropriate self.fittingQueueFiles is set."""
+        """Fits the files in the queueFiles list."""
         # Disable controls that can start fitting
-        self.actnFitAllSteps.setDisabled(True)
-        self.actnFitAllFiles.setDisabled(True)
-        self.actnFitLastStep.setDisabled(True)
-        self.actnUndo.setEnabled(False)
-        self.actnRedo.setEnabled(False)
+        self._actions['Fit all steps'].setDisabled(True)
+        self._actions['Fit all files'].setDisabled(True)
+        self._actions['Fit one step'].setDisabled(True)
+        self._actions['Undo'].setEnabled(False)
+        self._actions['Redo'].setEnabled(False)
         self.setCursor(Qt.BusyCursor)
 
         if queueFiles is None: queueFiles = [self._crnt]
@@ -4640,7 +3770,7 @@ class MainView(QMainWindow):
                         fileToFit.resetCrntPars(crntParsH = copy.deepcopy(fileToFit.series[sid[0]].data[sid[1]-1].crntParsH) )
                 elif config.OPTIM_startFrom == "default":
                     fileToFit.resetCrntPars()   # Reset to defaults
-                else: # i.e. settings["startgFromPars"] == "current"
+                else:
                     pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
                 self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
 
@@ -4680,11 +3810,11 @@ class MainView(QMainWindow):
             self.treeModel.notifyDataChanged()
 
             # Enable controls that can start fitting again
-            self.actnFitAllSteps.setEnabled(True)
-            self.actnFitAllFiles.setEnabled(True)
-            self.actnFitLastStep.setEnabled(True)
-            self.actnUndo.setEnabled(len(self._undoStack) > 0)
-            self.actnRedo.setEnabled(len(self._redoStack) > 0)
+            self._actions['Fit all steps'].setEnabled(True)
+            self._actions['Fit all files'].setEnabled(True)
+            self._actions['Fit one step'].setEnabled(True)
+            self._actions['Undo'].setEnabled(len(self._undoStack) > 0)
+            self._actions['Redo'].setEnabled(len(self._redoStack) > 0)
             self.unsetCursor()
             self.progressBarFiles.setValue(self.progressBarFiles.maximum())
 
@@ -4720,11 +3850,28 @@ class MainView(QMainWindow):
 
         self.startThread(pushUndo=False)
 
+    def onPhased(self, p0deg, p1deg):
+        """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
+        nf = next_pow_of_2( 2**self._crnt.zff * len(self._crnt.t) )     # Determine the number of samples in the FULL signal spectrum (possibly including zero-filling). zff and t are taken from the Series level
+        dt = self._crnt.t[1]-self._crnt.t[0]
+
+        d_theta, d_tau = deg2tau(dt, nf, p0deg, p1deg)
+        if not ( np.isclose(d_theta, 0) and np.isclose(d_tau, 0) ):
+            theta = self._crnt.getCrntVal(key=('.', 'theta', 0))
+            tau = self._crnt.getCrntVal(key=('.', 'tau', 0))
+
+            self._undoStack.append([ [self._crnt], [{('.', 'theta', 0):theta, ('.', 'tau', 0):tau}] ])
+            self._redoStack.clear()
+            self._crnt.setCrntVal(key=('.', 'theta', 0), val = (theta+d_theta + np.pi/2) % np.pi - np.pi/2 )     # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
+            self._crnt.setCrntVal(key=('.', 'tau', 0), val = tau + d_tau)
+
+        self.startThread(pushUndo=False)
+
     def fitAllSteps(self, selectedFiles = None):
         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
         # Form the list of steps to Fit
         s = self.stepsEdit.toPlainText()
-        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhA)|(Rsd)|(Lsh)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
+        if re.search('[0-9]|(A[ ,A])|(Ph0)|(Ph1)|(PhX)|(Rsd)|(Lsh)|(PhA)|(PhA0)', s) is None: s = 'A'    # Fit all steps if the string is missing any numerical characters or A's
         s = "A ".join(re.split("A", s ))      # Prevent any consecutive A's from occuring in the string; separate them with spaces
         while s.find('(') != -1:    # Randomize all elements in all parentheses
             beg, end = s.find('('), s.find(')')
@@ -4935,6 +4082,843 @@ class MainView(QMainWindow):
                 self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
         self.histCanvas.draw()
 
+# --------------------- Adding and removing frequency blocks -------------------
+    def addFreqBlock(self, xmin, xmax):
+        """Adds new optimization range to the current Series and updates the plot."""
+        dref_chsh = 0.0 # self._crnt.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0
+        self.freqTableModel.addFreqBlock(xmin + dref_chsh, xmax + dref_chsh)
+        self.mainFigureWidget.addFreqRange((xmin, xmax))
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def remFreqBlock(self, indx):
+        """Removes a frequency block that covers a location xdata in ppm and updates the plot."""
+        # Find which block (if any) covers the passed location and which one to remove if there are multiple blocks.
+        self.mainFigureWidget.remFreqRange(indx)
+        self.freqTableModel.remFreqBlock(indx)
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def updFreqBlock(self, indx, lims=None, active=None):
+        """Updates the ranges of a frequency block in the model."""
+        if lims is None:
+            lims = (self._crnt.freqBlocks[indx].min, self._crnt.freqBlocks[indx].max)
+        if active is None:
+            active = indx in self._crnt.steps[-1].frqBlkIds
+
+        self._crnt.altFreqBlock(indx=indx, lims=lims)
+
+        # In general, calling both functions below is unnecessary as the changes heve likely been caused by either freqTableModel or mainFigureWidget
+        self.freqTableModel.notifyDataChanged(indx)
+        self.mainFigureWidget.updFreqRange( indx, lims, active )
+
+        self.startThread(pushUndo=False)
+
+        self.preprocTool.setNewDatum(self._crnt)
+
+    def reduceRange(self):
+        """Selects and cuts a region of interest in the spectrum and adjusts the underlying data accordingly."""
+        print('In reduce range')
+
+# ----------------------- Handling Drag-and-Drop events ------------------------
+    def dragEnterEvent(self, evt):
+        if evt.mimeData().hasUrls():
+            evt.acceptProposedAction()
+
+    def dragMoveEvent(self, evt):
+        if evt.mimeData().hasUrls():
+            evt.acceptProposedAction()
+
+    def dropEvent(self, evt):
+        # Load the files
+        filePathList, self.DATA_PATH = [], None
+        for url in evt.mimeData().urls():
+            filePath = url.toLocalFile()
+
+            # If its a workspace, load it and return
+            if (not os.path.isdir(filePath)) and filePath.endswith('.wsp'):
+                with open(filePath, 'rb') as fp:
+                    dataUnPack = dill.load(fp)
+
+                # Reset the settings and the Workspace
+                self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
+                return
+
+            # Assemble a list of spinsolve folders
+            filePathList = read_spinsolve_subfolders(filePath, filePathList)
+
+        # Set the DATA_PATH to the dropped directory or to the parent directory, if several folders were dropped
+        if len(filePathList) == 1:
+            self.DATA_PATH = os.path.dirname(filePathList[0])
+        else:
+            self.DATA_PATH = os.path.dirname(os.path.dirname(filePathList[0]))
+        self.loadManyFiles(filePathList)
+
+    def loadManyFiles(self, filePathList):
+        """Loads files from several folders."""
+        # Load the new files
+        for filePath in filePathList:
+            dat = self.addDatumFromFile(filePath)
+
+class MainView_nmrQuant(MainView_Generic):
+    """Main GUI form class."""
+
+    def __init__(self, wsp, expiryTime = np.inf, parent = None):
+        # Initialize the main window
+        super().__init__(wsp, expiryTime, parent)
+
+        ## Install the custom output stream
+        if compile_standalone:
+            sys.stdout = EmittingStream(textWritten=self.normalOutputWritten)
+            sys.stderr = EmittingStream(textWritten=self.errorOutputWritten)
+
+    def __del__(self):
+        # Restore sys.stdout (if used to collect output to the console)
+        if compile_standalone:
+            sys.stdout = sys.__stdout__
+            sys.stderr = sys.__stderr__
+
+    def __getattr__(self, attr):
+        """Called with the dot notation for attributes not found in the class. Access the Workspace directly."""
+        return getattr(self.wsp, attr)
+
+    def normalOutputWritten(self, text):
+        # Used to show text that was written to the console
+        #self.statusBar.showMessage(text)
+        cursor = self.printoutEdit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        cursor.insertText(text)
+        self.printoutEdit.setTextCursor(cursor)
+        self.printoutEdit.ensureCursorVisible()
+
+    def errorOutputWritten(self, text):
+        # Used to show text that was written to the console
+        #self.statusBar.showMessage(text)
+        cursor = self.printoutEdit.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        #if err: cursor.insertText("------------ ERROR -------------")
+        cursor.insertText(text)
+        self.printoutEdit.setTextCursor(cursor)
+        self.printoutEdit.ensureCursorVisible()
+
+    def _icon(self, name):
+        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
+
+    def setupGUI(self):
+        """Sets the layout for the main window."""
+        # Call the parent setup GUI function
+        super().setupGUI()
+        self.setWindowTitle("Model-based quantitative NMR analysis ver. {} ({})".format(version, str(date.today())) )
+        self.resize(1400, 800)
+
+        # ------------------- Printout for the console -------------------------
+        self.printoutEdit = QPlainTextEdit()
+        self.printoutEdit.setReadOnly(True)
+        self.printoutEdit.resize(50, 50)
+
+        # ----------------- set up the pie chart figure
+        self.pieFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
+        self.pieCanvas = FigureCanvas(self.pieFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
+        self.pieCanvas.setMaximumHeight(275)
+        self.ax_pie = self.pieFigure.add_subplot(111)    # create axes
+
+        # ------------------ 2. Set up the chemical tree ----------------------
+        self.treeView = ChemTreeView()
+        self.treeModel = ChemTreeModel(self.wsp)
+        self.treeView.setModel(self.treeModel)
+        self.treeModel.requestParameterChange.connect( self.onParameterChange )       # Updates the parameters and evaluates the active step if current values are changed by the user
+        self.treeView.changedSelected.connect(self.selectStems)                       # If new parameter is selected by the user
+        self.treeView.requestAdjustment.connect( lambda actnToRun : self.startThread(queueActns=[actnToRun]) )     # Adjust the phase
+
+        # create a text edit widget to choose the optimization sequence
+        self.stepsEdit = QPlainTextEdit('Please enter a sequence of steps to fit. All steps will be fitted consecutively by default.')  # , e.g.: 1, A, 5, (3, 4, A, 1), 2
+        self.stepsEdit.setMaximumHeight(50)
+
+        # ----------------- Spectrum figure in pyqtgraph -----------------------
+        self.mainFigureWidget = MainSpectrumWidget()
+        self.mainFigureWidget.sigFreqRangeSelected.connect(self.onFreqRangeSelected)
+        self.mainFigureWidget.sigFreqRangeChanged.connect(self.onFreqRangeChanged)
+        self.mainFigureWidget.sigMouseClicked.connect(self.onMouseClicked)
+        self.mainFigureWidget.sigStemsClicked.connect(self.treeView.selectPickedParameter)
+        self.mainFigureWidget.sigStemsDragged.connect(self.treeView.updateValue)
+        self.mainFigureWidget.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+
+        # Create the parameters tab
+        self.tbTree = QToolBar("Tree")                      # Tree toolbar
+        self.tbTree.setIconSize(QtCore.QSize(18,18))
+        self.tbTree.setFloatable(False)
+        self.tbTree.setMovable(False)
+
+        tabParam = QWidget()
+        layParam = QVBoxLayout()
+        tabParam.setLayout(layParam)
+        layParam.addWidget(self.treeView)
+        layParam.addWidget(self.tbTree)
+        layParam.addWidget(self.stepsEdit)
+
+        # ----------------------------------------------------------------------
+        #                            Navigation tab
+        # ----------------------------------------------------------------------
+        # Create the navigation tree
+        self.naviTreeView = NavigationTreeView()
+        self.naviTreeModel = NavigationTreeModel(self.wsp)
+        self.naviSelection = QItemSelectionModel(self.naviTreeModel)
+        self.naviTreeView.setModel(self.naviTreeModel)
+        self.naviTreeView.setSelectionModel(self.naviSelection)
+        # self.naviTreeDelegate = NavigationTreeDelegate()
+        # self.naviTreeView.setItemDelegate(self.naviTreeDelegate)
+        self.naviSelection.currentChanged.connect(self.onCurrentSelectedChanged)
+        self.naviTreeView.requestPasteCrnt.connect(self.treeView.pasteCrntPars)     # Paste copied parameter values to all selected Datums in the naviTreeView
+        self.naviTreeView.requestPasteDflt.connect(self.treeView.pasteDfltPars)
+        self.naviTreeView.requestFitSelected.connect(self.fitAllSteps)
+
+        # Set up the tab
+        tabNavi = QWidget()
+        layNavi = QVBoxLayout()
+        tabNavi.setLayout(layNavi)
+        layNavi.addWidget(self.naviTreeView)
+        layNavi.addWidget(self.pieCanvas)
+        layNavi.setContentsMargins(1,1,1,1)
+
+
+        # ----------------------------------------------------------------------
+        #                            Settings tab
+        # ----------------------------------------------------------------------
+        # A table to display frequency ranges
+        self.freqTableView = FreqTableView()
+        self.freqTableModel = FreqTableModel(self.wsp)
+        self.freqTableView.setModel(self.freqTableModel)
+        self.freqTableModel.freqBlockChanged.connect(self.updFreqBlock)
+
+        # Add the preprocessing parameters tool
+        self.preprocTool = PreprocessingWidget()
+        self.preprocTool.parsChanged.connect(lambda x : self.resetSignals(**x))
+        # self.phasingTool = PhasingWidget(self._crnt, self.canvas, orientation='Horizontal') # set to 'Horizontal' if displayed on the right
+        # self.phasingTool.sigPhasingProgress.connect(self.onPhased)
+
+        # Add Phasing tool
+        self.mainPhasingWidget = PhasingWidget(orientation='Horizontal')
+
+        self.mainFigureWidget.sigPivotDragged.connect(self.mainPhasingWidget.setPivot)
+        self.mainPhasingWidget.sigPhasingProgress.connect(self.mainFigureWidget.replot_yF)
+        self.mainPhasingWidget.sigPhasingComplete.connect(self.onPhased)
+
+        # Set up the tab
+        tabSettings = QWidget()
+        laySettings = QVBoxLayout()
+        tabSettings.setLayout(laySettings)
+        laySettings.addWidget(self.freqTableView)
+        laySettings.addWidget(self.mainPhasingWidget)
+        laySettings.addWidget(self.preprocTool)
+
+        # --------------- Left Widget --------------------
+        widgetLeft = QTabWidget()
+        widgetLeft.setMinimumSize(200, 0)
+        widgetLeft.setMaximumWidth(250)
+        # set up the tabs
+        widgetLeft.setTabPosition(QTabWidget.North)
+        widgetLeft.addTab(tabNavi, 'Navigation')
+        widgetLeft.addTab(tabSettings, 'Settings')
+        # widgetLeft.addTab(tabPhasing, 'Phasing')
+        widgetLeft.setCurrentIndex(0)
+
+        # -------------- Center Widget -------------------
+        # spectrum on top and console on the bottom
+        widgetCenter = QSplitter()
+        widgetCenter.setOrientation(Qt.Vertical)
+        widgetCenter.addWidget(self.mainFigureWidget)
+        widgetCenter.addWidget(self.printoutEdit)
+        widgetCenter.setSizes([1000, 10])
+
+        # --------------- Right Widget -------------------
+        widgetRight = QTabWidget()
+        widgetRight.setMinimumSize(320, 0)
+        widgetRight.setTabPosition(QTabWidget.North)
+        widgetRight.addTab(tabParam, 'Parameters')
+
+        # Put everything together in a QSplitter
+        mainSplitter = QSplitter()
+        mainSplitter.addWidget(widgetLeft)
+        mainSplitter.addWidget(widgetCenter)
+        mainSplitter.addWidget(widgetRight)
+        mainSplitter.setStretchFactor(0, 1)
+        mainSplitter.setStretchFactor(1, 3)
+        mainSplitter.setStretchFactor(2, 1)
+        # mainSplitter.setHandleWidth(1)
+
+        # Set the result in the center of the form
+        self.setCentralWidget(mainSplitter)
+
+    def setup_actions(self):
+        super().setup_actions()
+        # ----------------------- Actions for the plot -------------------------
+        # Add freqBlock action
+        new = QAction(self._icon('add_range.png'), 'Add optimization range', self)
+        new.setShortcut('Ctrl+A')
+        new.setStatusTip('Add optimization range')
+        new.setCheckable(True)
+        self._actions['Add freqBlock'] = new
+
+        # Remove freqBlock action
+        new = QAction(self._icon('remove_range.png'), 'Remove optimization range', self)
+        new.setShortcut('Ctrl+D')
+        new.setStatusTip('Remove optimization range')
+        new.setCheckable(True)
+        self._actions['Remove freqBlock'] = new
+
+        # Modify freqBlocks action
+        new = QAction(self._icon('modify_range.png'), 'Modify optimization ranges', self)
+        new.setStatusTip('Modify optimization ranges')
+        new.setCheckable(True)
+        self._actions['Modify freqBlock'] = new
+
+        # Add all frequency ranges actions to the group
+        self.actnGroupFreqBlocks = QActionGroup(self)
+        self.actnGroupFreqBlocks.addAction(self._actions['Add freqBlock'])
+        self.actnGroupFreqBlocks.addAction(self._actions['Remove freqBlock'])
+        self.actnGroupFreqBlocks.addAction(self._actions['Modify freqBlock'])
+        self.actnGroupFreqBlocks.triggered.connect(self.onFreqRangeControl)
+        self.actnGroupFreqBlocks._previuosAction = None          # Indicator of the previously selected action
+
+        # Show stems
+        new = QAction(self._icon('icon_showStems.png'), 'Show transition lines', self)
+        new.setStatusTip('Show transition lines')
+        new.setCheckable(True)
+        new.triggered.connect(self.toggleStems)
+        self._actions['Show transitions'] = new
+
+        # Show components
+        new = QAction(self._icon('icon_showComponents.png'), 'Show fitted components', self)
+        new.setStatusTip('Show fitted components')
+        new.setCheckable(True)
+        new.triggered.connect(self.toggleComps)
+        self._actions['Show components'] = new
+
+        # Show residual
+        new = QAction(self._icon('icon_plotResidual.png'), 'Show residual', self)
+        new.setStatusTip('Show residual')
+        new.setCheckable(True)
+        new.triggered.connect(self.toggleResid)
+        self._actions['Show residual'] = new
+
+        # Autoscale
+        new = QAction(self._icon('icon_autoScale.png'), 'Autoscale', self)
+        new.setStatusTip('Scale plot to data')
+        new.triggered.connect(self.mainFigureWidget.autoRange)
+        self._actions['Autoscale'] = new
+
+        # Save Image
+        new = QAction(self._icon('icon_saveImage.png'), 'Save image', self)
+        new.setStatusTip('Saves the spectrum as image')
+        new.triggered.connect(self.mainFigureWidget.saveImage)
+        self._actions['Save image'] = new
+
+        # ------------------------ Processing Actions --------------------------
+        # Autophase
+        new = QAction(self._icon('icon_autoPhase.png'), 'Autophase', self)
+        new.setStatusTip('Apply a phase correction algorithm')
+        new.triggered.connect( lambda : self.startThread(queueActns=['PhA']) )
+        self._actions['Autophase both'] = new
+
+        # Set custom lineshape
+        new = QAction(self._icon('icon_customShape.png'), 'Set custom lineshape', self)
+        new.setStatusTip('Apply a custom lineshape derived by deconvolution')
+        new.triggered.connect( lambda _ : self.startThread(queueActns=['Lsh']) )
+        self._actions['Set lineshape'] = new
+
+        new = QAction(self._icon('icon_resetShape.png'), 'Reset the lineshape', self)
+        new.setStatusTip('Remove the custom lineshape - reset to default (Lorentzian)')
+        new.triggered.connect( lambda _ : self.startThread(queueActns=['Lor']) )
+        self._actions['Remove lineshape'] = new
+
+        # ----------------------- Actions for the tree -------------------------
+        # Add step
+        new = QAction(self._icon('icon_addStep.png'), 'Add step', self)
+        new.setStatusTip('Add an optimization step')
+        new.triggered.connect(self.treeModel.addStep)
+        self._actions['Add step'] = new
+
+        # Delete step
+        new = QAction(self._icon('icon_delStep.png'), 'Remove active step', self)
+        new.setStatusTip('Remove an optimization step')
+        new.triggered.connect(self.treeModel.delStep)
+        self._actions['Remove step'] = new
+
+        # Copy All parameters
+        new = QAction(self._icon('icon_copy.png'), 'Copy all parameters', self)
+        new.setStatusTip('Copy current values of all parameters')
+        new.triggered.connect(lambda : self.treeView.copyCrntPars(keys=None))
+        self._actions['Copy all parameters'] = new
+
+        # Paste copied parameters
+        new = QAction(self._icon('icon_pasteCrnt.png'), 'Paste parameters', self)
+        new.setStatusTip('Paste values of copied parameters as current')
+        new.triggered.connect(lambda : self.treeView.pasteCrntPars(datums=None))
+        self._actions['Paste parameters'] = new
+
+        # Toggle LS/TLS
+        new = QAction(self._icon('icon_TLS.png'), 'Use TLS algorithm', self)
+        new.setStatusTip('Use the Total Least Squares algorithm')
+        new.setCheckable(True)
+        self._actions['Toggle TLS'] = new
+        def onToggleTLS():
+            config.SAMPL_funcType = 'TLS' if self._actions['Toggle TLS'].isChecked() else 'LS'
+            self.treeModel.notifyDataChanged()     # Update the TLS line in the chemTree view
+        self._actions['Toggle TLS'].triggered.connect(onToggleTLS)
+
+        # Phase correction actions
+        """self.actnCorrectPh0 = QAction(self._icon('icon_correctPh0.png'), 'Correct ph0', self)
+        self.actnCorrectPh0.setStatusTip('Correct zero-order phasing.')
+        self.actnCorrectPh0.triggered.connect(self.correct_phase)"""
+
+    def assign_actions(self):
+        """Assigns actions to the lements of toolbars."""
+        # ------------------------- Set up the toolbars ------------------------
+        menubar = self.menuBar()
+        tbMain = self.addToolBar("File")               # Main toolbar
+
+        # ------------------------- set the menubar ----------------------------
+        fileMenu = menubar.addMenu('&File')
+        for actn in ['Import file','Remove file','Load workspace','Save workspace', 'Exit']:
+            fileMenu.addAction(self._actions[actn])
+        helpMenu = menubar.addMenu('&Help')
+        helpMenu.addAction(self._actions['Show about'])
+
+        # ------------------------- Set the main toolbar -----------------------
+        for actn in ['Clear workspace','Import file','Remove file','Show settings',None,
+                     'Load workspace','Save workspace', None, 'Add freqBlock', 'Remove freqBlock',
+                     'Modify freqBlock', 'Show transitions', 'Show components', 'Show residual',
+                     'Autoscale', None, 'Undo', 'Redo', None, 'Autophase both', 'Set lineshape', 'Remove lineshape',
+                     'Fit one step', 'Fit all steps', 'Fit all files', None,
+                     'Report results', 'Save results', 'Exit']:
+            if actn is not None:
+                tbMain.addAction(self._actions[actn])
+            else: tbMain.addSeparator()
+
+        # ------------------------- Set the tree toolbar -----------------------
+        for actn in ['Load tree', 'Add step', 'Remove step', None, 'Copy all parameters',
+                     'Paste parameters', None, 'Fit one step', 'Fit all steps', 'Fit all files', 'Stop thread']:
+            if actn is not None:
+                self.tbTree.addAction(self._actions[actn])
+            else: self.tbTree.addSeparator()
+
+    # ----------------- Signals from the main Spectrum Widget ------------------
+
+    def onFreqRangeSelected(self, lims):
+        # print('Selected a frequency block', lims)
+        self._actions['Add freqBlock'].setChecked(False)           # Make sure that the buton is not pressed
+        self.mainFigureWidget.setSelectorFlag(False)      # Exit the selection mode
+        self.addFreqBlock(*lims)                          # Add new Frequency block
+
+        self.actnGroupFreqBlocks._previuosAction = None
+
+    def onFreqRangeChanged(self, indx, lims):
+        # print('Frequency block has changed', indx, lims)
+        self._actions['Modify freqBlock'].setChecked(False)
+        self.mainFigureWidget.setCursor(mode='normal')
+        self.updFreqBlock(indx, lims)
+
+        self.actnGroupFreqBlocks._previuosAction = None
+
+    def onMouseClicked(self, pos):
+        # print('Mouse clicked', pos)
+        # Process the mouse click differently according to the current state
+        if self._actions['Remove freqBlock'].isChecked():    # Remove freqBlock request
+            self.mainFigureWidget.setCursor(mode='normal')
+            # Find which block was clicked on (the narrowest block that covers the clicked position)
+            scores = [blk.max-blk.min if blk.min < pos.x() < blk.max else np.inf for blk in self._crnt.freqBlocks]
+            indx = min(enumerate(scores), key=itemgetter(1))[0]      # Find the index of the minimum
+            if indx > 0:    # Don't remove the allFrequencies block
+                self._actions['Remove freqBlock'].setChecked(False)     # Unpress the button
+                self.remFreqBlock(indx)
+
+            self.actnGroupFreqBlocks._previuosAction = None
+
+    def onFreqRangeControl(self, actn):
+        """Called when the action group of freqRange controls is triggered"""
+        if self.actnGroupFreqBlocks._previuosAction == actn:
+            # Turn off the buttons
+            actn.setChecked(False)
+            self.mainFigureWidget.setMovableFreqBlocks(False)
+            self.mainFigureWidget.setSelectorFlag(False)
+            self.mainFigureWidget.setCursor(mode='normal')
+            self.actnGroupFreqBlocks._previuosAction = None
+            return 0
+
+        elif self._actions['Modify freqBlock'].isChecked():
+            # Changing frequency blocks
+            self.mainFigureWidget.setMovableFreqBlocks(True)
+            self.mainFigureWidget.setSelectorFlag(False)
+            self.mainFigureWidget.setCursor(mode='hand')
+
+        elif self._actions['Add freqBlock'].isChecked():
+            # Adding new frequency block
+            self.mainFigureWidget.setSelectorFlag(True)
+            self.mainFigureWidget.setMovableFreqBlocks(False)
+            self.mainFigureWidget.setCursor(mode='hand')
+
+        elif self._actions['Remove freqBlock'].isChecked():
+            # Removing a frequency block
+            self.mainFigureWidget.setMovableFreqBlocks(False)
+            self.mainFigureWidget.setSelectorFlag(False)
+            self.mainFigureWidget.setCursor(mode='hand')
+
+        self.actnGroupFreqBlocks._previuosAction = actn
+
+    # -------------------- Processing keyboard interactions --------------------
+
+    def keyPressEvent(self, ev):
+        # self.scene().keyPressEvent(ev)
+        # self.sigKeyPress.emit(ev)
+        # print('Key pressed ', ev.key())
+        pass
+
+    # ------------------------- Other utility methods --------------------------
+
+    def addDatumFromFile(self, path):
+        """Runs a dialog to select a new file."""
+        self.naviTreeModel.beginResetModel()
+        dat = super().addDatumFromFile(path)
+        self.naviTreeModel.endResetModel()
+
+        self.setCurrent(dat)
+
+    def removeCurrent(self):
+        """Removes current selection (Series or Datum)."""
+        if self._crnt != self.wsp:
+            self.naviTreeModel.remItems([self._crnt])
+            self.naviSelection.clear()    # Select the entire workspace
+
+    def setCurrent(self, newCrnt=None):
+        """Sets the _crnt Datum and updates the plot, tables, etc. accordingly."""
+
+        # Set self._crnt to the new Series/Datum or the entire workspace
+        if newCrnt is None:
+            try:
+                newCrnt = self.wsp.series[0].data[0]
+            except IndexError:
+                self._crnt = self.wsp
+                return None
+
+        # Compute the model signal if there is None
+        try:
+            if newCrnt.zF is None:
+                step = newCrnt.steps[-1]
+                newCrnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
+                #TODO: Possibly check which step to evaluate if steps use different frequency ranges
+        except AttributeError:
+            pass
+
+        # Update the necessary display widgets
+        self.treeModel.setNewDatum(newCrnt)
+        self.freqTableModel.setNewDatum(newCrnt)
+        self.preprocTool.setNewDatum(newCrnt)
+        # self.phasingTool.setNewDatum(newCrnt)
+
+        # Highlight the current Datum in the Navigation widget if it was seletected programmatically
+        self.naviTreeView.selectCurrentDatum(newCrnt.selfID())
+
+        if isinstance(self._crnt, Datum) and isinstance(newCrnt, Datum) and self._crnt.parent == newCrnt.parent:
+            resetView = False
+        else: resetView = True
+        self._crnt = newCrnt
+        self.plotCurrent(autoRange=resetView)
+
+    def onCurrentSelectedChanged(self, index):
+        """Slot for the signal indicating the change in the currently selected Series/Datum"""
+
+        self.setCurrent(newCrnt = index.internalPointer() if index.isValid() else None)
+
+    def loadChemTree(self):
+        """Calls a dialog and loads a new chemical tree from file."""
+        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")
+
+        T = loadTree(filename)
+
+        self.treeModel.resetChemTree(T)
+
+    def onSaveWspAction(self):
+        """Saves the workspace including the stepClass class and the steps array."""
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')
+        if filename:
+            if filename[-4:] != '.wsp': filename += '.wsp'
+
+            # Pack the logic of the workspace
+            dataPack = self.wsp.pack()
+
+            # Pack the settings
+            stngPack = copy.deepcopy(settings)
+            stngView = {'stepsEditText' : self.stepsEdit.toPlainText(),\
+                        'hiddenTreeViewNodes' : [node.name for node in self.treeModel.TP.items() if node.hidden]}
+            stngConfig = config.as_dict()
+
+            stngPack['_view'] = stngView
+            stngPack['_config'] = stngConfig
+
+            with open(filename, 'wb') as fp:
+                dill.dump([dataPack, stngPack], fp)
+
+    def onLoadWspAction(self):
+        """Loads the workspace including the stepClass class and the steps array."""
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")
+        if filename:
+            with open(filename, 'rb') as fp:
+                dataUnPack = dill.load(fp)
+
+            # Reset the settings and the Workspace
+            self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
+
+    def onResetWspAction(self, newWorkspace=None, newSettings=None):
+        """Clears the workspace including the stepClass, signals and the tree."""
+        self.naviTreeModel.beginResetModel()
+
+        # Update the global settings
+        settings.clear()
+        settings.update({"ax0Limits": None,
+                        "ax1Limits": {'ylim':(0, 5)},
+                        "ax2Limits": None,
+                        "startFromPars" : "current",          # Starting values of parameters when fitting multiple files (current, previous, default) - will be copied from crntParsH of this file, previous file or dfltParsH
+                        "autoPhase" : False,
+                        "autoPick" : False})
+        if newSettings is not None:
+            try:
+                stngView = newSettings.pop('_view')
+            except KeyError:
+                stngView = None
+            try:
+                stngConfig = newSettings.pop('_config')
+            except KeyError:
+                stngConfig = None
+            settings.update(newSettings)
+        else:
+            settings.update({"HCmode":"1H"})
+            stngView, stngConfig = None, None
+        settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
+
+        # Reset the undo and redo stacks
+        self._undoStack.clear()
+        self._actions['Undo'].setEnabled(False)
+        self._redoStack.clear()
+        self._actions['Redo'].setEnabled(False)
+
+        # Reset the workspace
+        self.wsp.reset()
+        if newWorkspace is not None:
+            self.wsp.unpack(newWorkspace)
+
+        # Reset the tree model
+        self.treeModel.fullReset(self._crnt)
+
+        self.naviTreeModel.endResetModel()
+
+        self.setCurrent()          # Sets the current display to the first Datum or the entire workspace if there is no Datum
+
+        # Update the views (e.g. shown/hidden rows, etc.)
+        if stngView is not None:
+            self.stepsEdit.setPlainText(stngView['stepsEditText'])
+            for node in stngView['hiddenTreeViewNodes']:
+                self.treeModel.TP[node].hidden = True
+            self.treeView.hideExcessiveRows()
+
+        # Update the global config
+        if stngConfig is not None:
+            config.from_dict(config, stngConfig)
+        self._actions['Toggle TLS'].setChecked(config.SAMPL_funcType == 'TLS')
+
+    def resetSignals(self, zff=None, apod=None, flagAdapFreq=None):
+        self._crnt.resetFreqs(zff, apod)
+
+        if flagAdapFreq is not None:
+            for dat in self._crnt.parent.data:
+                dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
+
+        self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
+        self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
+
+    def showSettingsDialog(self):
+        """Shows an input dialog and updates settings"""
+        accepted, newSettings = SettingsDialog.run(oldSettings={'HCmode': self.wsp.HCmode})
+
+        if accepted:
+            self.treeModel.setHCmode(newSettings['HCmode'])
+
+    def showAboutMessage(self):
+        """Displays the About message."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+
+        msg.setText("Quantitative NMR analysis with quantum mechanical models.")
+        msg.setInformativeText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
+        msg.setWindowTitle("About qNMR")
+        # msg.setDetailedText("The details are as follows:")
+        msg.setStandardButtons(QMessageBox.Close)
+
+        msg.exec_()            # Returns the values of pressed button
+
+    def onAssigned(self):
+        """Updates the tree and plots when model peaks have been assigned to picked peaks."""
+        self.plotCurrent(autoRange=False)
+        self.treeWidget.showStep()
+        #self.phasingTool.setVals(self.steps[0])
+        #dataFiles[self.indxCrntFile].update()
+        pass
+
+    def pullUndo(self):
+        """Restores the last state from the Undo stack."""
+        dats_list, pars_list = self._undoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        self._redoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
+
+        # Set the stored values to the Datums
+        for dat, par in zip(dats_list, pars_list):
+            dat.setCrntVals(par)
+
+        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
+
+    def pullRedo(self):
+        """Restores the last state from the Redo stack."""
+        dats_list, pars_list = self._redoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
+        self._undoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
+
+        # Set the stored values to the Datums
+        for dat, par in zip(dats_list, pars_list):
+            dat.setCrntVals(par)
+
+        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
+
+# ------------------------ Parameter list --------------------------------------
+    def updateParsList(self, indxStep = None):
+        """Updates and displays the list of optimizaed parameters on the current step."""
+        self.parsListWidget.clear()
+        items = [node.name for node in stepClass.T.repRoots()]
+        if indxStep is not None:
+            items.extend([str(v) for v in self.steps[indxStep].parsKeys])
+        self.parsListWidget.addItems(items)
+
+    def onSelectParList(self, item):
+        """Handles the selection event of a parameter in the list."""
+        indxRow = self.parsListWidget.row(item)
+        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+        if indxRow < numRepRoots:
+            key = self.parsListWidget.currentItem().text()
+        else:
+            key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
+            slctParSpec = stepClass.getPrior(stepClass, key)
+            self.editMin.setText("{:.4g}".format(slctParSpec.min))
+            self.editMax.setText("{:.4g}".format(slctParSpec.max))
+            self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
+            self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
+            if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
+                self.editPriorMode.setEnabled(True)
+                self.editPriorStdv.setEnabled(True)
+                self.chkboxUseCrnt.setEnabled(True)
+                if slctParSpec.prior['mode'] is None:
+                    self.chkboxUseCrnt.setCheckState(Qt.Checked)
+                    self.editPriorMode.setText(self.editCrntVal.text())
+                    self.editPriorMode.setReadOnly(True)
+                else:
+                    self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
+                    self.editPriorMode.setReadOnly(False)
+                    self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
+                self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
+            else:   # Uniform prior
+                    self.editPriorMode.setDisabled(True)
+                    self.editPriorStdv.setDisabled(True)
+                    self.chkboxUseCrnt.setDisabled(True)
+        self.plotDistr(key)    # plot the prior distribution
+
+    def onPriorNameChanged(self, itemIndx):
+        """Handles the event of changing the name of the prior distribution in the combobox."""
+        priorName = self.cmboxPrior.currentText()
+        if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
+            self.editPriorMode.setEnabled(True)
+            self.editPriorStdv.setEnabled(True)
+            self.chkboxUseCrnt.setEnabled(True)
+            if self.chkboxUseCrnt.isChecked:
+                self.editPriorMode.setText(self.editCrntVal.text())
+                self.editPriorMode.setReadOnly(True)
+            else:
+                self.editPriorMode.setReadOnly(False)
+                self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
+            self.editPriorStdv.setText("{:.4g}".format(0.5))
+        else:   # Uniform prior
+                self.editPriorMode.setDisabled(True)
+                self.editPriorStdv.setDisabled(True)
+                self.chkboxUseCrnt.setDisabled(True)
+        self.saveParsForm()
+
+    def saveParsForm(self):
+        """Saves the parsSpec entered in the resForm1."""
+        indxRow = self.parsListWidget.currentRow()
+        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+        if indxRow < numRepRoots:
+            key = self.parsListWidget.currentItem().text()
+        else:
+            key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
+            priorName = self.cmboxPrior.currentText()
+            if priorName == 'Uniform':
+                prior = {'name':priorName, 'mode':None, 'stdv':None}
+            elif self.chkboxUseCrnt.isChecked():
+                self.editPriorMode.setText(self.editCrntVal.text())
+                self.editPriorMode.setReadOnly(True)
+                prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
+            else:
+                self.editPriorMode.setReadOnly(False)
+                prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
+
+            # Save the parSpec
+            stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
+            # Update the current parameter values
+            self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
+            """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
+            # Display new min/max values in the tree
+            self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
+            self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
+            self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
+            self.treeWidget.blockSignals(False)
+            # Update the rest of parameters based on their values in the tree table
+            for indx, stp in enumerate(self.steps):
+                clmn = indx+3
+                stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
+        # plot the prior distribution
+        self.plotDistr(key)
+
+    def plotDistr(self, key=None):
+        """Plots a prior probability distribution for the parameter key on the middle plot."""
+        # Determine which parameter is selected in the list and plot its samples
+        if key is None:
+            numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+            if self.parsListWidget.currentRow() < numRepRoots:
+                key = self.parsListWidget.currentItem().text()
+            else:
+                key = self.steps[-1].parsKeys[self.parsListWidget.currentRow() - numRepRoots]    # Parameter name
+        # Plot the piror distribution and samples
+        self.axDistr.clear()
+        self.axDistr2.clear()
+        if type(key) is tuple:
+            # Handle adjustible parameters
+            slctParSpec = self.steps[-1].getPrior(key)
+            # Plot the samples
+            if self.steps[-1].sHat is not None:
+                indx = self.steps[-1].sHat['smplKeys'].index(key)       # Index of the sampled parameter in the array of samples
+                smpl_abs = self.steps[-1].sHat['smplVals'][indx, :]
+                self.axDistr2.hist(smpl_abs, bins=50, range=(slctParSpec.min, slctParSpec.max), color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
+            # Plot the prior
+            vals = [slctParSpec.evalPrior(x) for x in np.linspace(-1,1,25)]
+            self.axDistr.plot(np.linspace(slctParSpec.min, slctParSpec.max, 25), vals, color=(0.96, 0.53, 0.20))
+            self.axDistr.set_xlim((slctParSpec.min, slctParSpec.max))
+            self.axDistr.axvline(x=slctParSpec.abs(self.steps[-1].getCrntVal(key)), ymin=0, ymax=0.05, color='r')
+        else:
+            # Handle the amplitudes
+            if self.steps[-1].sHat is not None:
+                indx = self.steps[-1].sHat['labels'].index(key)       # Index of the sampled parameter in the array of samples
+                smpl_abs = np.abs(self.steps[-1].sHat['smplAmpl'][indx,:])
+                self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
+        self.histCanvas.draw()
+
 # ------------------------ Functions for plotting ------------------------------
     def plotCurrent(self, autoRange=True):
         """Plots signals corresponding to the currently opened file and current parameters."""
@@ -4946,14 +4930,14 @@ class MainView(QMainWindow):
             f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
 
             # Compute the stems
-            if self.actnToggleStems.isChecked():
+            if self._actions['Show transitions'].isChecked():
                 allStems = self._crnt.stems_for_plot()
             else: allStems = None
 
             # Plotting function
             self.mainFigureWidget.plot(f, yFph, xF,
-                zF = zF if self.actnToggleComps.isChecked() else None,
-                stems = allStems if self.actnToggleStems.isChecked() else None,
+                zF = zF if self._actions['Show components'].isChecked() else None,
+                stems = allStems if self._actions['Show transitions'].isChecked() else None,
                 freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[-1].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)],
                 indx_colr=[i for i, name in enumerate(self._crnt.repRootNames) if not self._crnt.isXclRootName(name)])   # if i in self._crnt.steps[-1].frqBlkIds])
 
@@ -4963,6 +4947,10 @@ class MainView(QMainWindow):
             # Output the found results
             self.plotPieChart()
 
+            # Update the phasing widget
+            self.mainPhasingWidget.setData(f, yFph, xF,
+                freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[-1].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)])
+
         else:
             self.mainFigureWidget.reset()
             self.plotPieChart(reset=True)
@@ -4970,9 +4958,9 @@ class MainView(QMainWindow):
     def toggleStems(self):
         """Plots stem lines to indicate modeled peaks."""
         try:
-            self.mainFigureWidget.showStems(flag=self.actnToggleStems.isChecked())
+            self.mainFigureWidget.showStems(flag=self._actions['Show transitions'].isChecked())
         except:
-            # if self.actnToggleStems.isChecked():
+            # if self._actions['Show transitions'].isChecked():
             self.plotCurrent(autoRange=False)
 
     def toggleComps(self):
@@ -4980,18 +4968,18 @@ class MainView(QMainWindow):
         # If no components have been computed so far, will evaluate them first.
         # TODO! Use customized exceptions
         try:
-            self.mainFigureWidget.showComponents(flag=self.actnToggleComps.isChecked())
+            self.mainFigureWidget.showComponents(flag=self._actions['Show components'].isChecked())
         except:
-            if self.actnToggleComps.isChecked():
+            if self._actions['Show components'].isChecked():
                 self.plotCurrent(autoRange=False)
 
     def toggleResid(self):
         """Show or hide the residual plot."""
-        self.mainFigureWidget.showResidual(flag=self.actnToggleResid.isChecked())
+        self.mainFigureWidget.showResidual(flag=self._actions['Show residual'].isChecked())
 
     def selectStems(self, key_crnt, key_prev=None):
         """Shows which stems are affected when a row is selected in the tree."""
-        if self.actnToggleStems.isChecked():
+        if self._actions['Show transitions'].isChecked():
             if key_prev is not None and key_prev[1] in ['chshQD', 'alphQD']:
                 self.mainFigureWidget.highlightStems((key_prev[0], 'chshQD', key_prev[2]), False)
             if key_crnt is not None and key_crnt[1] in ['chshQD', 'alphQD']:
@@ -5087,7 +5075,7 @@ if __name__ == '__main__':
     app = 0
     app = QApplication(sys.argv)
 
-    expiryTime, options = readLicenseFile()
+    expiryTime, options = readLicenseFile(path=SCRIPT_PATH)
 
     if expiryTime is None:
         # No license file found
@@ -5117,7 +5105,8 @@ if __name__ == '__main__':
         msg.show()         # msg.exec_()            # Returns the values of pressed button
     else:
         wsp = Workspace()
-        main_view = MainView(wsp, expiryTime)
+        main_view = MainView_nmrQuant(wsp, expiryTime)
+        # main_view = MainView_Generic(wsp, expiryTime)
         main_view.show()
 
     app.exec_()
