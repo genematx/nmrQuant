@@ -797,8 +797,8 @@ def init_Steps_autoWine(SSS):
                          autoKeys = [('.', 'sigma2', 0), ('Succinic acid', 'ampl', 0)], frqBlkIds=[6], nrep=3, fitEach=True))     # Fit succinic acid
     SSS.steps.append(Step(script=fit_lactic))        # Fits lactic acid and alanine
     SSS.steps.append(Step(script=fit_proline))        # Fits acetic acid and proline
-    SSS.steps.append(Step(parsKeys=[('Acids', 'alph', 0)],
-                          autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
+    # SSS.steps.append(Step(parsKeys=[('Acids', 'alph', 0)],
+    #                       autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
     # # Fit the sugars
     SSS.steps.append(Step(script=fit_sugars))
 
@@ -813,7 +813,7 @@ def init_Steps_autoWine(SSS):
 
     # Define a list of fast processing steps
     n = len(SSS.steps)
-    SSS.extra['fastStepIDs'] = [0, 1, 2, 4, 5, n-2, n-1]   # List of step IDs that should should be run if the fitted values are copied from PRESAT to PROTON spectra
+    SSS.extra['fastStepIDs'] = [0, 1, 2, 4, 5, n-2, n-1]   # List of step IDs that should be run if the fitted values are copied from PRESAT to PROTON spectra
 
 def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, resetSteps=True):
     """Initializes the workspace wsp for beverage analysis."""

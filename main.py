@@ -3472,6 +3472,12 @@ class MainNMRWindowBase(QMainWindow):
 
         self.importDataFiles(pathList)
 
+    def runLoadWspDialog(self):
+        """Runs a dialog for loading a new Workspace."""
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
+        if filename:
+            pass
+
     def removeCurrent(self):
         """Removes currently selected spectrum."""
         crntID = self._crnt.selfID()

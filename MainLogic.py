@@ -582,6 +582,28 @@ class Workspace():
         p0 = 0.1*delta*(np.random.rand(nwalkers, ndim)-1/2) + np.array(initVals).reshape(1,-1)    # Starting points
         p0 = np.minimum(np.maximum(p0, bounds[:, 0].reshape(1,-1)), bounds[:, 1].reshape(1,-1))
 
+        # Define a bounded sampling function. Run a dummy try to figure out the size of the ampl array
+        val, meta = costFuncSmpl(np.mean(bounds, axis=1))
+        m_ampl, S_ampl = meta['ampl']
+        a_sigma2, b_sigma2 = meta['sigma2']
+        na = len(meta['ampl'][0])    # Number of amplitudes
+        # print(val, meta)
+
+        # def costFuncSmplBounded(x):
+        #     """Cost function that respect the bounds.
+        #
+        #     Returns the value of log-posterior and 'blobs' (posterior means and
+        #     covariance matrix of amplitudes) and parameters of sigma2 distribution.
+        #
+        #     """
+        #     if (x > bounds[:, 0]).all() and (x < bounds[:, 1]).all():
+        #         val, meta = costFuncSmpl(x)
+        #         m_ampl, S_ampl = meta['ampl']
+        #         a_sigma2, b_sigma2 = meta['sigma2']
+        #         return val, m_ampl, S_ampl
+        #     else:
+        #         return -np.inf, np.zeros((na, 1)), np.zeros((na, na))
+
         costFuncSmplBounded = lambda x : costFuncSmpl(x) if (x > bounds[:, 0]).all() and (x < bounds[:, 1]).all() else (-np.inf, {})
 
         """# Run burn-in iterations (separately for each dimension)
@@ -599,11 +621,12 @@ class Workspace():
             p0[:,i] = pos.ravel()"""
 
         # Define the sampler
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, costFuncSmplBounded, a=2.0)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, costFuncSmplBounded, a=2.0,
+                                        blobs_dtype=[('blob', object)])
 
         # Run burn-in iterations (jointly for all dimensions)
         print("Burning in...")
-        pos, _, _, _ = sampler.run_mcmc(p0, N=max(1, int(nsteps/10)) )    # burn-in
+        pos, _, _, _ = sampler.run_mcmc(p0, nsteps=max(1, int(nsteps/10)) )    # burn-in
         sampler.reset()
 
         # Final sampling starting from the parameter values found during burn-in
@@ -611,9 +634,6 @@ class Workspace():
         for i, result in enumerate(sampler.sample( pos, iterations=nsteps )):
             progressBar(i, nsteps)
         sys.stdout.write("\n")
-
-        #sampler.run_mcmc(pos, nsteps)
-        #print(sampler.blobs)
 
         if verbose:
             print("Mean acceptance ratio: {0:.3f}"
@@ -1374,25 +1394,26 @@ class Series():
                 result[key] = flatchain[:, i]
                 self.smplDistF[key] = smplSpec_from_data(result[key])
 
-        sigma2 = np.array([blbWlkr['sigma2'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
-        theta = np.array([blbWlkr['theta'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
-        for j in set([k[0] for k in parsKeys if len(k)==4]):      #   range(len(self.data)):
-            m_ampl = np.array([blbWlkr['ampl'][0][:,j].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
-            for i in range(m_ampl.shape[0]):
-                result[(j, self.repRootNames[i], 'ampl', 0)] = m_ampl[i,:]
-
-            m_ampl = np.array([blbWlkr['ampl'][0][...,j].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T     # Means of the amplitudes
-            S_ampl = np.array([blbWlkr['ampl'][1][...,j] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T             # Covariance matrices of the amplitudes
-            #result[(j, '.', 'ampl', 'covr')] = np.array([blbWlkr['ampl'][1][...,j] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
-            result[(j, '.', 'ampl', 'mean')] = m_ampl
-            result[(j, '.', 'ampl', 'covr')] = S_ampl
-            result[(j, '.', 'sigma2', 0)] = sigma2[j, 1,:] / (sigma2[j, 0,:]-1)     # Mean estimator for sigma
-            result[(j, '.', 'sigma2', 'distr')] = sigma2[j,...]
-
-            # Theta
-            key = (j, '.', 'theta', 0)
-            result[key] = theta[j,...].ravel()
-            self.smplDistF[key] = smplSpec_from_data(result[key])
+        # TODO: Reimplement processing of sampling blobs (amplitudes, sigma2, theta) after emcee package was updated and the format has changed
+        # sigma2 = np.array([blbWlkr['sigma2'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        # theta = np.array([blbWlkr['theta'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        # for j in set([k[0] for k in parsKeys if len(k)==4]):      #   range(len(self.data)):
+        #     m_ampl = np.array([blbWlkr['ampl'][0][:,j].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        #     for i in range(m_ampl.shape[0]):
+        #         result[(j, self.repRootNames[i], 'ampl', 0)] = m_ampl[i,:]
+        #
+        #     m_ampl = np.array([blbWlkr['ampl'][0][...,j].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T     # Means of the amplitudes
+        #     S_ampl = np.array([blbWlkr['ampl'][1][...,j] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T             # Covariance matrices of the amplitudes
+        #     #result[(j, '.', 'ampl', 'covr')] = np.array([blbWlkr['ampl'][1][...,j] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        #     result[(j, '.', 'ampl', 'mean')] = m_ampl
+        #     result[(j, '.', 'ampl', 'covr')] = S_ampl
+        #     result[(j, '.', 'sigma2', 0)] = sigma2[j, 1,:] / (sigma2[j, 0,:]-1)     # Mean estimator for sigma
+        #     result[(j, '.', 'sigma2', 'distr')] = sigma2[j,...]
+        #
+        #     # Theta
+        #     key = (j, '.', 'theta', 0)
+        #     result[key] = theta[j,...].ravel()
+        #     self.smplDistF[key] = smplSpec_from_data(result[key])
 
         return(result)
 
@@ -2728,8 +2749,8 @@ class Datum():
             result[key] = flatchain[:, i]
             self.smplDistF[key] = smplSpec_from_data(result[key])
 
-        m_ampl = np.array([blbWlkr['ampl'][0].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T     # Means of the amplitudes
-        S_ampl = np.array([blbWlkr['ampl'][1] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T             # Covariance matrices of the amplitudes
+        m_ampl = np.array([blb[0]['ampl'][0].ravel() for blb in sampler.blobs.ravel()]).T     # Means of the amplitudes
+        S_ampl = np.array([blb[0]['ampl'][1] for blb in sampler.blobs.ravel()]).T             # Covariance matrices of the amplitudes
         # Generate random samples of amplitudes
         nrep = 3     # Number of repeats for each case of parsKeys to sample the amplitudes from the Gaussian distributions
         indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled explicitely
@@ -2743,13 +2764,13 @@ class Datum():
                     self.smplDistF[key] = smplSpec_from_data(result[key])
 
         # Sigma2
-        sigma2 = np.array([blbWlkr['sigma2'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        sigma2 = np.array([blb[0]['sigma2'] for blb in sampler.blobs.ravel()]).T
         result[('.', 'sigma2', 0)] = sigma2[1,:] / (sigma2[0,:]-1)     # Sample sigma
         result[('.', 'sigma2', 'distr')] = sigma2
 
         # Theta
         key = ('.', 'theta', 0)
-        result[key] = np.array([blbWlkr['theta'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).ravel()
+        result[key] = np.array([blb[0]['theta'] for blb in sampler.blobs.ravel()]).ravel()
         self.smplDistF[key] = smplSpec_from_data(result[key])
 
         return result
