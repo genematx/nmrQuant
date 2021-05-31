@@ -2710,7 +2710,7 @@ def printChemDB():
 def loadChemLibrary(path=None):
     """Loads the chemical library (a dictionary of chemDB dictionaries)."""
     if path is None:
-        path = os.getcwd()
+        path = os.path.join(os.getcwd(), 'chemdb')
 
     # Define a DB for common chemicals
     chemLib = {'Built-in models' :
