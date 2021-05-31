@@ -17,6 +17,9 @@ https://geoffboeing.com/2014/09/using-geopandas-windows/
 6. Cloning an environment in Anaconda
 conda env export > environment.yml
 
+7. Extensions for Jupyter Notebook (e.g. code folding)
+pip install jupyter_contrib_nbextensions
+
 
 To set up the software to be run from the code:
 
@@ -35,3 +38,5 @@ To set up the software to be run from the code:
 7. Try running the code (note, it won't work first; we'll likely need to install a few other things). For this, in the Home page of Anaconda, run Spyder; it will open a Matlab-like IDE.
 
 8. In Spyder, open the file main.py of the code and click run. In the console, it will start complaining about missing packages, for example 'dill' -- I have no idea why it does this, apparently it hasn't been installed correctly. To fix this, in the terminal run 'pip install whatever_package_it_complains_about' -- it shouldn't take long.
+
+9. Install OpenEyes Toolkits, https://docs.eyesopen.com/toolkits/python/quickstart-python/windows.html#figure-anaconda-add-channel

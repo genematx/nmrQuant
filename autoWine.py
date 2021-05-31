@@ -7,9 +7,15 @@ from dataio import *
 import config
 
 from optparse import OptionParser
-from PyQt4 import QtGui, QtCore
-from PyQt4.QtGui import QAction, QActionGroup, QApplication, QBrush, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QIcon, QInputDialog, QItemSelectionModel, QItemDelegate, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QMainWindow, QPalette, QPen, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget, QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
-from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent, QItemSelectionModel
+from PyQt5.QtGui import QBrush, QDoubleValidator, QIcon, QPalette, QPen, QTextCursor
+from PyQt5.QtWidgets import QAction, QActionGroup, QApplication, QCheckBox,\
+    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,\
+    QInputDialog, QItemDelegate, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QMainWindow, \
+    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, \
+    QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget,\
+    QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -27,7 +33,7 @@ import os, time
 from datetime import date
 from types import MethodType
 
-from main import MainSpectrumWidget, FittingThread, MainView_Generic
+from main import MainSpectrumWidget, FittingThread, MainNMRWindowBase
 
 # Set white background in plots
 pg.setConfigOption('background', 'w')
@@ -53,16 +59,6 @@ cursord = {
 global settings
 settings = dict()       # A dictionary of settings for processing
 steps = []
-
-# class EmittingStream(QObject):
-#     """For printing text in a textEdit."""
-#
-#     textWritten = pyqtSignal(str)
-#
-#     def write(self, text):
-#         self.textWritten.emit(str(text))
-
-from PyQt4.QtCore import Qt
 
 # Some definitions
 labels = ['Ethanol','Glucose','Fructose','Sucrose','Maltose','Maltotriose','Lactose','Sorbitol',
@@ -801,8 +797,8 @@ def init_Steps_autoWine(SSS):
                          autoKeys = [('.', 'sigma2', 0), ('Succinic acid', 'ampl', 0)], frqBlkIds=[6], nrep=3, fitEach=True))     # Fit succinic acid
     SSS.steps.append(Step(script=fit_lactic))        # Fits lactic acid and alanine
     SSS.steps.append(Step(script=fit_proline))        # Fits acetic acid and proline
-    SSS.steps.append(Step(parsKeys=[('Acids', 'alph', 0)],
-                          autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
+    # SSS.steps.append(Step(parsKeys=[('Acids', 'alph', 0)],
+    #                       autoKeys = [('.', 'sigma2', 0), ('Acetic acid', 'ampl', 0), ('Succinic acid', 'ampl', 0), ('Malic acid', 'ampl', 0), ('Citric acid', 'ampl', 0), ('Lactic acid', 'ampl', 0)], frqBlkIds=[6, 7, 8]))
     # # Fit the sugars
     SSS.steps.append(Step(script=fit_sugars))
 
@@ -817,7 +813,7 @@ def init_Steps_autoWine(SSS):
 
     # Define a list of fast processing steps
     n = len(SSS.steps)
-    SSS.extra['fastStepIDs'] = [0, 1, 2, 4, 5, n-2, n-1]   # List of step IDs that should should be run if the fitted values are copied from PRESAT to PROTON spectra
+    SSS.extra['fastStepIDs'] = [0, 1, 2, 4, 5, n-2, n-1]   # List of step IDs that should be run if the fitted values are copied from PRESAT to PROTON spectra
 
 def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, resetSteps=True):
     """Initializes the workspace wsp for beverage analysis."""
@@ -1084,7 +1080,7 @@ class MyDoubleEdit(QLineEdit):
         super().__init__(parent)
         self.setValue(value)
         self.editingFinished.connect(self.onEditingFinished)
-        self.setValidator(QtGui.QDoubleValidator())
+        self.setValidator(QDoubleValidator())
 
     def value(self):
         return self._value
@@ -1169,7 +1165,7 @@ class QCheckableComboBox(QComboBox):
         else:
             item.setCheckState(Qt.Unchecked)
 
-class MainViewWine(MainView_Generic):
+class MainViewWine(MainNMRWindowBase):
     """Main GUI form class."""
 
     def __init__(self, wsp, expiryTime = np.inf, parent = None):
@@ -1188,7 +1184,7 @@ class MainViewWine(MainView_Generic):
         # If DATA_PATH was given, collect the data and start fitting
         if self.DATA_PATH is not None:
             filePathList = read_spinsolve_subfolders(self.DATA_PATH, [])
-            self.loadManyFiles(filePathList)
+            self.importDataFiles(filePathList)
 
     def __getattr__(self, attr):
         """Called with the dot notation for attributes not found in the class. Access the Workspace directly."""
@@ -1198,7 +1194,7 @@ class MainViewWine(MainView_Generic):
         # Used to show text that was written to the console
         #self.statusBar.showMessage(text)
         cursor = self.printoutEdit.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
+        cursor.movePosition(QTextCursor.End)
         cursor.insertText(text)
         self.printoutEdit.setTextCursor(cursor)
         self.printoutEdit.ensureCursorVisible()
@@ -1207,7 +1203,7 @@ class MainViewWine(MainView_Generic):
         # Used to show text that was written to the console
         #self.statusBar.showMessage(text)
         cursor = self.printoutEdit.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
+        cursor.movePosition(QTextCursor.End)
         #if err: cursor.insertText("------------ ERROR -------------")
         cursor.insertText(text)
         self.printoutEdit.setTextCursor(cursor)
@@ -1324,11 +1320,11 @@ class MainViewWine(MainView_Generic):
             else: tbMain.addSeparator()
 
     # ------------------------- Other utility methods --------------------------
-    def addDatumFromFile(self, path):
+    def addNewDatum(self, path):
         """Imports a new spectrum and adds it to the workspace and the list widget of data."""
-        dat = super().addDatumFromFile(path)
 
         crnt_series = self.wsp.series[0]
+        dat = addDatumFromFile(path, crnt_series)
 
         dat.extra.update({'mass_frac_MalAc':0.0, 'masses_au': {}, 'mass_total_au':0.0, 'density':1000.0, 'fitted':False, 'sigma_est':0.0})
 
@@ -1338,7 +1334,7 @@ class MainViewWine(MainView_Generic):
 
         return dat
 
-    def loadManyFiles(self, filePathList):
+    def importDataFiles(self, filePathList):
         """Loads files from several folders."""
         # TODO! This can be reorganized into several functions (e.g. for compile_reduced and compiled_full) or combined with dropEvent...
 
@@ -1348,7 +1344,7 @@ class MainViewWine(MainView_Generic):
 
         # Load the new files
         for filePath in filePathList:
-            dat = self.addDatumFromFile(filePath)
+            dat = self.addNewDatum(filePath)
 
         # Check the files and run the optimization
         if compile_reduced:
@@ -1395,7 +1391,7 @@ class MainViewWine(MainView_Generic):
     def onSaveWspAction(self):
         """Saves the workspace including the stepClass class and the steps array."""
         # TODO: Use save_worksapce from MainLogic.py
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')[0]
         if filename:
             if filename[-4:] != '.wsp': filename += '.wsp'
 
@@ -1414,7 +1410,7 @@ class MainViewWine(MainView_Generic):
         """Loads the workspace including the stepClass class and the steps array."""
         # TODO: Use load_workspace from MainLogic.py
         self.DATA_PATH = None
-        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
         if filename:
             with open(filename, 'rb') as fp:
                 dataUnPack = dill.load(fp)
@@ -1682,7 +1678,7 @@ class MainViewWine(MainView_Generic):
 
     def saveResults(self):
         """Saves the current results of computation into a file."""
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.xlsx)')
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.xlsx)')[0]
         if filename:
             if filename == '' : filename = 'results.xlsx'
             if filename[-5:] != '.xlsx': filename += '.xlsx'
@@ -1897,959 +1893,959 @@ class MainViewWine(MainView_Generic):
         self.resCanvas.draw()
 
 
-class MainViewWine(MainView_Generic):
-    """Main GUI form class."""
+# class MainViewWine(MainNMRWindowBase):
+#     """Main GUI form class."""
+#
+#     def __init__(self, wsp, expiryTime = np.inf, parent = None):
+#         # Determine whether the program was called from a script with a data folder option
+#         self.DATA_PATH = None
+#         if len(sys.argv) > 1:
+#             parser = make_parser()
+#             opts, args = parser.parse_args(sys.argv[1:])
+#             self.DATA_PATH = opts.datadir
+#         # self.DATA_PATH = 'C:\\Users\\yma80\\Data\\FromScript'
+#
+#         # Initialize the main window
+#         super().__init__(wsp, expiryTime, parent)
+#         self.onResetWspAction()
+#
+#         # If DATA_PATH was given, collect the data and start fitting
+#         if self.DATA_PATH is not None:
+#             filePathList = read_spinsolve_subfolders(self.DATA_PATH, [])
+#             self.importDataFiles(filePathList)
+#
+#     def __getattr__(self, attr):
+#         """Called with the dot notation for attributes not found in the class. Access the Workspace directly."""
+#         return getattr(self.wsp, attr)
+#
+#     def normalOutputWritten(self, text):
+#         # Used to show text that was written to the console
+#         #self.statusBar.showMessage(text)
+#         cursor = self.printoutEdit.textCursor()
+#         cursor.movePosition(QTextCursor.End)
+#         cursor.insertText(text)
+#         self.printoutEdit.setTextCursor(cursor)
+#         self.printoutEdit.ensureCursorVisible()
+#
+#     def errorOutputWritten(self, text):
+#         # Used to show text that was written to the console
+#         #self.statusBar.showMessage(text)
+#         cursor = self.printoutEdit.textCursor()
+#         cursor.movePosition(QTextCursor.End)
+#         #if err: cursor.insertText("------------ ERROR -------------")
+#         cursor.insertText(text)
+#         self.printoutEdit.setTextCursor(cursor)
+#         self.printoutEdit.ensureCursorVisible()
+#
+#     def _icon(self, name):
+#         return QIcon(path.join(SCRIPT_PATH, 'icons', name))
+#
+#     def setupGUI(self):
+#         """Sets the layout for the main window."""
+#         # ----------------- set up the pie chart figure
+#         self.resFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
+#         self.resCanvas = FigureCanvas(self.resFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
+#         self.resCanvas.setMinimumHeight(400)
+#
+#         # ----------------- Spectrum figure in pyqtgraph -----------------------
+#         self.mainFigureWidget = MainSpectrumWidget()
+#         self.mainFigureWidget.setMinimumSize(550, 300)
+#         self.mainFigureWidget.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+#
+#         # ----------------------------------------------------------------------
+#         #                            Navigation tab
+#         # ----------------------------------------------------------------------
+#         self.dataListWidget = QListWidget()
+#         self.dataListWidget.currentRowChanged.connect(self.setCurrent)
+#
+#         # ----------------------------------------------------------------------
+#
+#         # Set up the navigation and results widgets
+#         tabNavi, tabRest = QWidget(), QWidget()
+#         layNavi, layRest = QHBoxLayout(), QHBoxLayout()
+#         tabNavi.setLayout(layNavi)
+#         tabRest.setLayout(layRest)
+#         layNavi.addWidget(self.dataListWidget)
+#         layRest.addWidget(self.resCanvas)
+#         layNavi.setContentsMargins(1,1,1,1)
+#         layRest.setContentsMargins(1,1,1,1)
+#         tabNavi.setMaximumHeight(150 if compile_reduced else 150)                 # Set to 0 to hide the navigation widget
+#
+#         # --------------- Left --------------------
+#         widgetLeft = QWidget()
+#         widgetLeft.setMinimumSize(250, 0)
+#         widgetLeft.setMaximumWidth(300)
+#         layLeft = QVBoxLayout()
+#         widgetLeft.setLayout(layLeft)
+#         layLeft.addWidget(tabNavi)
+#         layLeft.addWidget(tabRest)
+#         layLeft.setContentsMargins(1,1,1,1)
+#
+#         # --------------- Main widget and layout ----------------
+#         widgetMain = QWidget()
+#         layMain = QHBoxLayout()
+#         layMain.addWidget(widgetLeft)
+#         layMain.addWidget(self.mainFigureWidget)
+#         widgetMain.setLayout(layMain)
+#         self.setCentralWidget(widgetMain)    # Set the result in the center of the window
+#
+#         # Call the parent setup GUI function, Here setup_actions and assign_actions will be called
+#         super().setupGUI()
+#         self.setWindowTitle("Automated qNMR analysis of fermented beverages ver. {} ({})".format(version, str(date.today())) )
+#         self.resize(1200, 700)
+#
+#         if compile_reduced:
+#             tbMain.hide()
+#             tabNavi.hide()
+#
+#     def setup_actions(self):
+#         super().setup_actions()
+#         # ----------------------- Actions for the plot -------------------------
+#         # Show components
+#         new = QAction(self._icon('icon_showComponents.png'), 'Show fitted components', self)
+#         new.setStatusTip('Show fitted components')
+#         new.setCheckable(True)
+#         new.triggered.connect(self.toggleComps)
+#         self._actions['Show components'] = new
+#
+#         # Show residual
+#         new = QAction(self._icon('icon_plotResidual.png'), 'Show residual', self)
+#         new.setStatusTip('Show residual')
+#         new.setCheckable(True)
+#         new.triggered.connect(self.toggleResid)
+#         self._actions['Show residual'] = new
+#
+#         # Autoscale
+#         new = QAction(self._icon('icon_autoScale.png'), 'Autoscale', self)
+#         new.setStatusTip('Scale plot to data')
+#         new.triggered.connect(self.mainFigureWidget.autoRange)
+#         self._actions['Autoscale'] = new
+#
+#         # Save Image
+#         new = QAction(self._icon('icon_saveImage.png'), 'Save image', self)
+#         new.setStatusTip('Saves the spectrum as image')
+#         new.triggered.connect(self.mainFigureWidget.saveImage)
+#         self._actions['Save image'] = new
+#
+#         # Reset the fit but keep the files
+#         new = QAction(self._icon('icon_magic.png'), 'Reset the fit', self)
+#         new.setStatusTip('Resets the fitted parameters to default values but keeps loaded spectra in the workspace')
+#         new.triggered.connect(lambda _ : init_autoWine(self.wsp, resetSeries=False))
+#         self._actions['Reset fit'] = new
+#
+#     def assign_actions(self):
+#         """Assigns actions to the lements of toolbars."""
+#         # ------------------------- Set up the toolbars ------------------------
+#         tbMain = self.addToolBar("File")               # Main toolbar
+#
+#         # ------------------------- Set the main toolbar -----------------------
+#         for actn in ['Clear workspace', 'Reset fit', 'Import file','Remove file','Show settings',None,
+#                      'Load workspace','Save workspace', None, 'Show components', 'Show residual',
+#                      'Autoscale', None, 'Fit all steps', 'Fit all files', 'Stop thread', None,
+#                      'Save results', 'Exit']:
+#             if actn is not None:
+#                 tbMain.addAction(self._actions[actn])
+#             else: tbMain.addSeparator()
+#
+#     # -------------------- Processing keyboard interactions --------------------
+#
+#     def keyPressEvent(self, ev):
+#         # self.scene().keyPressEvent(ev)
+#         # self.sigKeyPress.emit(ev)
+#         # print('Key pressed ', ev.key())
+#         pass
+#
+#     # ------------------------- Other utility methods --------------------------
+#     def addDatumFromFile(self, path):
+#         """Imports a new spectrum and adds it to the workspace and the list widget of data."""
+#         crnt_series = self.wsp.series[0]
+#         dic = None
+#
+#         if path[-3:] == '.1d':
+#
+#             yT, c0, f0, dt, dic = read_spinsolve(path)
+#
+#             nt = yT.shape[0]
+#             t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+#             name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
+#
+#         # Read an Mnova corrected FID file
+#         elif path[-4:] in ['.txt']:
+#             with open(path, 'rb') as fp:
+#                 # Read the file header line by line
+#                 for line in fp:
+#                     pair = line.decode().strip().split('=')
+#                     if 'DataPoints' in pair[0]:
+#                         break           # The next line will be the first data point -- stop reading the header
+#                     elif 'Size' in pair[0]:
+#                         nt = int(pair[1])
+#                     elif 'SpectrometerFrequency' in pair[0]:
+#                         c0 = float(pair[1])
+#                     elif 'Hz' in pair[0]:
+#                         f0 = -float(pair[1])
+#                     elif 'SpectralWidth' in pair[0]:
+#                         dt = 1 / float(pair[1])
+#
+#                 # Read the remainder of the file into a np array
+#                 data = np.fromfile(fp, sep='\t')
+#
+#             # Form the arrays
+#             t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
+#             yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
+#
+#             ## Subsample if the frequency range is too large
+#             #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
+#             #t = t[::k]
+#             #yT = yT[::k, :]
+#
+#             name = path[path.rfind('\\')+1:path.rfind('.')]
+#
+#         # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
+#         if crnt_series.c0 is None:
+#             crnt_series.c0 = c0
+#             crnt_series.f0 = f0
+#             crnt_series.t = t
+#             crnt_series.fullReset()
+#
+#         dat = crnt_series.addDatum(yT, name = name, extra=dic)
+#         dat.extra.update({'mass_frac_MalAc':0.0, 'masses_au': {}, 'mass_total_au':0.0, 'density':1000.0, 'fitted':False, 'sigma_est':0.0})
+#         if 'startTime' in dic.keys():
+#             # TODO: Try dateutil to automatically parse dates in different formats
+#             timeParsed = time.strptime(dic['startTime'].split('.')[0], '%Y-%m-%dT%H:%M:%S')         # Convert the time format from e.g. "2021-02-14T13:21:33.653" to '%Y%m%d-%H%M%S'
+#             timeString = time.strftime('%Y%m%d-%H%M%S', timeParsed)
+#             dat.extra.update({'acqu_time' : timeString})
+#
+#         # Add new entry to the data List
+#         newItem = QListWidgetItem(self._icon('icon_gof_none.png'), name, parent=self.dataListWidget)
+#         self.setCurrent(resetView=True if len(crnt_series.data)==1 else False)     # Set the last spectrum as current
+#
+#         return dat
+#
+#     def onImportData(self):
+#         """Runs a dialog to select a new file."""
+#         for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "Spinsolve FID (*.1d)"):   # ;;JEOL FID (*.jdf)
+#             dat = self.addDatumFromFile(newFilePath[0])
+#         return dat
+#
+#     def removeCurrent(self):
+#         """Removes currently selected spectrum."""
+#         crntID = self._crnt.selfID()
+#         if crntID[0] == 0 and crntID[1] is not None:
+#             self.wsp.series[0].data[crntID[1]].remove()
+#             self.dataListWidget.takeItem(crntID[1])
+#
+#     def setCurrent(self, indx_crnt=0, resetView=False):
+#         """Sets the _crnt Datum and updates the plot, tables, etc. accordingly."""
+#         try:
+#             if compile_reduced:
+#                 # Set the current to a PRESAT experiment, if possible
+#                 for i, DDD in enumerate(self.wsp.series[0].data):
+#                     if DDD.protocol() == 'PRESAT':
+#                         indx_crnt = 0
+#                         break
+#
+#             self._crnt = self.wsp.series[0].data[indx_crnt]
+#             self.dataListWidget.setCurrentRow(self.dataListWidget.count()-1 if indx_crnt == -1 else indx_crnt)
+#         except IndexError:
+#             # If there are no Series/Datums
+#             self._crnt = self.wsp
+#             self.dataListWidget.clear()
+#
+#         self.plotCurrent(autoRange=resetView)
+#
+#     def onSaveWspAction(self):
+#         """Saves the workspace including the stepClass class and the steps array."""
+#         # TODO: Use save_worksapce from MainLogic.py
+#         filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')[0]
+#         if filename:
+#             if filename[-4:] != '.wsp': filename += '.wsp'
+#
+#             # Pack the logic of the workspace
+#             dataPack = self.wsp.pack()
+#
+#             # Pack the settings
+#             stngPack = copy.deepcopy(settings)
+#             stngConfig = config.as_dict()
+#             stngPack['_config'] = stngConfig
+#
+#             with open(filename, 'wb') as fp:
+#                 dill.dump([dataPack, stngPack], fp)
+#
+#     def onLoadWspAction(self):
+#         """Loads the workspace including the stepClass class and the steps array."""
+#         # TODO: Use load_workspace from MainLogic.py
+#         self.DATA_PATH = None
+#         filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
+#         if filename:
+#             with open(filename, 'rb') as fp:
+#                 dataUnPack = dill.load(fp)
+#
+#             # Reset the settings and the Workspace
+#             self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
+#
+#     def onResetWspAction(self, newWorkspace=None, newSettings=None):
+#         """Clears the workspace including the stepClass, signals and the tree."""
+#
+#         self.wsp.reset() # Reset the workspace
+#         self.setCurrent(resetView=True)     # Set the last spectrum as current
+#         if newWorkspace is None:
+#             self.wsp = init_autoWine(self.wsp)
+#         else:
+#             try:
+#                 if newWorkspace['extra']['autoWine'] == True:
+#                     self.wsp.unpack(newWorkspace)
+#                     for dat in self.wsp.series[0].data:
+#                         newItem = QListWidgetItem(self._icon('icon_gof_none.png'), dat.name, parent=self.dataListWidget)
+#                     # Update the global config
+#                     if newSettings is not None:
+#                         try:
+#                             stngConfig = newSettings.pop('_config')
+#                             config.from_dict(config, stngConfig)
+#                         except KeyError: pass
+#             except KeyError: self.onResetWspAction()      # If autoWine is not the loaded workspace
+#
+#         self.setCurrent(resetView=True)     # Set the last spectrum as current
+#
+#     def resetSignals(self, zff=None, apod=None, flagAdapFreq=None):
+#         self._crnt.resetFreqs(zff, apod)
+#
+#         if flagAdapFreq is not None:
+#             for dat in self._crnt.parent.data:
+#                 dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
+#
+#         self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
+#         self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
+#
+#     def showAboutMessage(self):
+#         """Displays the About message."""
+#         msg = QMessageBox()
+#         msg.setIcon(QMessageBox.Information)
+#
+#         msg.setText("Quantitative NMR analysis with quantum mechanical models.")
+#         msg.setInformativeText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
+#         msg.setWindowTitle("About qNMR")
+#         # msg.setDetailedText("The details are as follows:")
+#         msg.setStandardButtons(QMessageBox.Close)
+#
+#         msg.exec_()            # Returns the values of pressed button
+#
+#     def showErrorMessage(self, text=None):
+#         """Displays an Error message."""
+#         msg = QMessageBox()
+#         msg.setIcon(QMessageBox.Critical)
+#
+#         msg.setText(text)
+#         # msg.setInformativeText(text)
+#         msg.setWindowTitle("Error")
+#         msg.setStandardButtons(QMessageBox.Close)
+#
+#         msg.exec_()            # Returns the values of pressed button
+#
+#     def onAssigned(self):
+#         """Updates the tree and plots when model peaks have been assigned to picked peaks."""
+#         self.plotCurrent(autoRange=False)
+#         self.treeWidget.showStep()
+#         #self.phasingTool.setVals(self.steps[0])
+#         #dataFiles[self.indxCrntFile].update()
+#         pass
+#
+#     # ------------------ Working with the fitting thread -----------------------
+#
+#     def startThread(self, queueFiles=None, queueActns=None):
+#         """Fits the files in the queueFiles list."""
+#         # Disable controls that can start fitting
+#         self.setCursor(Qt.BusyCursor)
+#
+#         if queueFiles is None: queueFiles = [self._crnt]
+#
+#         if queueActns is None: queueActns = ['Evl']        # Only evaluate the active step by default
+#
+#         queueActns = [self.treeModel.actvStepIndx if x == 'Fit' else x for x in queueActns]
+#         # if len(queueFiles) > 1: queueActns.insert(0, 'Init')
+#
+#         # Setup the fitting queue
+#         self._fittingQueue = [[file, actn] for file in queueFiles for actn in queueActns]
+#
+#         # Set up the progress bars
+#         self.progressBarFiles.setRange(0, len(self._fittingQueue))
+#         self.progressBarFiles.setValue(0)
+#
+#         self.fittingThread.setExitFlag(False)
+#
+#         self.continueThread()
+#
+#     def continueThread(self):
+#         """Continues fitting the thread if there are any files left."""
+#         if len(self._fittingQueue) > 0:
+#             fileToFit, actnToRun = self._fittingQueue.pop(0)
+#
+#             if actnToRun == 'Init':
+#                 # We are starting to fit a new file and will be running through the list of steps from 0 again... Need to set up the initial values.
+#                 # Determine the starting values of parameters for the next file in the fittingQueueFiles and KEEP the current values if necessary
+#                 if config.OPTIM_startFrom == "previous":
+#                     sid = fileToFit.selfID()
+#                     # Check if the current file is not the first one in the Series. If possible use parameters of the previous file, otherwise keep the current parameters.
+#                     if sid[1] > 0:
+#                         fileToFit.resetCrntPars(crntParsH = copy.deepcopy(fileToFit.series[sid[0]].data[sid[1]-1].crntParsH) )
+#                 elif config.OPTIM_startFrom == "default":
+#                     fileToFit.resetCrntPars()   # Reset to defaults (parameters and distributions)
+#                 else: # i.e. settings["startgFromPars"] == "current"
+#                     pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
+#
+#                 # Try copying the parameters from a previously fitted presat experiment
+#                 if config.OPTIM_copyFromPRESAT and 'PROTON' in fileToFit.name and 'DRY' not in fileToFit.name:
+#                     #Tries to find an already fitted (PRESAT) experiment in the same Series and copies all its parameters and distributions to the current (PROTON) datum.
+#                     fileCopyFrom = None
+#                     for dat in fileToFit.parent.data:
+#                         if get_wine_name(fileToFit) == get_wine_name(dat) and dat.extra['fitted'] and ('PRESAT' in dat.name) and ('DRY' not in dat.name):
+#                             fileCopyFrom = dat
+#                             break
+#
+#                     if fileCopyFrom is not None:
+#                         for key in fileToFit.allParsKeys(amplitudes=True):
+#                             # Copy the distribution definitions
+#                             fileToFit.parsSpecDict.update(copy.deepcopy(dat.parsSpecDict))
+#
+#                             # Copy the parameter values
+#                             fileToFit.setCrntVal(key, dat.getCrntVal(key))
+#
+#                         # Remove the steps that do not need to be refitted and update the fitting queue and progress bars
+#                         new_fittingQueue = [x for x in self._fittingQueue if (x[0] == fileToFit and x[1] in fileToFit.parent.extra['fastStepIDs']) or x[0] != fileToFit]
+#                         self.progressBarFiles.setMaximum( self.progressBarFiles.maximum() - (len(self._fittingQueue) - len(new_fittingQueue)) )
+#                         self._fittingQueue.clear()
+#                         self._fittingQueue.extend(new_fittingQueue)
+#
+#                 self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
+#
+#                 self.continueThread()
+#
+#             elif isinstance(actnToRun, int):
+#                 # If it is a step with too many parameters, split it into several steps and add them to the queue
+#                 print("\nOptimizing step {:d}".format(actnToRun+1))
+#                 actnToRun = fileToFit.steps[actnToRun]
+#
+#                 if len(actnToRun.parsKeys) > 3:
+#                     newSteps = split_steps(fileToFit, actnToRun)
+#                     self._fittingQueue[:0] = [[fileToFit, step] for step in newSteps]         # Insert all new steps from the beginning of the queue
+#
+#                     # Update the progress bar accordingly
+#                     oldVal, oldMax = self.progressBarFiles.value(), self.progressBarFiles.maximum()
+#                     if oldMax != oldVal:
+#                         newVal = oldVal*int(math.ceil((oldMax-oldVal+len(newSteps)-1)/(oldMax-oldVal)))           # newVal = int(math.ceil(oldVal*(oldMax+len(newSteps)-1)/oldMax))
+#                         newMax = newVal + (oldMax-oldVal) + len(newSteps) - 1
+#
+#                         self.progressBarFiles.setMaximum(newMax)
+#                         self.progressBarFiles.setValue(newVal)
+#                 else:
+#                     # TODO: Possibly check here that the parsKeys in the step are fittable
+#                     self._fittingQueue.insert(0, [fileToFit, actnToRun] )          # Substitute the integer with the step
+#
+#                 self.continueThread()
+#
+#             else:
+#                 # It is a usual optimization step or an action (e.g. phasing)
+#                 self.fittingThread.fit(fileToFit, actnToRun)
+#
+#         else:
+#             # All done. Reset the widgets
+#
+#             # This will be executed always when the thread is finished, either normally or by termination.
+#             self.plotCurrent(autoRange=False)
+#             self.unsetCursor()
+#             self.progressBarFiles.setValue(self.progressBarFiles.maximum())
+#
+#             # Save the results
+#             if compile_reduced and self.DATA_PATH is not None:
+#                 wine_name = get_wine_name(self._crnt)
+#
+#                 # Save the workspace
+#                 dataPack = self.wsp.pack()
+#                 stngPack = copy.deepcopy(settings)
+#                 stngPack['_config'] = config.as_dict()
+#
+#                 with open(os.path.join(self.DATA_PATH, wine_name+'.wsp'), 'wb') as fp:
+#                     dill.dump([dataPack, stngPack], fp)
+#
+#                 # Save Excel file
+#                 self._crnt.saveResults( os.path.join(self.DATA_PATH, wine_name+'.xlsx') )
+#
+#     def onThreadFinished(self):
+#         """Called when the fittingThread finishes processing each step. Depending if there are files/steps in queue, may call the startThread/fitqueueActns function again or just display the results."""
+#         self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
+#
+#         if self.fittingThread.isExiting(): self._fittingQueue.clear()
+#
+#         self.continueThread()
+#
+#     def stopThread(self):
+#         """Stops fitting in the thread."""
+#         self.fittingThread.setExitFlag(True)
+#         self.fittingThread.quit()
+#
+#     def onParameterChange(self, key, val):
+#         """Sets a new value to the parameter key."""
+#
+#         oldVal = self._crnt.getCrntVal(key)
+#
+#         if not np.isclose(val, oldVal):
+#
+#             self._crnt.setCrntVal(key, val)
+#
+#         self.startThread()
+#
+#     def onPhased(self, p0deg, p1deg):
+#         """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
+#         nf = next_pow_of_2( 2**self._crnt.zff * len(self._crnt.t) )     # Determine the number of samples in the FULL signal spectrum (possibly including zero-filling). zff and t are taken from the Series level
+#         dt = self._crnt.t[1]-self._crnt.t[0]
+#
+#         d_theta, d_tau = deg2tau(dt, nf, p0deg, p1deg)
+#         if not ( np.isclose(d_theta, 0) and np.isclose(d_tau, 0) ):
+#             theta = self._crnt.getCrntVal(key=('.', 'theta', 0))
+#             tau = self._crnt.getCrntVal(key=('.', 'tau', 0))
+#
+#             self._crnt.setCrntVal(key=('.', 'theta', 0), val = (theta+d_theta + np.pi) % np.pi - np.pi )     # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
+#             self._crnt.setCrntVal(key=('.', 'tau', 0), val = tau + d_tau)
+#
+#         self.startThread()
+#
+#     def fitAllSteps(self, selectedFiles = None):
+#         """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
+#         # Form the list of steps to Fit
+#         stepIdsToFit = ['Init'] + list(range(len(self._crnt.steps)))
+#
+#         # Set up the fitting queue making sure that there are no repeated files
+#         if selectedFiles is None:
+#             selectedFiles = [self._crnt]         # Fit all steps of the current file only
+#         selectedIDs = [ddd.selfID() for ddd in selectedFiles if isinstance(ddd, Datum)] \
+#                     + [ddd.selfID() for sss in selectedFiles for ddd in sss.data if isinstance(sss, Series)]      # Expand all Series
+#         selectedIDs = sorted(list(set(selectedIDs)),
+#                             key = lambda x : sorting_key(self._crnt.dataByID(x).name))                     # Sort the files to fit presat experiments first
+#         queueFiles = [self._crnt.series[sid[0]].data[sid[1]] for sid in selectedIDs]
+#
+#         # Call the fitting function
+#         self.startThread(queueFiles, stepIdsToFit)
+#
+#     def fitAllFiles(self):
+#         """Fits all steps for all Files in the current Series. The starting values on the next step are copied from the current found values. Starting values for each file are determined by the settings and are set by the FittingThread."""
+#
+#         # Reset the workspace/current parameters without resetting the data in the series
+#         init_autoWine(self.wsp, resetSeries=False)
+#
+#         if isinstance(self._crnt, Series):
+#             selectedFiles = [i for i in self._crnt.data]
+#
+#         elif isinstance(self._crnt, Datum):
+#             selectedFiles = [i for i in self._crnt.parent.data]
+#
+#         else: return 0
+#
+#         self.fitAllSteps(selectedFiles)
+#
+#     def saveResults(self):
+#         """Saves the current results of computation into a file."""
+#         filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.xlsx)')[0]
+#         if filename:
+#             if filename == '' : filename = 'results.xlsx'
+#             if filename[-5:] != '.xlsx': filename += '.xlsx'
+#
+#         self._crnt.saveResults(filename)
+#
+# # ------------------------ Parameter list --------------------------------------
+#     def updateParsList(self, indxStep = None):
+#         """Updates and displays the list of optimizaed parameters on the current step."""
+#         self.parsListWidget.clear()
+#         items = [node.name for node in stepClass.T.repRoots()]
+#         if indxStep is not None:
+#             items.extend([str(v) for v in self.steps[indxStep].parsKeys])
+#         self.parsListWidget.addItems(items)
+#
+#     def onSelectParList(self, item):
+#         """Handles the selection event of a parameter in the list."""
+#         indxRow = self.parsListWidget.row(item)
+#         numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+#         if indxRow < numRepRoots:
+#             key = self.parsListWidget.currentItem().text()
+#         else:
+#             key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
+#             slctParSpec = stepClass.getPrior(stepClass, key)
+#             self.editMin.setText("{:.4g}".format(slctParSpec.min))
+#             self.editMax.setText("{:.4g}".format(slctParSpec.max))
+#             self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
+#             self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
+#             if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
+#                 self.editPriorMode.setEnabled(True)
+#                 self.editPriorStdv.setEnabled(True)
+#                 self.chkboxUseCrnt.setEnabled(True)
+#                 if slctParSpec.prior['mode'] is None:
+#                     self.chkboxUseCrnt.setCheckState(Qt.Checked)
+#                     self.editPriorMode.setText(self.editCrntVal.text())
+#                     self.editPriorMode.setReadOnly(True)
+#                 else:
+#                     self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
+#                     self.editPriorMode.setReadOnly(False)
+#                     self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
+#                 self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
+#             else:   # Uniform prior
+#                     self.editPriorMode.setDisabled(True)
+#                     self.editPriorStdv.setDisabled(True)
+#                     self.chkboxUseCrnt.setDisabled(True)
+#         self.plotDistr(key)    # plot the prior distribution
+#
+#     def onPriorNameChanged(self, itemIndx):
+#         """Handles the event of changing the name of the prior distribution in the combobox."""
+#         priorName = self.cmboxPrior.currentText()
+#         if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
+#             self.editPriorMode.setEnabled(True)
+#             self.editPriorStdv.setEnabled(True)
+#             self.chkboxUseCrnt.setEnabled(True)
+#             if self.chkboxUseCrnt.isChecked:
+#                 self.editPriorMode.setText(self.editCrntVal.text())
+#                 self.editPriorMode.setReadOnly(True)
+#             else:
+#                 self.editPriorMode.setReadOnly(False)
+#                 self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
+#             self.editPriorStdv.setText("{:.4g}".format(0.5))
+#         else:   # Uniform prior
+#                 self.editPriorMode.setDisabled(True)
+#                 self.editPriorStdv.setDisabled(True)
+#                 self.chkboxUseCrnt.setDisabled(True)
+#         self.saveParsForm()
+#
+#     def saveParsForm(self):
+#         """Saves the parsSpec entered in the resForm1."""
+#         indxRow = self.parsListWidget.currentRow()
+#         numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+#         if indxRow < numRepRoots:
+#             key = self.parsListWidget.currentItem().text()
+#         else:
+#             key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
+#             priorName = self.cmboxPrior.currentText()
+#             if priorName == 'Uniform':
+#                 prior = {'name':priorName, 'mode':None, 'stdv':None}
+#             elif self.chkboxUseCrnt.isChecked():
+#                 self.editPriorMode.setText(self.editCrntVal.text())
+#                 self.editPriorMode.setReadOnly(True)
+#                 prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
+#             else:
+#                 self.editPriorMode.setReadOnly(False)
+#                 prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
+#
+#             # Save the parSpec
+#             stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
+#             # Update the current parameter values
+#             self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
+#             """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
+#             # Display new min/max values in the tree
+#             self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
+#             self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
+#             self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
+#             self.treeWidget.blockSignals(False)
+#             # Update the rest of parameters based on their values in the tree table
+#             for indx, stp in enumerate(self.steps):
+#                 clmn = indx+3
+#                 stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
+#         # plot the prior distribution
+#         self.plotDistr(key)
+#
+#     def plotDistr(self, key=None):
+#         """Plots a prior probability distribution for the parameter key on the middle plot."""
+#         # Determine which parameter is selected in the list and plot its samples
+#         if key is None:
+#             numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
+#             if self.parsListWidget.currentRow() < numRepRoots:
+#                 key = self.parsListWidget.currentItem().text()
+#             else:
+#                 key = self.steps[-1].parsKeys[self.parsListWidget.currentRow() - numRepRoots]    # Parameter name
+#         # Plot the piror distribution and samples
+#         self.axDistr.clear()
+#         self.axDistr2.clear()
+#         if type(key) is tuple:
+#             # Handle adjustible parameters
+#             slctParSpec = self.steps[-1].getPrior(key)
+#             # Plot the samples
+#             if self.steps[-1].sHat is not None:
+#                 indx = self.steps[-1].sHat['smplKeys'].index(key)       # Index of the sampled parameter in the array of samples
+#                 smpl_abs = self.steps[-1].sHat['smplVals'][indx, :]
+#                 self.axDistr2.hist(smpl_abs, bins=50, range=(slctParSpec.min, slctParSpec.max), color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
+#             # Plot the prior
+#             vals = [slctParSpec.evalPrior(x) for x in np.linspace(-1,1,25)]
+#             self.axDistr.plot(np.linspace(slctParSpec.min, slctParSpec.max, 25), vals, color=(0.96, 0.53, 0.20))
+#             self.axDistr.set_xlim((slctParSpec.min, slctParSpec.max))
+#             self.axDistr.axvline(x=slctParSpec.abs(self.steps[-1].getCrntVal(key)), ymin=0, ymax=0.05, color='r')
+#         else:
+#             # Handle the amplitudes
+#             if self.steps[-1].sHat is not None:
+#                 indx = self.steps[-1].sHat['labels'].index(key)       # Index of the sampled parameter in the array of samples
+#                 smpl_abs = np.abs(self.steps[-1].sHat['smplAmpl'][indx,:])
+#                 self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
+#         self.histCanvas.draw()
+#
+# # ------------------------ Functions for plotting ------------------------------
+#     def plotCurrent(self, autoRange=True):
+#         """Plots the spectrum/results for a specific datum dat."""
+#         if isinstance(self._crnt, Datum):
+#             # Reevaluate the last step to make sure that the baseline is computed correctly
+#             # if self._crnt.zF is None: self._crnt.evaluate(autoKeys=[], returnSignals=True)
+#             if self._crnt.extra['fitted'] and self._crnt.bF_corr is None:
+#                 self._crnt.steps[-1].run(self._crnt)
+#
+#                 # Output the found results
+#                 self.plotResultsChart()
+#
+#             # If the file has not bee fitted, zF, bF, and xF will be set to None
+#             f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
+#
+#             # Plotting function
+#             self.mainFigureWidget.plot(f, yFph, xF, zF = zF, stems =  None, phasingPivot=False, freqBlocks=None, show_yaxis=False,
+#                 # freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[-1].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)],
+#                 indx_colr=[i for i, name in enumerate(self._crnt.repRootNames) if not self._crnt.isXclRootName(name)])   # if i in self._crnt.steps[-1].frqBlkIds])
+#
+#             # Pass the components to the plot (already done), but don't show them yet
+#             if zF is not None and not self._actions['Show components'].isChecked():
+#                 self.mainFigureWidget.showComponents(flag=False)
+#
+#             # self.mainFigureWidget.getItem(0, 0).vb.setMouseEnabled(x=False)
+#             if autoRange:
+#                 self.mainFigureWidget.autoRange(xlims=(0.0, 7.0))
+#
+#         else:
+#             self.mainFigureWidget.reset()
+#             self.plotResultsChart(reset=True)
+#
+#     def toggleComps(self):
+#         """Plots the constituent peaks for each model component"""
+#         # If no components have been computed so far, will evaluate them first.
+#         # TODO! Use customized exceptions
+#         try:
+#             self.mainFigureWidget.showComponents(flag=self._actions['Show components'].isChecked())
+#         except:
+#             if self._actions['Show components'].isChecked():
+#                 self.plotCurrent(autoRange=False)
+#
+#     def toggleResid(self):
+#         """Show or hide the residual plot."""
+#         self.mainFigureWidget.showResidual(flag=self._actions['Show residual'].isChecked())
+#
+#     def plotResultsChart(self, reset=False):
+#         """Plots a pie chart that represents the found component concentrations."""
+#
+#         self.resFigure.clear()
+#
+#         def hover(evt):
+#             if evt.inaxes in ax_bar:
+#                 # Find which bar contains the event
+#                 newMessage = ''
+#                 for indx, patch in enumerate(bars.patches):
+#                     if patch.contains(evt)[0]:              # Can use this instead of redefining bbox explicitly
+#                     # bbox = patch.get_bbox()
+#                     # print(bbox.x0, evt.x, bbox.x1)
+#                     # print(bbox.y0, evt.y, bbox.y1)
+#                     # inv_trans = ax_bar[0].transData.inverted()      # Transform mouse (display) coordinates to data coordinates
+#                     # (x, y) = inv_trans.transform([evt.x, evt.y])
+#                     # if (bbox.x0 < x) and (x < bbox.x1) and (bbox.y0 < y) and (y < bbox.y1):
+#                         # define new status bar message
+#                         newMessage = '{:s}    {:.3g} g/L'.format(labels[indx], vals[indx])
+#
+#                         # Show the component (match the index from the labels array with the index in the zF matrix)
+#                         self.mainFigureWidget.showComponents(flag=True, indx=self.repRootNames.index(labels[indx]) )
+#
+#             elif evt.inaxes == ax_pie:
+#                 newMessage = 'Potential alcoholic strength:  {:.1f} %v/v (actual:  {:.1f} %v/v)'.format(conc_gL['Total Alcohol, %v\v'], conc_gL['Actual Alcohol, %v\v'])
+#             else:
+#                 # Return to the original state
+#                 self.statusBar.clearMessage()
+#                 self.mainFigureWidget.showComponents(flag=False)
+#                 return
+#
+#             # Set the status bar message
+#             if self.statusBar.currentMessage() != newMessage:
+#                 self.statusBar.showMessage(newMessage)
+#
+#         def axes_intervals(vals):
+#             """Determine the ranges for the subplots"""
+#
+#             def round_lims(val):
+#                 """Return min and max values of vertical limits of the plot need to correctly represent the value."""
+#                 if val < 2:
+#                     min_lim, max_lim = math.floor(0.95*val*5)/5, math.ceil(1.01*val*5)/5
+#                 elif val < 20:
+#                     min_lim, max_lim = math.floor(0.95*val/2)*2, math.ceil(1.01*val/2)*2
+#                 elif val < 200:
+#                     min_lim, max_lim = math.floor(0.95*val/5)*5, math.ceil(1.01*val/5)*5
+#                 else:
+#                     min_lim, max_lim = math.floor(0.95*val/10)*10, math.ceil(1.01*val/10)*10
+#
+#                 return minmaxTuple(max(0.0, min_lim), max(max_lim, 0.1))
+#
+#             intervals = merge_intervals([round_lims(val) for val in vals])
+#             gaps_size = (np.array([interval.min for interval in intervals])[1:] - np.array([interval.max for interval in intervals])[:-1]) / np.array([interval.max for interval in intervals])[:-1]      # Relative gap sizes between the intervals
+#
+#             boundaries = [intervals[0].min, intervals[-1].max]       # Selected boundaries for the plotting
+#             for gap_indx in np.argsort(gaps_size)[-2:]:
+#                 # Considr only the largest two gaps
+#                 if gaps_size[gap_indx] > 1:
+#                     boundaries.extend([intervals[gap_indx].max, intervals[gap_indx+1].min])
+#             boundaries = sorted(boundaries)
+#
+#             return [(x,y) for x, y in zip(boundaries[::2], boundaries[1::2])]
+#
+#         # Remove the reference to the hovering event
+#         try:
+#             self.resCanvas.mpl_disconnect(self._cid_hover)
+#         except AttributeError: pass
+#
+#         # -------------------- Main plotting goes here -------------------------
+#         if not reset:
+#             # Get the concentrations in g/L; choose only related Datums
+#             wine_name = get_wine_name(self._crnt)
+#             conc_gL = wine_results(data = [DDD for DDD in self._crnt.parent.data if wine_name == get_wine_name(DDD)])       # Use all datums in the series
+#
+#             vals = np.array([conc_gL[lbl] for lbl in labels if 'Peak' not in lbl])
+#             vals = np.where(np.isnan(vals), 0.0, vals)
+#
+#             # Define the subplots
+#             intervals = axes_intervals(vals)         # Determine the ranges for the subplots (broken axes)
+#             n_ax = len(intervals)      # Number of axes in the broken graph
+#             gs_top = gridspec.GridSpec(n_ax+1, 2, bottom=0.0, top=0.99, hspace=0.0, wspace=0.0)
+#             gs_bot = gridspec.GridSpec(n_ax+1, 2, hspace=0.03)
+#             ax_pie = self.resFigure.add_subplot(gs_top[0, 0], aspect="equal")
+#             ax_tab = self.resFigure.add_subplot(gs_top[0, 1])
+#             ax_bar = [self.resFigure.add_subplot(gs_bot[n_ax,:])]
+#             if n_ax > 1:
+#                 for i in range(n_ax-1, 0, -1):
+#                     ax_bar.append(self.resFigure.add_subplot(gs_bot[i,:], sharex=ax_bar[0]) )
+#
+#
+#             # ---------------------------- Doughnut chart --------------------------------
+#             data_pie = [sum([conc_gL[key] for key in ['Ethanol', 'Glycerol', 'Methanol', '2,3-Butanediol']]),
+#                     sum([conc_gL[key] for key in ['Glucose', 'Fructose', 'Sucrose', 'Sorbitol']]),
+#                     sum([conc_gL[key] for key in ['Lactic acid', 'Acetic acid', 'Malic acid', 'Citric acid', 'Succinic acid']])]
+#             act_alc_vv, tot_alc_vv = cww2pvv(conc_gL)        # Actual and total alcoholic strength
+#
+#             wedges, texts = ax_pie.pie(data_pie, wedgeprops=dict(width=0.3), startangle=45)
+#             ax_pie.text(0, 0, '{:.1f}%'.format(conc_gL['Total Alcohol, %v\v']), fontsize=18, family='cursive',
+#                          horizontalalignment='center', verticalalignment='center')
+#
+#             # -------------------------------- Table -------------------------------------
+#             ax_tab.clear()
+#             ax_tab.axis('off')
+#             cellText = [ ['Total amounts, g/L', ''],
+#                          ['', ''],
+#                          ['Alcohol', '{:.1f}'.format(conc_gL['Total Alcohol, g/L']) ],
+#                          ['Acids', '{:.1f}'.format(conc_gL['Total Acidity (as TrtAc), g/L']) ],
+#                          ['Sugars', '{:.1f}'.format(conc_gL['Total sugars, g/L']) ] ]
+#             table = ax_tab.table(cellText=cellText, cellLoc='left',
+#                         colWidths=[0.75, 0.25], loc='center', fontsize=16, edges='open')
+#             table.auto_set_font_size(False)
+#             # table.set_fontsize(16)
+#             # # Set cell heights
+#             # cellDict = table.get_celld()
+#             # for i in range(0,2):
+#             #     cellDict[(0,i)].set_height(.3)
+#             #     for j in range(1,len(cellText)+1):
+#             #         cellDict[(j,i)].set_height(.2)
+#
+#             # ------------------------------- Bar chart ----------------------------------
+#             bar_labels = [lbl for lbl in labels if 'Peak' not in lbl]
+#             for i in range(n_ax-1, -1, -1):
+#                 ax = ax_bar[i]
+#                 x = np.arange(len(bar_labels))  # the label locations
+#                 bars = ax.bar(x, vals, align='center', width=0.75,
+#                               tick_label=[abbrev[lbl] for lbl in bar_labels])
+#                 ax.spines['top'].set_visible(False)        # Don't show the top spine
+#                 ax.tick_params(length=3, labelsize=10, pad=2)
+#                 if i == 0:
+#                     # Bottom plot
+#                     ax.set_xticks(x)
+#                     ax.tick_params(top=False, right=False)
+#                     ax.set_xlim(-0.5, len(bar_labels)-0.5)
+#                     for tick in ax.get_xticklabels():
+#                         tick.set_rotation('vertical')
+#                 else:
+#                     # The rest of the plots
+#                     ax.tick_params(bottom=False, top=False, right=False)
+#                     for tick in ax.get_xticklabels():
+#                         tick.set_visible(False)
+#                     ax.spines['bottom'].set_color((0.8, 0.8, 0.8))
+#                     ax.spines['bottom'].set_linestyle('--')
+#                     if i == n_ax-1:
+#                         # The top plot
+#                         ax.spines['top'].set_visible(True)
+#
+#             for ax, lims in zip(ax_bar, intervals):
+#                 ax.set_ylim(*lims)
+#
+#             ttl = ax_bar[-1].set_title('Concentrations, g/L', fontsize=16)
+#             ttl.set_position((0.5, 1.03))
+#
+#
+#
+#             self._cid_hover = self.resCanvas.mpl_connect("motion_notify_event", hover)
+#
+#         self.resCanvas.draw()
+#
+# # ----------------------- Handling Drag-and-Drop events ------------------------
+#     def dragEnterEvent(self, evt):
+#         if evt.mimeData().hasUrls():
+#             evt.acceptProposedAction()
+#
+#     def dragMoveEvent(self, evt):
+#         if evt.mimeData().hasUrls():
+#             evt.acceptProposedAction()
+#
+#     def dropEvent(self, evt):
+#         # Load the files
+#         filePathList, self.DATA_PATH = [], None
+#         for url in evt.mimeData().urls():
+#             filePath = url.toLocalFile()
+#
+#             # If its a workspace, load it and return
+#             if (not os.path.isdir(filePath)) and filePath.endswith('.wsp'):
+#                 with open(filePath, 'rb') as fp:
+#                     dataUnPack = dill.load(fp)
+#
+#                 # Reset the settings and the Workspace
+#                 self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
+#                 return
+#
+#             # Assemble a list of spinsolve folders
+#             filePathList = read_spinsolve_subfolders(filePath, filePathList)
+#
+#         # Set the DATA_PATH to the dropped directory or to the parent directory, if several folders were dropped
+#         if len(filePathList) == 1:
+#             self.DATA_PATH = os.path.dirname(filePathList[0])
+#         else:
+#             self.DATA_PATH = os.path.dirname(os.path.dirname(filePathList[0]))
+#         self.importDataFiles(filePathList)
+#
+#     def importDataFiles(self, filePathList):
+#         """Loads files from several folders."""
+#         # TODO! Thus can be reorganized into several functions (e.g. for compile_reduced and compiled_full) or combined with dropEvent...
+#
+#         # Reset the workspace if there are any files to be added in the reduced version
+#         if compile_reduced and len(filePathList) > 0:
+#             self.onResetWspAction()
+#
+#         # Load the new files
+#         for filePath in filePathList:
+#             dat = self.addDatumFromFile(filePath)
+#
+#         # Check the files and run the optimization
+#         if compile_reduced:
+#             # Check that all datasets are from the same sample
+#             if len(set([get_wine_name(DDD) for DDD in self.wsp.series[0].data])) > 1:
+#                 self.showErrorMessage(text='All spectra need to be from the same sample. Please load them again.')
+#                 self.onResetWspAction()
+#
+#             elif all([DDD.protocol() == 'PRESAT' for DDD in self.wsp.series[0].data]):
+#                 self.showErrorMessage(text='A spectrum without water suppression is needed to estimate absolute concentrations. Please load it along with a PRESAT data to ensure the best quantification accuracy.')
+#                 self.onResetWspAction()
+#
+#             # # Set the current spectrum to a presat experiment
+#             # self.setCurrent(resetView=True)
+#
+#             self.fitAllFiles()
 
-    def __init__(self, wsp, expiryTime = np.inf, parent = None):
-        # Determine whether the program was called from a script with a data folder option
-        self.DATA_PATH = None
-        if len(sys.argv) > 1:
-            parser = make_parser()
-            opts, args = parser.parse_args(sys.argv[1:])
-            self.DATA_PATH = opts.datadir
-        # self.DATA_PATH = 'C:\\Users\\yma80\\Data\\FromScript'
-
-        # Initialize the main window
-        super().__init__(wsp, expiryTime, parent)
-        self.onResetWspAction()
-
-        # If DATA_PATH was given, collect the data and start fitting
-        if self.DATA_PATH is not None:
-            filePathList = read_spinsolve_subfolders(self.DATA_PATH, [])
-            self.loadManyFiles(filePathList)
-
-    def __getattr__(self, attr):
-        """Called with the dot notation for attributes not found in the class. Access the Workspace directly."""
-        return getattr(self.wsp, attr)
-
-    def normalOutputWritten(self, text):
-        # Used to show text that was written to the console
-        #self.statusBar.showMessage(text)
-        cursor = self.printoutEdit.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
-        cursor.insertText(text)
-        self.printoutEdit.setTextCursor(cursor)
-        self.printoutEdit.ensureCursorVisible()
-
-    def errorOutputWritten(self, text):
-        # Used to show text that was written to the console
-        #self.statusBar.showMessage(text)
-        cursor = self.printoutEdit.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
-        #if err: cursor.insertText("------------ ERROR -------------")
-        cursor.insertText(text)
-        self.printoutEdit.setTextCursor(cursor)
-        self.printoutEdit.ensureCursorVisible()
-
-    def _icon(self, name):
-        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
-
-    def setupGUI(self):
-        """Sets the layout for the main window."""
-        # ----------------- set up the pie chart figure
-        self.resFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
-        self.resCanvas = FigureCanvas(self.resFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
-        self.resCanvas.setMinimumHeight(400)
-
-        # ----------------- Spectrum figure in pyqtgraph -----------------------
-        self.mainFigureWidget = MainSpectrumWidget()
-        self.mainFigureWidget.setMinimumSize(550, 300)
-        self.mainFigureWidget.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
-
-        # ----------------------------------------------------------------------
-        #                            Navigation tab
-        # ----------------------------------------------------------------------
-        self.dataListWidget = QListWidget()
-        self.dataListWidget.currentRowChanged.connect(self.setCurrent)
-
-        # ----------------------------------------------------------------------
-
-        # Set up the navigation and results widgets
-        tabNavi, tabRest = QWidget(), QWidget()
-        layNavi, layRest = QHBoxLayout(), QHBoxLayout()
-        tabNavi.setLayout(layNavi)
-        tabRest.setLayout(layRest)
-        layNavi.addWidget(self.dataListWidget)
-        layRest.addWidget(self.resCanvas)
-        layNavi.setContentsMargins(1,1,1,1)
-        layRest.setContentsMargins(1,1,1,1)
-        tabNavi.setMaximumHeight(150 if compile_reduced else 150)                 # Set to 0 to hide the navigation widget
-
-        # --------------- Left --------------------
-        widgetLeft = QWidget()
-        widgetLeft.setMinimumSize(250, 0)
-        widgetLeft.setMaximumWidth(300)
-        layLeft = QVBoxLayout()
-        widgetLeft.setLayout(layLeft)
-        layLeft.addWidget(tabNavi)
-        layLeft.addWidget(tabRest)
-        layLeft.setContentsMargins(1,1,1,1)
-
-        # --------------- Main widget and layout ----------------
-        widgetMain = QWidget()
-        layMain = QHBoxLayout()
-        layMain.addWidget(widgetLeft)
-        layMain.addWidget(self.mainFigureWidget)
-        widgetMain.setLayout(layMain)
-        self.setCentralWidget(widgetMain)    # Set the result in the center of the window
-
-        # Call the parent setup GUI function, Here setup_actions and assign_actions will be called
-        super().setupGUI()
-        self.setWindowTitle("Automated qNMR analysis of fermented beverages ver. {} ({})".format(version, str(date.today())) )
-        self.resize(1200, 700)
-
-        if compile_reduced:
-            tbMain.hide()
-            tabNavi.hide()
-
-    def setup_actions(self):
-        super().setup_actions()
-        # ----------------------- Actions for the plot -------------------------
-        # Show components
-        new = QAction(self._icon('icon_showComponents.png'), 'Show fitted components', self)
-        new.setStatusTip('Show fitted components')
-        new.setCheckable(True)
-        new.triggered.connect(self.toggleComps)
-        self._actions['Show components'] = new
-
-        # Show residual
-        new = QAction(self._icon('icon_plotResidual.png'), 'Show residual', self)
-        new.setStatusTip('Show residual')
-        new.setCheckable(True)
-        new.triggered.connect(self.toggleResid)
-        self._actions['Show residual'] = new
-
-        # Autoscale
-        new = QAction(self._icon('icon_autoScale.png'), 'Autoscale', self)
-        new.setStatusTip('Scale plot to data')
-        new.triggered.connect(self.mainFigureWidget.autoRange)
-        self._actions['Autoscale'] = new
-
-        # Save Image
-        new = QAction(self._icon('icon_saveImage.png'), 'Save image', self)
-        new.setStatusTip('Saves the spectrum as image')
-        new.triggered.connect(self.mainFigureWidget.saveImage)
-        self._actions['Save image'] = new
-
-        # Reset the fit but keep the files
-        new = QAction(self._icon('icon_magic.png'), 'Reset the fit', self)
-        new.setStatusTip('Resets the fitted parameters to default values but keeps loaded spectra in the workspace')
-        new.triggered.connect(lambda _ : init_autoWine(self.wsp, resetSeries=False))
-        self._actions['Reset fit'] = new
-
-    def assign_actions(self):
-        """Assigns actions to the lements of toolbars."""
-        # ------------------------- Set up the toolbars ------------------------
-        tbMain = self.addToolBar("File")               # Main toolbar
-
-        # ------------------------- Set the main toolbar -----------------------
-        for actn in ['Clear workspace', 'Reset fit', 'Import file','Remove file','Show settings',None,
-                     'Load workspace','Save workspace', None, 'Show components', 'Show residual',
-                     'Autoscale', None, 'Fit all steps', 'Fit all files', 'Stop thread', None,
-                     'Save results', 'Exit']:
-            if actn is not None:
-                tbMain.addAction(self._actions[actn])
-            else: tbMain.addSeparator()
-
-    # -------------------- Processing keyboard interactions --------------------
-
-    def keyPressEvent(self, ev):
-        # self.scene().keyPressEvent(ev)
-        # self.sigKeyPress.emit(ev)
-        # print('Key pressed ', ev.key())
-        pass
-
-    # ------------------------- Other utility methods --------------------------
-    def addDatumFromFile(self, path):
-        """Imports a new spectrum and adds it to the workspace and the list widget of data."""
-        crnt_series = self.wsp.series[0]
-        dic = None
-
-        if path[-3:] == '.1d':
-
-            yT, c0, f0, dt, dic = read_spinsolve(path)
-
-            nt = yT.shape[0]
-            t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-            name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
-
-        # Read an Mnova corrected FID file
-        elif path[-4:] in ['.txt']:
-            with open(path, 'rb') as fp:
-                # Read the file header line by line
-                for line in fp:
-                    pair = line.decode().strip().split('=')
-                    if 'DataPoints' in pair[0]:
-                        break           # The next line will be the first data point -- stop reading the header
-                    elif 'Size' in pair[0]:
-                        nt = int(pair[1])
-                    elif 'SpectrometerFrequency' in pair[0]:
-                        c0 = float(pair[1])
-                    elif 'Hz' in pair[0]:
-                        f0 = -float(pair[1])
-                    elif 'SpectralWidth' in pair[0]:
-                        dt = 1 / float(pair[1])
-
-                # Read the remainder of the file into a np array
-                data = np.fromfile(fp, sep='\t')
-
-            # Form the arrays
-            t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
-            yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
-
-            ## Subsample if the frequency range is too large
-            #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-            #t = t[::k]
-            #yT = yT[::k, :]
-
-            name = path[path.rfind('\\')+1:path.rfind('.')]
-
-        # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
-        if crnt_series.c0 is None:
-            crnt_series.c0 = c0
-            crnt_series.f0 = f0
-            crnt_series.t = t
-            crnt_series.fullReset()
-
-        dat = crnt_series.addDatum(yT, name = name, extra=dic)
-        dat.extra.update({'mass_frac_MalAc':0.0, 'masses_au': {}, 'mass_total_au':0.0, 'density':1000.0, 'fitted':False, 'sigma_est':0.0})
-        if 'startTime' in dic.keys():
-            # TODO: Try dateutil to automatically parse dates in different formats
-            timeParsed = time.strptime(dic['startTime'].split('.')[0], '%Y-%m-%dT%H:%M:%S')         # Convert the time format from e.g. "2021-02-14T13:21:33.653" to '%Y%m%d-%H%M%S'
-            timeString = time.strftime('%Y%m%d-%H%M%S', timeParsed)
-            dat.extra.update({'acqu_time' : timeString})
-
-        # Add new entry to the data List
-        newItem = QListWidgetItem(self._icon('icon_gof_none.png'), name, parent=self.dataListWidget)
-        self.setCurrent(resetView=True if len(crnt_series.data)==1 else False)     # Set the last spectrum as current
-
-        return dat
-
-    def onImportData(self):
-        """Runs a dialog to select a new file."""
-        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "Spinsolve FID (*.1d)"):   # ;;JEOL FID (*.jdf)
-            dat = self.addDatumFromFile(newFilePath)
-        return dat
-
-    def removeCurrent(self):
-        """Removes currently selected spectrum."""
-        crntID = self._crnt.selfID()
-        if crntID[0] == 0 and crntID[1] is not None:
-            self.wsp.series[0].data[crntID[1]].remove()
-            self.dataListWidget.takeItem(crntID[1])
-
-    def setCurrent(self, indx_crnt=0, resetView=False):
-        """Sets the _crnt Datum and updates the plot, tables, etc. accordingly."""
-        try:
-            if compile_reduced:
-                # Set the current to a PRESAT experiment, if possible
-                for i, DDD in enumerate(self.wsp.series[0].data):
-                    if DDD.protocol() == 'PRESAT':
-                        indx_crnt = 0
-                        break
-
-            self._crnt = self.wsp.series[0].data[indx_crnt]
-            self.dataListWidget.setCurrentRow(self.dataListWidget.count()-1 if indx_crnt == -1 else indx_crnt)
-        except IndexError:
-            # If there are no Series/Datums
-            self._crnt = self.wsp
-            self.dataListWidget.clear()
-
-        self.plotCurrent(autoRange=resetView)
-
-    def onSaveWspAction(self):
-        """Saves the workspace including the stepClass class and the steps array."""
-        # TODO: Use save_worksapce from MainLogic.py
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')
-        if filename:
-            if filename[-4:] != '.wsp': filename += '.wsp'
-
-            # Pack the logic of the workspace
-            dataPack = self.wsp.pack()
-
-            # Pack the settings
-            stngPack = copy.deepcopy(settings)
-            stngConfig = config.as_dict()
-            stngPack['_config'] = stngConfig
-
-            with open(filename, 'wb') as fp:
-                dill.dump([dataPack, stngPack], fp)
-
-    def onLoadWspAction(self):
-        """Loads the workspace including the stepClass class and the steps array."""
-        # TODO: Use load_workspace from MainLogic.py
-        self.DATA_PATH = None
-        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")
-        if filename:
-            with open(filename, 'rb') as fp:
-                dataUnPack = dill.load(fp)
-
-            # Reset the settings and the Workspace
-            self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
-
-    def onResetWspAction(self, newWorkspace=None, newSettings=None):
-        """Clears the workspace including the stepClass, signals and the tree."""
-
-        self.wsp.reset() # Reset the workspace
-        self.setCurrent(resetView=True)     # Set the last spectrum as current
-        if newWorkspace is None:
-            self.wsp = init_autoWine(self.wsp)
-        else:
-            try:
-                if newWorkspace['extra']['autoWine'] == True:
-                    self.wsp.unpack(newWorkspace)
-                    for dat in self.wsp.series[0].data:
-                        newItem = QListWidgetItem(self._icon('icon_gof_none.png'), dat.name, parent=self.dataListWidget)
-                    # Update the global config
-                    if newSettings is not None:
-                        try:
-                            stngConfig = newSettings.pop('_config')
-                            config.from_dict(config, stngConfig)
-                        except KeyError: pass
-            except KeyError: self.onResetWspAction()      # If autoWine is not the loaded workspace
-
-        self.setCurrent(resetView=True)     # Set the last spectrum as current
-
-    def resetSignals(self, zff=None, apod=None, flagAdapFreq=None):
-        self._crnt.resetFreqs(zff, apod)
-
-        if flagAdapFreq is not None:
-            for dat in self._crnt.parent.data:
-                dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
-
-        self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
-        self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
-
-    def showAboutMessage(self):
-        """Displays the About message."""
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Information)
-
-        msg.setText("Quantitative NMR analysis with quantum mechanical models.")
-        msg.setInformativeText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
-        msg.setWindowTitle("About qNMR")
-        # msg.setDetailedText("The details are as follows:")
-        msg.setStandardButtons(QMessageBox.Close)
-
-        msg.exec_()            # Returns the values of pressed button
-
-    def showErrorMessage(self, text=None):
-        """Displays an Error message."""
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Critical)
-
-        msg.setText(text)
-        # msg.setInformativeText(text)
-        msg.setWindowTitle("Error")
-        msg.setStandardButtons(QMessageBox.Close)
-
-        msg.exec_()            # Returns the values of pressed button
-
-    def onAssigned(self):
-        """Updates the tree and plots when model peaks have been assigned to picked peaks."""
-        self.plotCurrent(autoRange=False)
-        self.treeWidget.showStep()
-        #self.phasingTool.setVals(self.steps[0])
-        #dataFiles[self.indxCrntFile].update()
-        pass
-
-    # ------------------ Working with the fitting thread -----------------------
-
-    def startThread(self, queueFiles=None, queueActns=None):
-        """Fits the files in the queueFiles list."""
-        # Disable controls that can start fitting
-        self.setCursor(Qt.BusyCursor)
-
-        if queueFiles is None: queueFiles = [self._crnt]
-
-        if queueActns is None: queueActns = ['Evl']        # Only evaluate the active step by default
-
-        queueActns = [self.treeModel.actvStepIndx if x == 'Fit' else x for x in queueActns]
-        # if len(queueFiles) > 1: queueActns.insert(0, 'Init')
-
-        # Setup the fitting queue
-        self._fittingQueue = [[file, actn] for file in queueFiles for actn in queueActns]
-
-        # Set up the progress bars
-        self.progressBarFiles.setRange(0, len(self._fittingQueue))
-        self.progressBarFiles.setValue(0)
-
-        self.fittingThread.setExitFlag(False)
-
-        self.continueThread()
-
-    def continueThread(self):
-        """Continues fitting the thread if there are any files left."""
-        if len(self._fittingQueue) > 0:
-            fileToFit, actnToRun = self._fittingQueue.pop(0)
-
-            if actnToRun == 'Init':
-                # We are starting to fit a new file and will be running through the list of steps from 0 again... Need to set up the initial values.
-                # Determine the starting values of parameters for the next file in the fittingQueueFiles and KEEP the current values if necessary
-                if config.OPTIM_startFrom == "previous":
-                    sid = fileToFit.selfID()
-                    # Check if the current file is not the first one in the Series. If possible use parameters of the previous file, otherwise keep the current parameters.
-                    if sid[1] > 0:
-                        fileToFit.resetCrntPars(crntParsH = copy.deepcopy(fileToFit.series[sid[0]].data[sid[1]-1].crntParsH) )
-                elif config.OPTIM_startFrom == "default":
-                    fileToFit.resetCrntPars()   # Reset to defaults (parameters and distributions)
-                else: # i.e. settings["startgFromPars"] == "current"
-                    pass     # Don't do anything; the file will be loaded with its current parameters, and the optimization will start from them
-
-                # Try copying the parameters from a previously fitted presat experiment
-                if config.OPTIM_copyFromPRESAT and 'PROTON' in fileToFit.name and 'DRY' not in fileToFit.name:
-                    #Tries to find an already fitted (PRESAT) experiment in the same Series and copies all its parameters and distributions to the current (PROTON) datum.
-                    fileCopyFrom = None
-                    for dat in fileToFit.parent.data:
-                        if get_wine_name(fileToFit) == get_wine_name(dat) and dat.extra['fitted'] and ('PRESAT' in dat.name) and ('DRY' not in dat.name):
-                            fileCopyFrom = dat
-                            break
-
-                    if fileCopyFrom is not None:
-                        for key in fileToFit.allParsKeys(amplitudes=True):
-                            # Copy the distribution definitions
-                            fileToFit.parsSpecDict.update(copy.deepcopy(dat.parsSpecDict))
-
-                            # Copy the parameter values
-                            fileToFit.setCrntVal(key, dat.getCrntVal(key))
-
-                        # Remove the steps that do not need to be refitted and update the fitting queue and progress bars
-                        new_fittingQueue = [x for x in self._fittingQueue if (x[0] == fileToFit and x[1] in fileToFit.parent.extra['fastStepIDs']) or x[0] != fileToFit]
-                        self.progressBarFiles.setMaximum( self.progressBarFiles.maximum() - (len(self._fittingQueue) - len(new_fittingQueue)) )
-                        self._fittingQueue.clear()
-                        self._fittingQueue.extend(new_fittingQueue)
-
-                self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
-
-                self.continueThread()
-
-            elif isinstance(actnToRun, int):
-                # If it is a step with too many parameters, split it into several steps and add them to the queue
-                print("\nOptimizing step {:d}".format(actnToRun+1))
-                actnToRun = fileToFit.steps[actnToRun]
-
-                if len(actnToRun.parsKeys) > 3:
-                    newSteps = split_steps(fileToFit, actnToRun)
-                    self._fittingQueue[:0] = [[fileToFit, step] for step in newSteps]         # Insert all new steps from the beginning of the queue
-
-                    # Update the progress bar accordingly
-                    oldVal, oldMax = self.progressBarFiles.value(), self.progressBarFiles.maximum()
-                    if oldMax != oldVal:
-                        newVal = oldVal*int(math.ceil((oldMax-oldVal+len(newSteps)-1)/(oldMax-oldVal)))           # newVal = int(math.ceil(oldVal*(oldMax+len(newSteps)-1)/oldMax))
-                        newMax = newVal + (oldMax-oldVal) + len(newSteps) - 1
-
-                        self.progressBarFiles.setMaximum(newMax)
-                        self.progressBarFiles.setValue(newVal)
-                else:
-                    # TODO: Possibly check here that the parsKeys in the step are fittable
-                    self._fittingQueue.insert(0, [fileToFit, actnToRun] )          # Substitute the integer with the step
-
-                self.continueThread()
-
-            else:
-                # It is a usual optimization step or an action (e.g. phasing)
-                self.fittingThread.fit(fileToFit, actnToRun)
-
-        else:
-            # All done. Reset the widgets
-
-            # This will be executed always when the thread is finished, either normally or by termination.
-            self.plotCurrent(autoRange=False)
-            self.unsetCursor()
-            self.progressBarFiles.setValue(self.progressBarFiles.maximum())
-
-            # Save the results
-            if compile_reduced and self.DATA_PATH is not None:
-                wine_name = get_wine_name(self._crnt)
-
-                # Save the workspace
-                dataPack = self.wsp.pack()
-                stngPack = copy.deepcopy(settings)
-                stngPack['_config'] = config.as_dict()
-
-                with open(os.path.join(self.DATA_PATH, wine_name+'.wsp'), 'wb') as fp:
-                    dill.dump([dataPack, stngPack], fp)
-
-                # Save Excel file
-                self._crnt.saveResults( os.path.join(self.DATA_PATH, wine_name+'.xlsx') )
-
-    def onThreadFinished(self):
-        """Called when the fittingThread finishes processing each step. Depending if there are files/steps in queue, may call the startThread/fitqueueActns function again or just display the results."""
-        self.progressBarFiles.setValue(self.progressBarFiles.value()+1)
-
-        if self.fittingThread.isExiting(): self._fittingQueue.clear()
-
-        self.continueThread()
-
-    def stopThread(self):
-        """Stops fitting in the thread."""
-        self.fittingThread.setExitFlag(True)
-        self.fittingThread.quit()
-
-    def onParameterChange(self, key, val):
-        """Sets a new value to the parameter key."""
-
-        oldVal = self._crnt.getCrntVal(key)
-
-        if not np.isclose(val, oldVal):
-
-            self._crnt.setCrntVal(key, val)
-
-        self.startThread()
-
-    def onPhased(self, p0deg, p1deg):
-        """Gets the phasing values from the phasing tool widget and sets current parameters accordingly."""
-        nf = next_pow_of_2( 2**self._crnt.zff * len(self._crnt.t) )     # Determine the number of samples in the FULL signal spectrum (possibly including zero-filling). zff and t are taken from the Series level
-        dt = self._crnt.t[1]-self._crnt.t[0]
-
-        d_theta, d_tau = deg2tau(dt, nf, p0deg, p1deg)
-        if not ( np.isclose(d_theta, 0) and np.isclose(d_tau, 0) ):
-            theta = self._crnt.getCrntVal(key=('.', 'theta', 0))
-            tau = self._crnt.getCrntVal(key=('.', 'tau', 0))
-
-            self._crnt.setCrntVal(key=('.', 'theta', 0), val = (theta+d_theta + np.pi) % np.pi - np.pi )     # make sure the phase stays in the (-180.0, 180.0) interval  # p0deg = (p0deg + 180.0) % 360.0 - 180.0
-            self._crnt.setCrntVal(key=('.', 'tau', 0), val = tau + d_tau)
-
-        self.startThread()
-
-    def fitAllSteps(self, selectedFiles = None):
-        """Fits all steps in selected files; if no files are selected, uses the current file/series. The starting values on the next step are copied from the current found values."""
-        # Form the list of steps to Fit
-        stepIdsToFit = ['Init'] + list(range(len(self._crnt.steps)))
-
-        # Set up the fitting queue making sure that there are no repeated files
-        if selectedFiles is None:
-            selectedFiles = [self._crnt]         # Fit all steps of the current file only
-        selectedIDs = [ddd.selfID() for ddd in selectedFiles if isinstance(ddd, Datum)] \
-                    + [ddd.selfID() for sss in selectedFiles for ddd in sss.data if isinstance(sss, Series)]      # Expand all Series
-        selectedIDs = sorted(list(set(selectedIDs)),
-                            key = lambda x : sorting_key(self._crnt.dataByID(x).name))                     # Sort the files to fit presat experiments first
-        queueFiles = [self._crnt.series[sid[0]].data[sid[1]] for sid in selectedIDs]
-
-        # Call the fitting function
-        self.startThread(queueFiles, stepIdsToFit)
-
-    def fitAllFiles(self):
-        """Fits all steps for all Files in the current Series. The starting values on the next step are copied from the current found values. Starting values for each file are determined by the settings and are set by the FittingThread."""
-
-        # Reset the workspace/current parameters without resetting the data in the series
-        init_autoWine(self.wsp, resetSeries=False)
-
-        if isinstance(self._crnt, Series):
-            selectedFiles = [i for i in self._crnt.data]
-
-        elif isinstance(self._crnt, Datum):
-            selectedFiles = [i for i in self._crnt.parent.data]
-
-        else: return 0
-
-        self.fitAllSteps(selectedFiles)
-
-    def saveResults(self):
-        """Saves the current results of computation into a file."""
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.xlsx)')
-        if filename:
-            if filename == '' : filename = 'results.xlsx'
-            if filename[-5:] != '.xlsx': filename += '.xlsx'
-
-        self._crnt.saveResults(filename)
-
-# ------------------------ Parameter list --------------------------------------
-    def updateParsList(self, indxStep = None):
-        """Updates and displays the list of optimizaed parameters on the current step."""
-        self.parsListWidget.clear()
-        items = [node.name for node in stepClass.T.repRoots()]
-        if indxStep is not None:
-            items.extend([str(v) for v in self.steps[indxStep].parsKeys])
-        self.parsListWidget.addItems(items)
-
-    def onSelectParList(self, item):
-        """Handles the selection event of a parameter in the list."""
-        indxRow = self.parsListWidget.row(item)
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
-            slctParSpec = stepClass.getPrior(stepClass, key)
-            self.editMin.setText("{:.4g}".format(slctParSpec.min))
-            self.editMax.setText("{:.4g}".format(slctParSpec.max))
-            self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
-            self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
-            if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
-                self.editPriorMode.setEnabled(True)
-                self.editPriorStdv.setEnabled(True)
-                self.chkboxUseCrnt.setEnabled(True)
-                if slctParSpec.prior['mode'] is None:
-                    self.chkboxUseCrnt.setCheckState(Qt.Checked)
-                    self.editPriorMode.setText(self.editCrntVal.text())
-                    self.editPriorMode.setReadOnly(True)
-                else:
-                    self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
-                    self.editPriorMode.setReadOnly(False)
-                    self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
-                self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
-            else:   # Uniform prior
-                    self.editPriorMode.setDisabled(True)
-                    self.editPriorStdv.setDisabled(True)
-                    self.chkboxUseCrnt.setDisabled(True)
-        self.plotDistr(key)    # plot the prior distribution
-
-    def onPriorNameChanged(self, itemIndx):
-        """Handles the event of changing the name of the prior distribution in the combobox."""
-        priorName = self.cmboxPrior.currentText()
-        if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
-            self.editPriorMode.setEnabled(True)
-            self.editPriorStdv.setEnabled(True)
-            self.chkboxUseCrnt.setEnabled(True)
-            if self.chkboxUseCrnt.isChecked:
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-            else:
-                self.editPriorMode.setReadOnly(False)
-                self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
-            self.editPriorStdv.setText("{:.4g}".format(0.5))
-        else:   # Uniform prior
-                self.editPriorMode.setDisabled(True)
-                self.editPriorStdv.setDisabled(True)
-                self.chkboxUseCrnt.setDisabled(True)
-        self.saveParsForm()
-
-    def saveParsForm(self):
-        """Saves the parsSpec entered in the resForm1."""
-        indxRow = self.parsListWidget.currentRow()
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
-            priorName = self.cmboxPrior.currentText()
-            if priorName == 'Uniform':
-                prior = {'name':priorName, 'mode':None, 'stdv':None}
-            elif self.chkboxUseCrnt.isChecked():
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-                prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
-            else:
-                self.editPriorMode.setReadOnly(False)
-                prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
-
-            # Save the parSpec
-            stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
-            # Update the current parameter values
-            self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
-            """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
-            # Display new min/max values in the tree
-            self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
-            self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
-            self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
-            self.treeWidget.blockSignals(False)
-            # Update the rest of parameters based on their values in the tree table
-            for indx, stp in enumerate(self.steps):
-                clmn = indx+3
-                stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
-        # plot the prior distribution
-        self.plotDistr(key)
-
-    def plotDistr(self, key=None):
-        """Plots a prior probability distribution for the parameter key on the middle plot."""
-        # Determine which parameter is selected in the list and plot its samples
-        if key is None:
-            numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-            if self.parsListWidget.currentRow() < numRepRoots:
-                key = self.parsListWidget.currentItem().text()
-            else:
-                key = self.steps[-1].parsKeys[self.parsListWidget.currentRow() - numRepRoots]    # Parameter name
-        # Plot the piror distribution and samples
-        self.axDistr.clear()
-        self.axDistr2.clear()
-        if type(key) is tuple:
-            # Handle adjustible parameters
-            slctParSpec = self.steps[-1].getPrior(key)
-            # Plot the samples
-            if self.steps[-1].sHat is not None:
-                indx = self.steps[-1].sHat['smplKeys'].index(key)       # Index of the sampled parameter in the array of samples
-                smpl_abs = self.steps[-1].sHat['smplVals'][indx, :]
-                self.axDistr2.hist(smpl_abs, bins=50, range=(slctParSpec.min, slctParSpec.max), color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
-            # Plot the prior
-            vals = [slctParSpec.evalPrior(x) for x in np.linspace(-1,1,25)]
-            self.axDistr.plot(np.linspace(slctParSpec.min, slctParSpec.max, 25), vals, color=(0.96, 0.53, 0.20))
-            self.axDistr.set_xlim((slctParSpec.min, slctParSpec.max))
-            self.axDistr.axvline(x=slctParSpec.abs(self.steps[-1].getCrntVal(key)), ymin=0, ymax=0.05, color='r')
-        else:
-            # Handle the amplitudes
-            if self.steps[-1].sHat is not None:
-                indx = self.steps[-1].sHat['labels'].index(key)       # Index of the sampled parameter in the array of samples
-                smpl_abs = np.abs(self.steps[-1].sHat['smplAmpl'][indx,:])
-                self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
-        self.histCanvas.draw()
-
-# ------------------------ Functions for plotting ------------------------------
-    def plotCurrent(self, autoRange=True):
-        """Plots the spectrum/results for a specific datum dat."""
-        if isinstance(self._crnt, Datum):
-            # Reevaluate the last step to make sure that the baseline is computed correctly
-            # if self._crnt.zF is None: self._crnt.evaluate(autoKeys=[], returnSignals=True)
-            if self._crnt.extra['fitted'] and self._crnt.bF_corr is None:
-                self._crnt.steps[-1].run(self._crnt)
-
-                # Output the found results
-                self.plotResultsChart()
-
-            # If the file has not bee fitted, zF, bF, and xF will be set to None
-            f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
-
-            # Plotting function
-            self.mainFigureWidget.plot(f, yFph, xF, zF = zF, stems =  None, phasingPivot=False, freqBlocks=None, show_yaxis=False,
-                # freqBlocks=[(blk.min, blk.max, (i in self._crnt.steps[-1].frqBlkIds) ) for i, blk in enumerate(self._crnt.freqBlocks)],
-                indx_colr=[i for i, name in enumerate(self._crnt.repRootNames) if not self._crnt.isXclRootName(name)])   # if i in self._crnt.steps[-1].frqBlkIds])
-
-            # Pass the components to the plot (already done), but don't show them yet
-            if zF is not None and not self._actions['Show components'].isChecked():
-                self.mainFigureWidget.showComponents(flag=False)
-
-            # self.mainFigureWidget.getItem(0, 0).vb.setMouseEnabled(x=False)
-            if autoRange:
-                self.mainFigureWidget.autoRange(xlims=(0.0, 7.0))
-
-        else:
-            self.mainFigureWidget.reset()
-            self.plotResultsChart(reset=True)
-
-    def toggleComps(self):
-        """Plots the constituent peaks for each model component"""
-        # If no components have been computed so far, will evaluate them first.
-        # TODO! Use customized exceptions
-        try:
-            self.mainFigureWidget.showComponents(flag=self._actions['Show components'].isChecked())
-        except:
-            if self._actions['Show components'].isChecked():
-                self.plotCurrent(autoRange=False)
-
-    def toggleResid(self):
-        """Show or hide the residual plot."""
-        self.mainFigureWidget.showResidual(flag=self._actions['Show residual'].isChecked())
-
-    def plotResultsChart(self, reset=False):
-        """Plots a pie chart that represents the found component concentrations."""
-
-        self.resFigure.clear()
-
-        def hover(evt):
-            if evt.inaxes in ax_bar:
-                # Find which bar contains the event
-                newMessage = ''
-                for indx, patch in enumerate(bars.patches):
-                    if patch.contains(evt)[0]:              # Can use this instead of redefining bbox explicitly
-                    # bbox = patch.get_bbox()
-                    # print(bbox.x0, evt.x, bbox.x1)
-                    # print(bbox.y0, evt.y, bbox.y1)
-                    # inv_trans = ax_bar[0].transData.inverted()      # Transform mouse (display) coordinates to data coordinates
-                    # (x, y) = inv_trans.transform([evt.x, evt.y])
-                    # if (bbox.x0 < x) and (x < bbox.x1) and (bbox.y0 < y) and (y < bbox.y1):
-                        # define new status bar message
-                        newMessage = '{:s}    {:.3g} g/L'.format(labels[indx], vals[indx])
-
-                        # Show the component (match the index from the labels array with the index in the zF matrix)
-                        self.mainFigureWidget.showComponents(flag=True, indx=self.repRootNames.index(labels[indx]) )
-
-            elif evt.inaxes == ax_pie:
-                newMessage = 'Potential alcoholic strength:  {:.1f} %v/v (actual:  {:.1f} %v/v)'.format(conc_gL['Total Alcohol, %v\v'], conc_gL['Actual Alcohol, %v\v'])
-            else:
-                # Return to the original state
-                self.statusBar.clearMessage()
-                self.mainFigureWidget.showComponents(flag=False)
-                return
-
-            # Set the status bar message
-            if self.statusBar.currentMessage() != newMessage:
-                self.statusBar.showMessage(newMessage)
-
-        def axes_intervals(vals):
-            """Determine the ranges for the subplots"""
-
-            def round_lims(val):
-                """Return min and max values of vertical limits of the plot need to correctly represent the value."""
-                if val < 2:
-                    min_lim, max_lim = math.floor(0.95*val*5)/5, math.ceil(1.01*val*5)/5
-                elif val < 20:
-                    min_lim, max_lim = math.floor(0.95*val/2)*2, math.ceil(1.01*val/2)*2
-                elif val < 200:
-                    min_lim, max_lim = math.floor(0.95*val/5)*5, math.ceil(1.01*val/5)*5
-                else:
-                    min_lim, max_lim = math.floor(0.95*val/10)*10, math.ceil(1.01*val/10)*10
-
-                return minmaxTuple(max(0.0, min_lim), max(max_lim, 0.1))
-
-            intervals = merge_intervals([round_lims(val) for val in vals])
-            gaps_size = (np.array([interval.min for interval in intervals])[1:] - np.array([interval.max for interval in intervals])[:-1]) / np.array([interval.max for interval in intervals])[:-1]      # Relative gap sizes between the intervals
-
-            boundaries = [intervals[0].min, intervals[-1].max]       # Selected boundaries for the plotting
-            for gap_indx in np.argsort(gaps_size)[-2:]:
-                # Considr only the largest two gaps
-                if gaps_size[gap_indx] > 1:
-                    boundaries.extend([intervals[gap_indx].max, intervals[gap_indx+1].min])
-            boundaries = sorted(boundaries)
-
-            return [(x,y) for x, y in zip(boundaries[::2], boundaries[1::2])]
-
-        # Remove the reference to the hovering event
-        try:
-            self.resCanvas.mpl_disconnect(self._cid_hover)
-        except AttributeError: pass
-
-        # -------------------- Main plotting goes here -------------------------
-        if not reset:
-            # Get the concentrations in g/L; choose only related Datums
-            wine_name = get_wine_name(self._crnt)
-            conc_gL = wine_results(data = [DDD for DDD in self._crnt.parent.data if wine_name == get_wine_name(DDD)])       # Use all datums in the series
-
-            vals = np.array([conc_gL[lbl] for lbl in labels if 'Peak' not in lbl])
-            vals = np.where(np.isnan(vals), 0.0, vals)
-
-            # Define the subplots
-            intervals = axes_intervals(vals)         # Determine the ranges for the subplots (broken axes)
-            n_ax = len(intervals)      # Number of axes in the broken graph
-            gs_top = gridspec.GridSpec(n_ax+1, 2, bottom=0.0, top=0.99, hspace=0.0, wspace=0.0)
-            gs_bot = gridspec.GridSpec(n_ax+1, 2, hspace=0.03)
-            ax_pie = self.resFigure.add_subplot(gs_top[0, 0], aspect="equal")
-            ax_tab = self.resFigure.add_subplot(gs_top[0, 1])
-            ax_bar = [self.resFigure.add_subplot(gs_bot[n_ax,:])]
-            if n_ax > 1:
-                for i in range(n_ax-1, 0, -1):
-                    ax_bar.append(self.resFigure.add_subplot(gs_bot[i,:], sharex=ax_bar[0]) )
-
-
-            # ---------------------------- Doughnut chart --------------------------------
-            data_pie = [sum([conc_gL[key] for key in ['Ethanol', 'Glycerol', 'Methanol', '2,3-Butanediol']]),
-                    sum([conc_gL[key] for key in ['Glucose', 'Fructose', 'Sucrose', 'Sorbitol']]),
-                    sum([conc_gL[key] for key in ['Lactic acid', 'Acetic acid', 'Malic acid', 'Citric acid', 'Succinic acid']])]
-            act_alc_vv, tot_alc_vv = cww2pvv(conc_gL)        # Actual and total alcoholic strength
-
-            wedges, texts = ax_pie.pie(data_pie, wedgeprops=dict(width=0.3), startangle=45)
-            ax_pie.text(0, 0, '{:.1f}%'.format(conc_gL['Total Alcohol, %v\v']), fontsize=18, family='cursive',
-                         horizontalalignment='center', verticalalignment='center')
-
-            # -------------------------------- Table -------------------------------------
-            ax_tab.clear()
-            ax_tab.axis('off')
-            cellText = [ ['Total amounts, g/L', ''],
-                         ['', ''],
-                         ['Alcohol', '{:.1f}'.format(conc_gL['Total Alcohol, g/L']) ],
-                         ['Acids', '{:.1f}'.format(conc_gL['Total Acidity (as TrtAc), g/L']) ],
-                         ['Sugars', '{:.1f}'.format(conc_gL['Total sugars, g/L']) ] ]
-            table = ax_tab.table(cellText=cellText, cellLoc='left',
-                        colWidths=[0.75, 0.25], loc='center', fontsize=16, edges='open')
-            table.auto_set_font_size(False)
-            # table.set_fontsize(16)
-            # # Set cell heights
-            # cellDict = table.get_celld()
-            # for i in range(0,2):
-            #     cellDict[(0,i)].set_height(.3)
-            #     for j in range(1,len(cellText)+1):
-            #         cellDict[(j,i)].set_height(.2)
-
-            # ------------------------------- Bar chart ----------------------------------
-            bar_labels = [lbl for lbl in labels if 'Peak' not in lbl]
-            for i in range(n_ax-1, -1, -1):
-                ax = ax_bar[i]
-                x = np.arange(len(bar_labels))  # the label locations
-                bars = ax.bar(x, vals, align='center', width=0.75,
-                              tick_label=[abbrev[lbl] for lbl in bar_labels])
-                ax.spines['top'].set_visible(False)        # Don't show the top spine
-                ax.tick_params(length=3, labelsize=10, pad=2)
-                if i == 0:
-                    # Bottom plot
-                    ax.set_xticks(x)
-                    ax.tick_params(top=False, right=False)
-                    ax.set_xlim(-0.5, len(bar_labels)-0.5)
-                    for tick in ax.get_xticklabels():
-                        tick.set_rotation('vertical')
-                else:
-                    # The rest of the plots
-                    ax.tick_params(bottom=False, top=False, right=False)
-                    for tick in ax.get_xticklabels():
-                        tick.set_visible(False)
-                    ax.spines['bottom'].set_color((0.8, 0.8, 0.8))
-                    ax.spines['bottom'].set_linestyle('--')
-                    if i == n_ax-1:
-                        # The top plot
-                        ax.spines['top'].set_visible(True)
-
-            for ax, lims in zip(ax_bar, intervals):
-                ax.set_ylim(*lims)
-
-            ttl = ax_bar[-1].set_title('Concentrations, g/L', fontsize=16)
-            ttl.set_position((0.5, 1.03))
-
-
-
-            self._cid_hover = self.resCanvas.mpl_connect("motion_notify_event", hover)
-
-        self.resCanvas.draw()
-
-# ----------------------- Handling Drag-and-Drop events ------------------------
-    def dragEnterEvent(self, evt):
-        if evt.mimeData().hasUrls():
-            evt.acceptProposedAction()
-
-    def dragMoveEvent(self, evt):
-        if evt.mimeData().hasUrls():
-            evt.acceptProposedAction()
-
-    def dropEvent(self, evt):
-        # Load the files
-        filePathList, self.DATA_PATH = [], None
-        for url in evt.mimeData().urls():
-            filePath = url.toLocalFile()
-
-            # If its a workspace, load it and return
-            if (not os.path.isdir(filePath)) and filePath.endswith('.wsp'):
-                with open(filePath, 'rb') as fp:
-                    dataUnPack = dill.load(fp)
-
-                # Reset the settings and the Workspace
-                self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
-                return
-
-            # Assemble a list of spinsolve folders
-            filePathList = read_spinsolve_subfolders(filePath, filePathList)
-
-        # Set the DATA_PATH to the dropped directory or to the parent directory, if several folders were dropped
-        if len(filePathList) == 1:
-            self.DATA_PATH = os.path.dirname(filePathList[0])
-        else:
-            self.DATA_PATH = os.path.dirname(os.path.dirname(filePathList[0]))
-        self.loadManyFiles(filePathList)
-
-    def loadManyFiles(self, filePathList):
-        """Loads files from several folders."""
-        # TODO! Thus can be reorganized into several functions (e.g. for compile_reduced and compiled_full) or combined with dropEvent...
-
-        # Reset the workspace if there are any files to be added in the reduced version
-        if compile_reduced and len(filePathList) > 0:
-            self.onResetWspAction()
-
-        # Load the new files
-        for filePath in filePathList:
-            dat = self.addDatumFromFile(filePath)
-
-        # Check the files and run the optimization
-        if compile_reduced:
-            # Check that all datasets are from the same sample
-            if len(set([get_wine_name(DDD) for DDD in self.wsp.series[0].data])) > 1:
-                self.showErrorMessage(text='All spectra need to be from the same sample. Please load them again.')
-                self.onResetWspAction()
-
-            elif all([DDD.protocol() == 'PRESAT' for DDD in self.wsp.series[0].data]):
-                self.showErrorMessage(text='A spectrum without water suppression is needed to estimate absolute concentrations. Please load it along with a PRESAT data to ensure the best quantification accuracy.')
-                self.onResetWspAction()
-
-            # # Set the current spectrum to a presat experiment
-            # self.setCurrent(resetView=True)
-
-            self.fitAllFiles()
-            
 if __name__ == '__main__':
     app = 0
     app = QApplication(sys.argv)

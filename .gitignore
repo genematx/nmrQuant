@@ -123,7 +123,7 @@ results.*
 test.py
 test1.py
 test_pyqtgraph.py
-image.eps
+image.*
 fid/
 release.zip
 BASF_VitA.json

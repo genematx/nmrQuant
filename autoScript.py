@@ -5,7 +5,7 @@
 # unlike
 # #!/usr/bin/python2.5  - which will only run if there is a file
 #                         python 2.5 is installed at /usr/bin
-"""Module summary
+""" Module summary
 
 If you import this module and do help (module) you'll see this.
 The first line of a docstring is the "summary", and should be

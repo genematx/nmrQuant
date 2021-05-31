@@ -6,9 +6,16 @@ from MainLogic import Series, Datum, Workspace
 from dataio import *
 import config
 
-from PyQt4 import QtGui, QtCore, uic
-from PyQt4.QtGui import QAction, QActionGroup, QApplication, QBrush, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QIcon, QInputDialog, QItemSelectionModel, QItemDelegate, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QMainWindow, QPalette, QPen, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget, QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
-from PyQt4.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent, QItemSelectionModel
+from PyQt5.QtGui import QBrush, QDoubleValidator, QIcon, QPalette, QPen, QTextCursor
+from PyQt5.QtWidgets import QAction, QActionGroup, QApplication, QCheckBox,\
+    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,\
+    QInputDialog, QItemDelegate, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QMainWindow, \
+    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, \
+    QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget,\
+    QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
 from matplotlib import rc, rcParams
@@ -101,9 +108,6 @@ class CfunPopup(QWidget):
         #dc = QPainter(self)
         #dc.drawLine(0, 0, 100, 100)
         #dc.drawLine(100, 0, 0, 100)"""
-
-from PyQt4.QtGui import QDialog, QVBoxLayout, QDateTimeEdit, QApplication
-from PyQt4.QtCore import Qt, QDateTime
 
 class MyDoubleEdit(QLineEdit):
 
@@ -417,7 +421,7 @@ class PlotStemsItem(pg.PlotCurveItem):
         self.setAcceptHoverEvents(True)
 
     def mouseClickEvent(self, ev):
-        if ev.button() != QtCore.Qt.LeftButton:
+        if ev.button() != Qt.LeftButton:
             return
         if self.mouseShape().contains(ev.pos()):
             ev.accept()
@@ -810,7 +814,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
     def _onMouseClicked(self, evt):
         """Called when the mouse is clicked in the main graphic scene."""
-        if evt.button() == QtCore.Qt.LeftButton:
+        if evt.button() == Qt.LeftButton:
             p0 = self.getItem(0,0)
             pos = evt.scenePos()
             if p0.sceneBoundingRect().contains(pos):
@@ -824,7 +828,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
         vb = self.getItem(0,0).vb
 
-        if self._state == 'selectRange' and (evt.button() == QtCore.Qt.LeftButton):   # and (ev.modifiers() & QtCore.Qt.ControlModifier):
+        if self._state == 'selectRange' and (evt.button() == Qt.LeftButton):   # and (ev.modifiers() & Qt.ControlModifier):
             # Adding a new frequency range
             evt.accept()
 
@@ -845,7 +849,7 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
         elif self._stemDragging_flag:
             # Dragging a group of stems. Will be handled by the corresponding PlotStemsItem
             pass
-        elif self._state == 'dragSpectrum' and (evt.button() == QtCore.Qt.LeftButton):
+        elif self._state == 'dragSpectrum' and (evt.button() == Qt.LeftButton):
             # Moving the experimental spectrum to set a new global chemical shift
             print('Setting global chemical shift')
             evt.accept()
@@ -856,11 +860,11 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
     def setCursor(self, mode='normal'):
         """Sets the cursor to be displayed in the main scene according to the mode."""
         if mode == 'normal' or mode == 'arrow':
-            self.getItem(0,0).setCursor(QtCore.Qt.ArrowCursor)
+            self.getItem(0,0).setCursor(Qt.ArrowCursor)
         elif mode == 'cross':
-            self.getItem(0,0).setCursor(QtCore.Qt.CrossCursor)
+            self.getItem(0,0).setCursor(Qt.CrossCursor)
         elif mode == 'hand':
-            self.getItem(0,0).setCursor(QtCore.Qt.PointingHandCursor)
+            self.getItem(0,0).setCursor(Qt.PointingHandCursor)
 
     def enableCrosshair(self, enable=True):
         """Enables/disables the crosshair mode."""
@@ -1084,7 +1088,7 @@ class FreqTableModel(QtCore.QAbstractTableModel):
     def headerData(self, section, orientation, role):
         head = ["", "From", "To", "Bsln",  "Re", "Im"]
 
-        if orientation == QtCore.Qt.Horizontal and role == QtCore.Qt.DisplayRole:
+        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
             return head[section]
 
     def columnCount(self, parent = QtCore.QModelIndex()):
@@ -1092,22 +1096,21 @@ class FreqTableModel(QtCore.QAbstractTableModel):
 
     def rowCount(self, parent = QtCore.QModelIndex()):
         """Number of rows (children) for each item in the tree. INPUTS: QModelIndex. OUTPUT: int"""
-        try:
+        if not isinstance(self.datum, Workspace):
             return len(self.datum.freqBlocks) + 1
-        except AttributeError:
-            return 1
+        else: return 1
 
     def flags(self, index):
         row = index.row()
         clmn = index.column()
 
         if row == 0:
-            return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable
+            return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
 
         if clmn == 0:
-            return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable
+            return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
         else:
-            return QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
+            return Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
 
     def data(self, index, role):
         row = index.row()
@@ -1115,17 +1118,17 @@ class FreqTableModel(QtCore.QAbstractTableModel):
 
         if not isinstance(self.datum, Workspace):
 
-            if role == QtCore.Qt.CheckStateRole and clmn == 0:
+            if role == Qt.CheckStateRole and clmn == 0:
                 if row == 0:
                     if len(self.datum.steps[-1].frqBlkIds) > 0:
-                        return QtCore.Qt.Unchecked
-                    else: return QtCore.Qt.Checked
+                        return Qt.Unchecked
+                    else: return Qt.Checked
                 elif row > 0 and (row-1) in self.datum.steps[-1].frqBlkIds:
-                    return QtCore.Qt.Checked
+                    return Qt.Checked
                 else:
-                    return QtCore.Qt.Unchecked
+                    return Qt.Unchecked
 
-            if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole]:
+            if role in [Qt.DisplayRole, Qt.EditRole]:
                 if clmn == 0:
                     if row == 0:
                         return "Fit in time domain"
@@ -1146,7 +1149,7 @@ class FreqTableModel(QtCore.QAbstractTableModel):
 
     # --------------------------------- M A I N   D I S P L A Y   F U N C T I O N ----------------------------------
 
-    def setData(self, index, value, role = QtCore.Qt.EditRole):
+    def setData(self, index, value, role = Qt.EditRole):
 
         if not index.isValid():
             return False
@@ -1155,23 +1158,23 @@ class FreqTableModel(QtCore.QAbstractTableModel):
         clmn = index.column()
         row = index.row()
 
-        if role == QtCore.Qt.EditRole and row > 0:
+        if role == Qt.EditRole and row > 0:
             if clmn in [1, 2]:
-                xmin = float(value) if clmn == 1 else float(self.data(self.index(row, 1), QtCore.Qt.DisplayRole))
-                xmax = float(value) if clmn == 2 else float(self.data(self.index(row, 2), QtCore.Qt.DisplayRole))
+                xmin = float(value) if clmn == 1 else float(self.data(self.index(row, 1), Qt.DisplayRole))
+                xmax = float(value) if clmn == 2 else float(self.data(self.index(row, 2), Qt.DisplayRole))
                 self.datum.altFreqBlock(lims=(xmin, xmax), indx=row-1)
                 self.freqBlockChanged.emit(row-1)
 
             elif clmn == 3: # in [3, 4]:
-                Br = int(value) if clmn == 3 else int(self.data(self.index(row, 3), QtCore.Qt.DisplayRole))
-                #Bi = int(value) if clmn == 4 else int(self.data(self.index(row, 4), QtCore.Qt.DisplayRole))
+                Br = int(value) if clmn == 3 else int(self.data(self.index(row, 3), Qt.DisplayRole))
+                #Bi = int(value) if clmn == 4 else int(self.data(self.index(row, 4), Qt.DisplayRole))
                 #self.datum.altFreqBlock(bslnOrder=(Br, Bi), indx=row-1)    # Use this line to set different values for Br and Bi and set columnCount = 5
                 self.datum.altFreqBlock(bslnOrder=(Br, Br), indx=row-1)
 
             self.dataChanged.emit(index, index)
             return True
 
-        if role == QtCore.Qt.CheckStateRole:
+        if role == Qt.CheckStateRole:
             if row == 0:
                 if len(self.datum.steps[-1].frqBlkIds) > 0:
                     for step in self.datum.steps:
@@ -1301,7 +1304,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
         #print("Data", row, clmn, node, node.name)
 
-        if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole]:
+        if role in [Qt.DisplayRole, Qt.EditRole]:
             if isinstance(node, Workspace):
                 return "Workspace"
             else:
@@ -1309,7 +1312,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
                 if isinstance(node, Series) and len(node.data) == 0: result += ' (empty)'
                 return result
 
-        elif role == QtCore.Qt.DecorationRole:
+        elif role == Qt.DecorationRole:
             if isinstance(node, Datum):
                 displayIcon = QIcon('icons\icon_gof_none.png')
                 # gof = node.goodness_of_fit()
@@ -1328,16 +1331,16 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
     def flags(self, index):
         if not index.isValid():
             return None
-        return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEditable
+        return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable
 
-    def setData(self, index, value, role = QtCore.Qt.EditRole):
+    def setData(self, index, value, role = Qt.EditRole):
         """Stores changed name of the node."""
         if not index.isValid():
             return False
 
         node = index.internalPointer()
 
-        if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole]:
+        if role in [Qt.DisplayRole, Qt.EditRole]:
             if not isinstance(node, Workspace) and value != '':
                 node.name = value
                 return True
@@ -1358,25 +1361,6 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         self.wsp.addSeries()
 
         self.endInsertRows()
-
-    def importData(self, crnt_series=None):
-        """Opens a dialog to select a new data file to be added to the parent series."""
-        # Create new series if working from the workspace itself
-        dat = self.wsp
-
-        if crnt_series is None or crnt_series == self.wsp:
-            self.addSeries()
-            crnt_series = self.wsp.series[-1]
-        elif isinstance(crnt_series, Datum):
-            crnt_series = crnt_series.parent    # Go one level up to the Series level
-
-        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "All supported files (*.pyfid; *.dx; *.jdx; *.1d; *.2d; *.txt; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx; *.jdx);;Mnova FID (*.txt);;Bruker FID (fid)"):   # ;;JEOL FID (*.jdf)
-            #try:
-            dat = self.addDatumFromFile(newFilePath)
-            #except:
-            #    print("Could not add the file ", newFilePath)
-
-        return dat
 
     def indexByKey(self, key=(None, None)):
         """Retuens the index of an item (Datum or Series) given its selfID."""
@@ -1451,6 +1435,7 @@ class NavigationTreeView(QTreeView):
     requestPasteCrnt = pyqtSignal(list)
     requestPasteDflt = pyqtSignal(list)
     requestFitSelected = pyqtSignal(list)
+    requestImportData = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)    # Initialize a QTreeWidget
@@ -1474,7 +1459,7 @@ class NavigationTreeView(QTreeView):
         actnAddSeries.triggered.connect(self.model().addSeries)
         actnImportData = QAction(QIcon('icons\icon_addFile.png'), 'Import files', self)
         actnImportData.setStatusTip('Import new data and add them to the current series')
-        actnImportData.triggered.connect(lambda : self.onImportData(crnt_series=index.internalPointer() if index.isValid() else None))
+        actnImportData.triggered.connect(lambda : self.requestImportData.emit())  # self.onImportData(crnt_series=index.internalPointer() if index.isValid() else None))
         actnPasteCrnt = QAction(QIcon('icons\icon_pasteCrnt.png'), 'Paste as current', self)
         actnPasteCrnt.setStatusTip('Paste as current values')
         actnPasteCrnt.triggered.connect(lambda : self.requestPasteCrnt.emit(selected))     # Emit a list of selected datums to paste the currently copied parameters to them
@@ -1511,10 +1496,6 @@ class NavigationTreeView(QTreeView):
 
         # Show the menu
         popMenu.popup(self.viewport().mapToGlobal(pos))
-
-    def onImportData(self, crnt_series):
-        dat = self.model().importData(crnt_series)
-        self.selectCurrentDatum(dat.selfID())
 
     def selectCurrentDatum(self, key=(None, None)):
         """Highlights the current Datum or Series."""
@@ -1699,9 +1680,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             # If the list of steps has changed
             oldColumnCount = self.columnCount()
             newColumnCount = self.skipColumns
-            try:
+            if not isinstance(self.datum, Workspace):
                 newColumnCount += len(datum.steps)
-            except AttributeError: pass
+            else: pass
 
             parent = QtCore.QModelIndex()
 
@@ -1756,24 +1737,18 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
         self.dataChanged.emit(index_start, index_stop)     # Update the entire tree
 
-    def onHeaderSectionPressed(self, clmn):
-        """Is called when a user selects a new column. Connected to the slot"""
-        if clmn >= self.skipColumns:
-            self.actvStepIndx = self.clmn2step(clmn)
-            self.dataChanged.emit(self.index(0,clmn), self.index(self.rowCount(self._indxRoot)-1, clmn))                # Update the entire column
-
     def onHeaderSectionMoved(self, logicalIndex, oldVisualIndex, newVisualIndex):
         """Is called when columns in the tree view are moved."""
         print('Column {} is moved from {} to {}.'.format(logicalIndex, oldVisualIndex, newVisualIndex))
 
     def headerData(self, section, orientation, role):
 
-        #if role == QtCore.Qt.SizeHintRole:
+        #if role == Qt.SizeHintRole:
         #    return QtCore.QSize(20, 20)
 
-        if role == QtCore.Qt.DisplayRole:
+        if role == Qt.DisplayRole:
 
-            if orientation == QtCore.Qt.Horizontal:
+            if orientation == Qt.Horizontal:
                 head = ['Chemicals/parameters', 'min', 'max', 'dflt', 'value']
 
                 if section < 5:
@@ -1785,10 +1760,11 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 return None
 
     def columnCount(self, parent = QtCore.QModelIndex()):
-        try:
-            return self.skipColumns + len(self.datum.steps)
-        except AttributeError:
-            return self.skipColumns
+        result = self.skipColumns
+        if not isinstance(self.datum, Workspace):
+            result += len(self.datum.steps)
+
+        return result
 
     def rowCount(self, index):
         """Number of rows (children) for each item in the tree. INPUTS: QModelIndex. OUTPUT: int"""
@@ -1853,10 +1829,10 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
     def data(self, index, role):
         # Check if the list of fittable parameters needs to be computed again
         if self._unfittableParsKeys is None:
-            try:
+            if isinstance(self.datum, Datum):
                 # print('Recomputing the list of fittable parameters')
                 _, self._unfittableParsKeys = self.datum.fittableParsKeys()
-            except AttributeError:
+            else:
                 # If Worksapce or Series do not do anything
                 self._unfittableParsKeys = []
 
@@ -1867,7 +1843,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         row = index.row()
         clmn = index.column()
 
-        if role == QtCore.Qt.CheckStateRole and clmn >= self.skipColumns:
+        if role == Qt.CheckStateRole and clmn >= self.skipColumns:
             # step_indx = clmn-self.skipColumns    # Normal order
             step_indx = self.columnCount() - clmn - 1    # Reversed order
 
@@ -1875,11 +1851,11 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
             if node.nodeType == 'param':
                 if node.name in self.datum.steps[step_indx].parsKeys:
-                    return QtCore.Qt.Checked
+                    return Qt.Checked
                 elif self.datum.isAutofittable(key=node.name) and node.name in self.datum.steps[step_indx].autoKeys:
-                    return QtCore.Qt.PartiallyChecked
+                    return Qt.PartiallyChecked
                 else:
-                    return QtCore.Qt.Unchecked
+                    return Qt.Unchecked
 
             elif node.name == 'lshapeX':
                 return self.datum.steps[step_indx].fitCustomLshape
@@ -1887,7 +1863,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             else: return None
 
         # Setup font for the reported nodes (only in the 0-th column)
-        if clmn == 0 and role == QtCore.Qt.FontRole:
+        if clmn == 0 and role == Qt.FontRole:
             font = QtGui.QFont()    # Default font
 
             if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:     # Chemical node
@@ -1905,7 +1881,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
             return font
 
-        if role in [QtCore.Qt.DisplayRole, QtCore.Qt.EditRole, QtCore.Qt.ForegroundRole]:
+        if role in [Qt.DisplayRole, Qt.EditRole, Qt.ForegroundRole]:
             if node.nodeType == 'param':
                 key = node.name
                 prior = self.datum.getPrior(key)
@@ -1918,18 +1894,18 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 elif clmn == 3:
                     return prior.dflt()
                 elif clmn == 4:
-                    try:
+                    if isinstance(self.datum, Datum):
                         crntVal = self.datum.getCrntVal(key)
-                        if role == QtCore.Qt.DisplayRole:
+                        if role == Qt.DisplayRole:
                             return "{:.4g}".format(crntVal)
-                        elif (role == QtCore.Qt.ForegroundRole) and (self.flags(index) & QtCore.Qt.ItemIsEnabled):
+                        elif (role == Qt.ForegroundRole) and (self.flags(index) & Qt.ItemIsEnabled):
                             if (crntVal-prior.min < 1e-06*(prior.max-prior.min) or prior.max - crntVal < 1e-06*(prior.max-prior.min)) and not np.isinf([prior.min, prior.max]).any():
                                 return QtGui.QBrush( QtGui.QColor(255, 0, 0) )
                             elif crntVal != prior.dflt():
                                 return QtGui.QBrush( QtGui.QColor(0, 0, 255) )
                         else:
                             return "{:.10g}".format(crntVal)
-                    except AttributeError: return None    # If there is no crntParsH attribute (as in the Workspace itself)
+                    else: return None    # If there is no crntParsH attribute (as in the Workspace itself)
                 else:
                     pass
 
@@ -1937,9 +1913,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                     crntVal = self.datum.T[node.name].intn
 
-                    if role == QtCore.Qt.DisplayRole:
+                    if role == Qt.DisplayRole:
                         return "{:.4g}".format(crntVal)
-                    elif role == QtCore.Qt.EditRole:
+                    elif role == Qt.EditRole:
                         return "{:.10g}".format(crntVal)
 
             else:
@@ -1947,7 +1923,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     # Name of the chemical or parameter
                     return node.alias if node.alias != '' else str(node.name)
 
-        elif role == QtCore.Qt.DecorationRole:
+        elif role == Qt.DecorationRole:
             displayIcon = None
             if clmn == 0:
                 if node.nodeType == 'param':
@@ -1972,7 +1948,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             return displayIcon
 
         # Display the active step in a different color
-        if role == QtCore.Qt.BackgroundRole and clmn >= self.skipColumns and self.clmn2step(clmn) == self.actvStepIndx:
+        if role == Qt.BackgroundRole and clmn >= self.skipColumns and self.clmn2step(clmn) == self.actvStepIndx:
             return QtGui.QBrush(QtGui.QColor(255, 204, 41, 64))
 
         return None
@@ -1987,17 +1963,17 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
         # Initialize the result
         if node.nodeType=='param' and node.name[1]=='gamma' and config.SAMPL_funcType!='TLS':
-            result = QtCore.Qt.NoItemFlags
+            result = Qt.NoItemFlags
         else:
-            result = QtCore.Qt.ItemIsEnabled
+            result = Qt.ItemIsEnabled
 
         if clmn == 0:
             if node.nodeType == 'param':
-                return result | QtCore.Qt.ItemIsSelectable
+                return result | Qt.ItemIsSelectable
             elif node.nodeType == 'chemNode':
-                return result | QtCore.Qt.ItemIsEditable # | QtCore.Qt.ItemIsUserCheckable
+                return result | Qt.ItemIsEditable # | Qt.ItemIsUserCheckable
             elif node.nodeType in ['chemNodeDB', 'chemNodeQM']:
-                return result # | QtCore.Qt.ItemIsUserCheckable
+                return result # | Qt.ItemIsUserCheckable
             else:
                 return result
 
@@ -2006,39 +1982,39 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             if node.nodeType == 'lshape':
                 return result
             elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:
-                return result | QtCore.Qt.ItemIsEditable
+                return result | Qt.ItemIsEditable
             else:
-                return result | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable
+                return result | Qt.ItemIsEditable | Qt.ItemIsSelectable
             """elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
             if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
-                return QtCore.Qt.ItemIsEditable | result"""
+                return Qt.ItemIsEditable | result"""
 
         elif node.nodeType == 'param':
             if clmn in [1, 2, 3]:
-                return result | QtCore.Qt.ItemIsSelectable
+                return result | Qt.ItemIsSelectable
             elif clmn == 4:
-                return result | QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsSelectable
+                return result | Qt.ItemIsEditable | Qt.ItemIsSelectable
             else:
-                return result | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsSelectable
+                return result | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable
 
         elif node.nodeType == 'bool':
             if clmn < self.skipColumns:
-                return QtCore.Qt.ItemIsEnabled
+                return Qt.ItemIsEnabled
             else:
-                return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable
+                return Qt.ItemIsEnabled | Qt.ItemIsUserCheckable
 
             """elif node.nodeType == 'intn':
             if clmn in [1, 2, 3]:
-                return result | QtCore.Qt.ItemIsSelectable
+                return result | Qt.ItemIsSelectable
             elif clmn == 4:
-                return QtCore.Qt.ItemIsEditable | result | QtCore.Qt.ItemIsSelectable
+                return Qt.ItemIsEditable | result | Qt.ItemIsSelectable
             else:
-                return result |  QtCore.Qt.ItemIsSelectable # | QtCore.Qt.ItemIsUserCheckable"""
+                return result |  Qt.ItemIsSelectable # | Qt.ItemIsUserCheckable"""
 
         else:
             return result
 
-    def setData(self, index, value, role = QtCore.Qt.EditRole):
+    def setData(self, index, value, role = Qt.EditRole):
         """Stores changed data."""
         if not index.isValid():
             return False
@@ -2047,7 +2023,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         clmn = index.column()
         row = index.row()
 
-        if role == QtCore.Qt.EditRole:
+        if role == Qt.EditRole:
             if node.nodeType == 'param':
                 # Update parameter specification
                 if clmn == 4:
@@ -2078,9 +2054,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
             return True
 
-        if role == QtCore.Qt.CheckStateRole and clmn >= self.skipColumns:
+        if role == Qt.CheckStateRole and clmn >= self.skipColumns:
             # Set the tick boxes
-            shiftPressed = (QtGui.QApplication.keyboardModifiers() == QtCore.Qt.ShiftModifier)
+            shiftPressed = (QtGui.QApplication.keyboardModifiers() == Qt.ShiftModifier)
             # Find at which step we are now
             step_indx = self.clmn2step(clmn)
 
@@ -2143,9 +2119,9 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         return False
 
     def addStep(self):
-        try:
+        if not isinstance(self.datum, Workspace):
             newStep = Step(frqBlkIds = copy.copy(self.datum.steps[-1].frqBlkIds), autoKeys = copy.copy(self.datum.steps[-1].autoKeys))
-        except AttributeError:
+        else:
             return False
 
         parent = QtCore.QModelIndex()
@@ -2156,14 +2132,14 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
     def delStep(self):
         # Removes the active step and sets the previous one as active
-        try:
+        if not isinstance(self.datum, Workspace):
             if len(self.datum.steps) > 1:
                 parent = QtCore.QModelIndex()
                 self.beginRemoveColumns(parent, self.columnCount()-1, self.columnCount()-1)
                 self.datum.steps.pop(self.actvStepIndx)              # Remove the step
                 self.actvStepIndx = max(0, self.actvStepIndx - 1)    # Set the active step to previous
                 self.endRemoveColumns()
-        except AttributeError:      # If the datum is the entire Workspace
+        else:      # If the datum is the entire Workspace
             return False
 
     def moveStep(self, oldVisualIndex, newVisualIndex):
@@ -2184,7 +2160,10 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         """Is called when a user selects a new column corresponding to a step. Connected to the slot in the View."""
         if clmn >= self.skipColumns:
             self.actvStepIndx = self.clmn2step(clmn)
-            self.dataChanged.emit(self.index(0,clmn), self.index(self.rowCount(self._indxRoot)-1, clmn))                # Update the entire column
+
+            # Update the entire column
+            self.dataChanged.emit(self.index(0, clmn),
+                        self.index(self.rowCount(self._indxRoot)-1, clmn))
 
     def addChemical(self, index, source = 'new'):
         """Adds a new chemical to the tree as a child to node index."""
@@ -2193,7 +2172,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if source == 'new':
             X = chemNode('New group')
         elif source == 'file':
-            filename = QFileDialog.getOpenFileName(None, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")
+            filename = QFileDialog.getOpenFileName(None, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")[0]
             X = loadTree(filename)
             # if filename:
             #     with open(filename, 'rb') as fp:
@@ -2352,7 +2331,7 @@ class ChemTreeView(QTreeView):
             x = prnt_pos.x() + (prnt_siz.width()-w)/2
             y = prnt_pos.y() + (prnt_siz.height()-h)/2
             self.setGeometry(x,y, w, h)
-            self.setWindowFlags(QtCore.Qt.Tool)
+            self.setWindowFlags(Qt.Tool)
             self.setWindowTitle(str(name))
 
         def setDistrForm(self, distr):
@@ -2453,7 +2432,7 @@ class ChemTreeView(QTreeView):
         self.setSelectionMode(QTreeView.ExtendedSelection)
 
         self.header().sectionCountChanged.connect(self.onSectionCountChanged)
-        self.header().setClickable(True)
+        self.header().setSectionsClickable(True)
         self.header().sectionPressed.connect(self.model().setActiveStep)
         self.header().sectionMoved.connect(self.onHeaderSectionMoved)
 
@@ -2676,10 +2655,9 @@ class ChemTreeView(QTreeView):
         if node.nodeType in ['param'] and clmn in [0, 1, 2, 3]:
             key = node.name    # Usual parameter
             param = self.model().datum.getPrior(key)
-            try:
+            if isinstance(self.datum, Datum):
                 crntVal = self.model().datum.getCrntVal(key)
-            except AttributeError:
-                crntVal = None
+            else: crntVal = None
 
             dialog = self.ParsSpecDialog(key, param, crntVal, parent=self)
             result = dialog.exec_()
@@ -2695,7 +2673,7 @@ class ChemTreeView(QTreeView):
         """Saves the subtree starting with the node index."""
         node = index.internalPointer()
 
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.ctr)')
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.ctr)')[0]
         if filename:
             if filename[-4:] == '.ctr': filename = filename[:-4]
 
@@ -2742,9 +2720,9 @@ class ChemTreeView(QTreeView):
             self.model().datum.toggleXclRootName(key)
             self.model().notifyDataChanged()
 
-    def dataChanged(self, topLeft, btmRight):
+    def dataChanged(self, topLeft, btmRight, roles):
         """Reimplemented dataChanged slot."""
-        super().dataChanged(topLeft, btmRight)
+        super().dataChanged(topLeft, btmRight, roles)
         self.hideExcessiveRows()
 
     def hideExcessiveRows(self):
@@ -3230,8 +3208,12 @@ class MySpecPlot(FigureCanvas):
     def __init__(self, figure):
         pass
 
-class MainView_Generic(QMainWindow):
-    """Main GUI form class; can be subclassed by more specialized applications with specific GUIs, e.g. wine analysis."""
+class MainNMRWindowBase(QMainWindow):
+    """Abstract class of the main GUI window.
+
+       Can be subclassed by more specialized applications with specific GUIs,
+       e.g. wine analysis.
+    """
 
     def __init__(self, wsp, expiryTime = np.inf, parent = None):
         # Set the expiry time/date
@@ -3251,12 +3233,13 @@ class MainView_Generic(QMainWindow):
 
         # Initialize with some workspace
         self.wsp = wsp    # The Workspace; main class that holds all logic
+        self._wspPath = None      # Path to the Workspace file
         self._crnt = self.wsp     # Currently opened Series/Datum/or the entire Workspace
         self._undoStack = []      # The stack of previous actions; each entry is a 2-tuple with the first element = the datum, second elent = flat dictionary of previous parameter values
         self._redoStack = []
         self._actions = {}
 
-        # initialize the main window
+        # Initialize the main window
         super().__init__(parent)
         self.setAcceptDrops(True)      # Allow drag-and-drop
         self.setupGUI()
@@ -3266,7 +3249,6 @@ class MainView_Generic(QMainWindow):
         # Start the fitting thread
         self.fittingThread = FittingThread()
         self.fittingThread.finished.connect(self.onThreadFinished)
-        self.fittingThread.terminated.connect(self.onThreadFinished)
 
     def __del__(self):
         # Restore sys.stdout (if used to collect output to the console)
@@ -3343,7 +3325,7 @@ class MainView_Generic(QMainWindow):
         # Add import datafile action
         new = QAction(self._icon('icon_addFile.png'), 'Import files', self)
         new.setStatusTip('Import new data and add them to the current series')
-        new.triggered.connect(self.onImportData)
+        new.triggered.connect(self.runImportDataDialog)
         self._actions['Import file'] = new
 
         new = QAction(self._icon('icon_removeFile.png'), 'Remove file', self)
@@ -3475,60 +3457,35 @@ class MainView_Generic(QMainWindow):
 
     # ------------------------- Other utility methods --------------------------
 
-    def addDatumFromFile(self, path):
-        """Adds new Datum entries specified by the path to the series object."""
+    def importDataFiles(self, filePathList):
+        """Loads several files from a list and inserts them into the workspace."""
+        # Load the new files
+        for filePath in filePathList:
+            dat = addDatumFromFile(filePath, self._crnt)
 
-        t, yT, dic = read_any_file(path)
-        c0, f0, dt, name = dic['c0'], dic['f0'], dic['dt'], dic['name']
-        if 'startTime' in dic.keys():
-            # TODO: Try dateutil to automatically parse dates in different formats
-            timeParsed = time.strptime(dic['startTime'].split('.')[0], '%Y-%m-%dT%H:%M:%S')         # Convert the time format from e.g. "2021-02-14T13:21:33.653" to '%Y%m%d-%H%M%S'
-            timeString = time.strftime('%Y%m%d-%H%M%S', timeParsed)
-            dic.update({'acqu_time' : timeString})
+        self.setCurrent(dat)
 
-        if len(self.wsp.series) == 0:
-            self.wsp.addSeries()
-        ser_ID, _ = self._crnt.selfID()
-        if ser_ID is None: ser_ID = -1
-        crnt_series = self.wsp.series[ser_ID]
+    def runImportDataDialog(self):
+        """Run a dialog to import a new file."""
+        filter = "All supported files (*.pyfid; *.dx; *.jdx; *.1d; *.2d; *.txt; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx; *.jdx);;Mnova FID (*.txt);;Bruker FID (fid)"
+        pathList = [path for path in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter=filter)[0] ]   # ;;JEOL FID (*.jdf)
 
-        # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
-        if crnt_series.c0 is None:
-            crnt_series.c0 = c0
-            crnt_series.f0 = f0
-            crnt_series.t = t
-            crnt_series.fullReset()
-        elif np.abs(crnt_series.c0 - c0) > 1e-3:
-            # Create a new series and put the data into it
-            # TODO: Check if new c0/f0 are the same as the old ones when loading the rest of the data
-            self.addSeries()
-            crnt_series = self.wsp.series[-1]
-            crnt_series.c0 = c0
-            crnt_series.f0 = f0
-            crnt_series.t = t
-            crnt_series.fullReset()
+        self.importDataFiles(pathList)
 
-        # Add the data to the current series
-        for i in range(yT.shape[1]):
-            dat = crnt_series.addDatum(yT[:,i].reshape(-1,1), name = name+str(i+1) if yT.shape[1] > 1 else name, extra=dic)
-
-        return dat
-
-    def onImportData(self):
-        """Runs a dialog to select a new file."""
-        for newFilePath in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter = "Spinsolve FID (*.1d)"):   # ;;JEOL FID (*.jdf)
-            dat = self.addDatumFromFile(newFilePath)
-        return dat
+    def runLoadWspDialog(self):
+        """Runs a dialog for loading a new Workspace."""
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
+        if filename:
+            pass
 
     def removeCurrent(self):
         """Removes currently selected spectrum."""
         crntID = self._crnt.selfID()
-        if crntID[0] == 0 and crntID[1] is not None:
-            self.wsp.series[0].data[crntID[1]].remove()
-            self.dataListWidget.takeItem(crntID[1])
+        if crntID[0] is not None:
+            self.wsp.series[crntID[0]].data[crntID[1]].remove()
 
     def setCurrent(self, newCrnt=None):
-        """Sets the _crnt Datum and updates the plot, tables, etc. accordingly."""
+        """Set the _crnt Datum."""
 
         # Set self._crnt to the new Series/Datum or the entire workspace
         if newCrnt is None:
@@ -3547,29 +3504,13 @@ class MainView_Generic(QMainWindow):
         except AttributeError:
             pass
 
-        # Update the necessary display widgets
-        self.treeModel.setNewDatum(newCrnt)
-        self.freqTableModel.setNewDatum(newCrnt)
-        self.preprocTool.setNewDatum(newCrnt)
-        # self.phasingTool.setNewDatum(newCrnt)
-
-        # Highlight the current Datum in the Navigation widget if it was seletected programmatically
-        self.naviTreeView.selectCurrentDatum(newCrnt.selfID())
-
-        if isinstance(self._crnt, Datum) and isinstance(newCrnt, Datum) and self._crnt.parent == newCrnt.parent:
-            resetView = False
-        else: resetView = True
         self._crnt = newCrnt
-        self.plotCurrent(autoRange=resetView)
 
-    def onCurrentSelectedChanged(self, index):
-        """Slot for the signal indicating the change in the currently selected Series/Datum"""
-
-        self.setCurrent(newCrnt = index.internalPointer() if index.isValid() else None)
+        return newCrnt
 
     def loadChemTree(self):
         """Calls a dialog and loads a new chemical tree from file."""
-        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")
+        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")[0]
 
         T = loadTree(filename)
 
@@ -3577,7 +3518,7 @@ class MainView_Generic(QMainWindow):
 
     def onSaveWspAction(self):
         """Saves the workspace including the stepClass class and the steps array."""
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')[0]
         if filename:
             if filename[-4:] != '.wsp': filename += '.wsp'
 
@@ -3598,7 +3539,7 @@ class MainView_Generic(QMainWindow):
 
     def onLoadWspAction(self):
         """Loads the workspace including the stepClass class and the steps array."""
-        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
         if filename:
             with open(filename, 'rb') as fp:
                 dataUnPack = dill.load(fp)
@@ -3670,7 +3611,9 @@ class MainView_Generic(QMainWindow):
                 dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
 
         self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
-        self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
+
+        # Do not autorange if what has changed is only apodization
+        self.plotCurrent(autoRange=(apod is None))
 
     def showSettingsDialog(self):
         """Shows an input dialog and updates settings"""
@@ -3701,7 +3644,7 @@ class MainView_Generic(QMainWindow):
         pass
 
     def pullUndo(self):
-        """Restores the last state from the Undo stack."""
+        """Restore the last state from the Undo stack."""
         dats_list, pars_list = self._undoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
         self._redoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
 
@@ -3709,10 +3652,11 @@ class MainView_Generic(QMainWindow):
         for dat, par in zip(dats_list, pars_list):
             dat.setCrntVals(par)
 
-        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
+        # Also update the undo/redo buttons
+        self.startThread(queueFiles=dats_list, pushUndo=False)
 
     def pullRedo(self):
-        """Restores the last state from the Redo stack."""
+        """Restore the last state from the Redo stack."""
         dats_list, pars_list = self._redoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
         self._undoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
 
@@ -3720,7 +3664,8 @@ class MainView_Generic(QMainWindow):
         for dat, par in zip(dats_list, pars_list):
             dat.setCrntVals(par)
 
-        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
+        # Also update the undo/redo buttons
+        self.startThread(queueFiles=dats_list, pushUndo=False)
 
     # ------------------ Working with the fitting thread -----------------------
 
@@ -3907,7 +3852,7 @@ class MainView_Generic(QMainWindow):
 
     def saveResults(self):
         """Saves the current results of computation into a file."""
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.xlsx)')
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='(*.xlsx)')[0]
         if filename:
             if filename == '' : filename = 'results.xlsx'
             if filename[-5:] != '.xlsx': filename += '.xlsx'
@@ -4049,39 +3994,6 @@ class MainView_Generic(QMainWindow):
         # plot the prior distribution
         self.plotDistr(key)
 
-    def plotDistr(self, key=None):
-        """Plots a prior probability distribution for the parameter key on the middle plot."""
-        # Determine which parameter is selected in the list and plot its samples
-        if key is None:
-            numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-            if self.parsListWidget.currentRow() < numRepRoots:
-                key = self.parsListWidget.currentItem().text()
-            else:
-                key = self.steps[-1].parsKeys[self.parsListWidget.currentRow() - numRepRoots]    # Parameter name
-        # Plot the piror distribution and samples
-        self.axDistr.clear()
-        self.axDistr2.clear()
-        if type(key) is tuple:
-            # Handle adjustible parameters
-            slctParSpec = self.steps[-1].getPrior(key)
-            # Plot the samples
-            if self.steps[-1].sHat is not None:
-                indx = self.steps[-1].sHat['smplKeys'].index(key)       # Index of the sampled parameter in the array of samples
-                smpl_abs = self.steps[-1].sHat['smplVals'][indx, :]
-                self.axDistr2.hist(smpl_abs, bins=50, range=(slctParSpec.min, slctParSpec.max), color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
-            # Plot the prior
-            vals = [slctParSpec.evalPrior(x) for x in np.linspace(-1,1,25)]
-            self.axDistr.plot(np.linspace(slctParSpec.min, slctParSpec.max, 25), vals, color=(0.96, 0.53, 0.20))
-            self.axDistr.set_xlim((slctParSpec.min, slctParSpec.max))
-            self.axDistr.axvline(x=slctParSpec.abs(self.steps[-1].getCrntVal(key)), ymin=0, ymax=0.05, color='r')
-        else:
-            # Handle the amplitudes
-            if self.steps[-1].sHat is not None:
-                indx = self.steps[-1].sHat['labels'].index(key)       # Index of the sampled parameter in the array of samples
-                smpl_abs = np.abs(self.steps[-1].sHat['smplAmpl'][indx,:])
-                self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
-        self.histCanvas.draw()
-
 # --------------------- Adding and removing frequency blocks -------------------
     def addFreqBlock(self, xmin, xmax):
         """Adds new optimization range to the current Series and updates the plot."""
@@ -4154,18 +4066,12 @@ class MainView_Generic(QMainWindow):
         # Set the DATA_PATH to the dropped directory or to the parent directory, if several folders were dropped
         if len(filePathList) == 1:
             self.DATA_PATH = os.path.dirname(filePathList[0])
-        else:
+        elif len(filePathList) > 1:
             self.DATA_PATH = os.path.dirname(os.path.dirname(filePathList[0]))
-        self.loadManyFiles(filePathList)
+        self.importDataFiles(filePathList)
 
-    def loadManyFiles(self, filePathList):
-        """Loads files from several folders."""
-        # Load the new files
-        for filePath in filePathList:
-            dat = self.addDatumFromFile(filePath)
-
-class MainView_nmrQuant(MainView_Generic):
-    """Main GUI form class."""
+class MainView_nmrQuant(MainNMRWindowBase):
+    """Main GUI Window class."""
 
     def __init__(self, wsp, expiryTime = np.inf, parent = None):
         # Initialize the main window
@@ -4275,6 +4181,7 @@ class MainView_nmrQuant(MainView_Generic):
         self.naviTreeView.requestPasteCrnt.connect(self.treeView.pasteCrntPars)     # Paste copied parameter values to all selected Datums in the naviTreeView
         self.naviTreeView.requestPasteDflt.connect(self.treeView.pasteDfltPars)
         self.naviTreeView.requestFitSelected.connect(self.fitAllSteps)
+        self.naviTreeView.requestImportData.connect(self.runImportDataDialog)
 
         # Set up the tab
         tabNavi = QWidget()
@@ -4283,7 +4190,6 @@ class MainView_nmrQuant(MainView_Generic):
         layNavi.addWidget(self.naviTreeView)
         layNavi.addWidget(self.pieCanvas)
         layNavi.setContentsMargins(1,1,1,1)
-
 
         # ----------------------------------------------------------------------
         #                            Settings tab
@@ -4297,8 +4203,6 @@ class MainView_nmrQuant(MainView_Generic):
         # Add the preprocessing parameters tool
         self.preprocTool = PreprocessingWidget()
         self.preprocTool.parsChanged.connect(lambda x : self.resetSignals(**x))
-        # self.phasingTool = PhasingWidget(self._crnt, self.canvas, orientation='Horizontal') # set to 'Horizontal' if displayed on the right
-        # self.phasingTool.sigPhasingProgress.connect(self.onPhased)
 
         # Add Phasing tool
         self.mainPhasingWidget = PhasingWidget(orientation='Horizontal')
@@ -4569,23 +4473,7 @@ class MainView_nmrQuant(MainView_Generic):
 
         self.actnGroupFreqBlocks._previuosAction = actn
 
-    # -------------------- Processing keyboard interactions --------------------
-
-    def keyPressEvent(self, ev):
-        # self.scene().keyPressEvent(ev)
-        # self.sigKeyPress.emit(ev)
-        # print('Key pressed ', ev.key())
-        pass
-
     # ------------------------- Other utility methods --------------------------
-
-    def addDatumFromFile(self, path):
-        """Runs a dialog to select a new file."""
-        self.naviTreeModel.beginResetModel()
-        dat = super().addDatumFromFile(path)
-        self.naviTreeModel.endResetModel()
-
-        self.setCurrent(dat)
 
     def removeCurrent(self):
         """Removes current selection (Series or Datum)."""
@@ -4594,39 +4482,27 @@ class MainView_nmrQuant(MainView_Generic):
             self.naviSelection.clear()    # Select the entire workspace
 
     def setCurrent(self, newCrnt=None):
-        """Sets the _crnt Datum and updates the plot, tables, etc. accordingly."""
+        """Set the _crnt Datum and updates the plot, tables, etc. accordingly."""
 
-        # Set self._crnt to the new Series/Datum or the entire workspace
-        if newCrnt is None:
-            try:
-                newCrnt = self.wsp.series[0].data[0]
-            except IndexError:
-                self._crnt = self.wsp
-                return None
+        oldCrnt = self._crnt
+        newCrnt = super().setCurrent(newCrnt)
+        if newCrnt is None: return None
 
-        # Compute the model signal if there is None
-        try:
-            if newCrnt.zF is None:
-                step = newCrnt.steps[-1]
-                newCrnt.evaluate(frqBlkIds=step.frqBlkIds, autoKeys=step.autoKeys, returnSignals=True)
-                #TODO: Possibly check which step to evaluate if steps use different frequency ranges
-        except AttributeError:
-            pass
 
         # Update the necessary display widgets
         self.treeModel.setNewDatum(newCrnt)
         self.freqTableModel.setNewDatum(newCrnt)
         self.preprocTool.setNewDatum(newCrnt)
-        # self.phasingTool.setNewDatum(newCrnt)
 
         # Highlight the current Datum in the Navigation widget if it was seletected programmatically
         self.naviTreeView.selectCurrentDatum(newCrnt.selfID())
 
-        if isinstance(self._crnt, Datum) and isinstance(newCrnt, Datum) and self._crnt.parent == newCrnt.parent:
+        if isinstance(oldCrnt, Datum) and isinstance(newCrnt, Datum) and oldCrnt.ser == newCrnt.ser:
             resetView = False
         else: resetView = True
-        self._crnt = newCrnt
         self.plotCurrent(autoRange=resetView)
+
+        return newCrnt
 
     def onCurrentSelectedChanged(self, index):
         """Slot for the signal indicating the change in the currently selected Series/Datum"""
@@ -4635,7 +4511,7 @@ class MainView_nmrQuant(MainView_Generic):
 
     def loadChemTree(self):
         """Calls a dialog and loads a new chemical tree from file."""
-        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")
+        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")[0]
 
         T = loadTree(filename)
 
@@ -4643,7 +4519,7 @@ class MainView_nmrQuant(MainView_Generic):
 
     def onSaveWspAction(self):
         """Saves the workspace including the stepClass class and the steps array."""
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')
+        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')[0]
         if filename:
             if filename[-4:] != '.wsp': filename += '.wsp'
 
@@ -4664,7 +4540,7 @@ class MainView_nmrQuant(MainView_Generic):
 
     def onLoadWspAction(self):
         """Loads the workspace including the stepClass class and the steps array."""
-        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")
+        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
         if filename:
             with open(filename, 'rb') as fp:
                 dataUnPack = dill.load(fp)
@@ -5106,7 +4982,7 @@ if __name__ == '__main__':
     else:
         wsp = Workspace()
         main_view = MainView_nmrQuant(wsp, expiryTime)
-        # main_view = MainView_Generic(wsp, expiryTime)
+        # main_view = MainNMRWindowBase(wsp, expiryTime)
         main_view.show()
 
     app.exec_()

@@ -13,7 +13,6 @@ import itertools
 import numexpr as ne
 import copy
 from operator import itemgetter
-import networkx as nx
 
 # Ordered set class to store children of a node
 import collections
@@ -355,28 +354,6 @@ def meqv2asgn(spins, links=[]):
 
     return chshAsgn, jcplAsgn
 
-def get_spinGraph(chshQD, jcplQD, meqSpins, meqLinks):
-    """Create a graph to represent the spin system."""
-
-    G = nx.Graph()
-
-    G.add_nodes_from(meqSpins)
-
-    for link in meqLinks:
-        p, q = link.indxVert
-        weight = np.abs( jcplQD[link.indxJcpl] / (chshQD[meqSpins[p].indxChsh] - chshQD[meqSpins[q].indxChsh]))
-        G.add_edge(meqSpins[p], meqSpins[q], weight=weight, indxJcpl=link.indxJcpl)
-
-    return G
-
-def spinGraph2meqv(G):
-    """Converts a spin graph representation to the meqv representation of a spin system."""
-    meqSpins = [node for node in G.nodes]
-    meqLinks = [spinEdge( indxJcpl=edge[2]['indxJcpl'], indxVert=sorted( [meqSpins.index(edge[0]), meqSpins.index(edge[1])] ) )
-                for edge in G.edges(data=True)]
-
-    return meqSpins, meqLinks
-
 # Sampling
 def smplSpec_from_data(data):
     """Returns the statistics of the 1D np.array of samples, data, in the form of smplSpec."""
@@ -623,7 +600,7 @@ def get_hamiltonian(chshQD, jcplQD, chshAsgn, jcplAsgn):
 
 # QD simulations
 def transition_indices(n_spin, k=0):
-    """Returns indices of singlestate transitons for the kth spin of total n_spin spins in an nxn matrix of intensities or frequencies."""
+    """Returns indices of singlestate transitons for the kth spin of total n_spin spins in an n_x_n matrix of intensities or frequencies."""
     k = n_spin-k-1
     diag_indx = [(i, i+2**k) for i in range(2**n_spin-2**k)]    # Indices of the 2**k off diagonal
     rows, cols = zip(*[diag_indx[i] for j in range(0, 2**n_spin, 2**(k+1)) for i in range(j, j+2**k)])
@@ -1427,15 +1404,31 @@ def group_peaks(omega, intn, maxWidth=0.1, isSplit = False):     # maxWidth = 0.
     else: return [omega], [intn]
 
 class treeNode:
-    """ A generic tree node."""
+    """ A class used to represent a generic node in a hierarchical structure.
+
+        Defines the logic of the tree hierarchy. Will be subclassed to create
+        more specialised chemical tree nodes.
+
+    Attributes:
+        name: str
+            The name of the node; must be unique within the tree.
+        alias: str
+            An alternative name used for display purposes; can be duplicated.
+
+    Methods:
+
+    """
+
     def __init__(self, name, alias='', **kwargs):
-        super().__init__(**kwargs)
 
         self.name = name
         self.alias = alias
         self._parent = None
-        self._children = []
-        self._treeBook = weakref.WeakValueDictionary({self.name:self})    # References to other nodes in the tree; the same dictionary is shared by all nodes
+        self._children = []       # List of treeNode instances
+
+        # Set a dictionary of references to other nodes in the tree in the form:
+        # 'nodeNane: nodeInstance'. The same dictionary is shared by all nodes.
+        self._treeBook = weakref.WeakValueDictionary({self.name:self})
 
     def __str__(self):
         if self.alias is None or self.alias == '':
@@ -1449,7 +1442,7 @@ class treeNode:
         return self._treeBook[key]
 
     def __getstate__(self):
-        """This method is called when pickling called and the returned object is pickled as the contents for the instance, instead of the contents of the instance’s dictionary."""
+        """Called when pickling called and the returned object is pickled as the contents for the instance, instead of the contents of the instance’s dictionary."""
         state = self.__dict__.copy()
         try:
             state.pop("_treeBook")              # Don't pickle the weak references
@@ -1463,7 +1456,7 @@ class treeNode:
         #self.__dict__["_treeBook"] = weakref.WeakValueDictionary({self.name:self})
 
     def setTreeBook(self):
-        """Updates the map of weak references. Can be used after unpickling or for grafting."""
+        """Update the map of weak references. Can be used after unpickling or for grafting."""
         newBook = weakref.WeakValueDictionary()
         for node in self.items():
             newBook.update({node.name:node})
@@ -1666,15 +1659,17 @@ class treeNode:
         return self.log()
 
 class viewNode(treeNode):
-    """A class for nodes in the tree view model."""
+    """A class for nodes in the treeView model in the GUI."""
+
     def __init__(self, name, alias='', nodeType=None, hidden=False, meta=None):
         super().__init__(name, alias)
         self.nodeType = nodeType
         self.hidden = hidden
-        self.meta = meta             # Any metadata
+        self.meta = meta
 
 class parsNode(treeNode):
-    """A class for nodes in the tree of parameters (e.g. chemical shifts)."""
+    """A class for nodes in the tree of parameters in the GUI (e.g. chsh)."""
+
     def __init__(self, name, alias='', crnt=0.0, ancs=0.0):
         super().__init__(name, alias)
         self.crnt = crnt
@@ -1684,8 +1679,10 @@ class parsNode(treeNode):
         name = self.name[0]
         indx = self.name[2]
         sfx = self.name[1][4:]    # the 'QD' suffix
+
+        # A list of keys related to this chemical shift (chsh, alph, ampl, etc.)    (name, 'chsh'+sfx, indx)
         self.keys = [(name, 'alph'+sfx, indx),
-                     (name.replace('SPSY', '')+'.'+str(indx+1) if sfx else name, 'ampl', 0)]  # A list of keys related to this chemical shift (chsh, alph, ampl, etc.)    (name, 'chsh'+sfx, indx)
+                     (name.replace('SPSY', '')+'.'+str(indx+1) if sfx else name, 'ampl', 0)]
 
     def propLims(self, limsPrnt=None):
         """Propagates the limits of the parameter through the tree."""
@@ -2713,7 +2710,7 @@ def printChemDB():
 def loadChemLibrary(path=None):
     """Loads the chemical library (a dictionary of chemDB dictionaries)."""
     if path is None:
-        path = os.getcwd()
+        path = os.path.join(os.getcwd(), 'chemdb')
 
     # Define a DB for common chemicals
     chemLib = {'Built-in models' :

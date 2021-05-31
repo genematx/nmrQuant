@@ -10,6 +10,7 @@ import tabulate
 from math import ceil
 import pywt
 import xlsxwriter
+from dataio import read_any_file
 
 # Functions for generating FIDs and optimization
 from scipy import optimize
@@ -178,6 +179,12 @@ class Workspace():
                 output += SSS.log(depth=1)
 
         return output
+
+    def __getattr__(self, attr):
+        """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+
+        if attr == 'wsp':
+            return self
 
     def selfID(self):
         return (None, None)
@@ -575,6 +582,28 @@ class Workspace():
         p0 = 0.1*delta*(np.random.rand(nwalkers, ndim)-1/2) + np.array(initVals).reshape(1,-1)    # Starting points
         p0 = np.minimum(np.maximum(p0, bounds[:, 0].reshape(1,-1)), bounds[:, 1].reshape(1,-1))
 
+        # Define a bounded sampling function. Run a dummy try to figure out the size of the ampl array
+        val, meta = costFuncSmpl(np.mean(bounds, axis=1))
+        m_ampl, S_ampl = meta['ampl']
+        a_sigma2, b_sigma2 = meta['sigma2']
+        na = len(meta['ampl'][0])    # Number of amplitudes
+        # print(val, meta)
+
+        # def costFuncSmplBounded(x):
+        #     """Cost function that respect the bounds.
+        #
+        #     Returns the value of log-posterior and 'blobs' (posterior means and
+        #     covariance matrix of amplitudes) and parameters of sigma2 distribution.
+        #
+        #     """
+        #     if (x > bounds[:, 0]).all() and (x < bounds[:, 1]).all():
+        #         val, meta = costFuncSmpl(x)
+        #         m_ampl, S_ampl = meta['ampl']
+        #         a_sigma2, b_sigma2 = meta['sigma2']
+        #         return val, m_ampl, S_ampl
+        #     else:
+        #         return -np.inf, np.zeros((na, 1)), np.zeros((na, na))
+
         costFuncSmplBounded = lambda x : costFuncSmpl(x) if (x > bounds[:, 0]).all() and (x < bounds[:, 1]).all() else (-np.inf, {})
 
         """# Run burn-in iterations (separately for each dimension)
@@ -592,11 +621,12 @@ class Workspace():
             p0[:,i] = pos.ravel()"""
 
         # Define the sampler
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, costFuncSmplBounded, a=2.0)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, costFuncSmplBounded, a=2.0,
+                                        blobs_dtype=[('blob', object)])
 
         # Run burn-in iterations (jointly for all dimensions)
         print("Burning in...")
-        pos, _, _, _ = sampler.run_mcmc(p0, N=max(1, int(nsteps/10)) )    # burn-in
+        pos, _, _, _ = sampler.run_mcmc(p0, nsteps=max(1, int(nsteps/10)) )    # burn-in
         sampler.reset()
 
         # Final sampling starting from the parameter values found during burn-in
@@ -604,9 +634,6 @@ class Workspace():
         for i, result in enumerate(sampler.sample( pos, iterations=nsteps )):
             progressBar(i, nsteps)
         sys.stdout.write("\n")
-
-        #sampler.run_mcmc(pos, nsteps)
-        #print(sampler.blobs)
 
         if verbose:
             print("Mean acceptance ratio: {0:.3f}"
@@ -866,6 +893,13 @@ class Series():
 
     def __getattr__(self, attr):
         """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+
+        # return references to the parent series or entire workspace
+        if attr == 'ser':
+            return self
+        if attr == 'wsp':
+            return self.parent
+
         return getattr(self.parent, attr)
 
     def log(self, depth=0):
@@ -1360,25 +1394,26 @@ class Series():
                 result[key] = flatchain[:, i]
                 self.smplDistF[key] = smplSpec_from_data(result[key])
 
-        sigma2 = np.array([blbWlkr['sigma2'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
-        theta = np.array([blbWlkr['theta'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
-        for j in set([k[0] for k in parsKeys if len(k)==4]):      #   range(len(self.data)):
-            m_ampl = np.array([blbWlkr['ampl'][0][:,j].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
-            for i in range(m_ampl.shape[0]):
-                result[(j, self.repRootNames[i], 'ampl', 0)] = m_ampl[i,:]
-
-            m_ampl = np.array([blbWlkr['ampl'][0][...,j].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T     # Means of the amplitudes
-            S_ampl = np.array([blbWlkr['ampl'][1][...,j] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T             # Covariance matrices of the amplitudes
-            #result[(j, '.', 'ampl', 'covr')] = np.array([blbWlkr['ampl'][1][...,j] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
-            result[(j, '.', 'ampl', 'mean')] = m_ampl
-            result[(j, '.', 'ampl', 'covr')] = S_ampl
-            result[(j, '.', 'sigma2', 0)] = sigma2[j, 1,:] / (sigma2[j, 0,:]-1)     # Mean estimator for sigma
-            result[(j, '.', 'sigma2', 'distr')] = sigma2[j,...]
-
-            # Theta
-            key = (j, '.', 'theta', 0)
-            result[key] = theta[j,...].ravel()
-            self.smplDistF[key] = smplSpec_from_data(result[key])
+        # TODO: Reimplement processing of sampling blobs (amplitudes, sigma2, theta) after emcee package was updated and the format has changed
+        # sigma2 = np.array([blbWlkr['sigma2'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        # theta = np.array([blbWlkr['theta'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        # for j in set([k[0] for k in parsKeys if len(k)==4]):      #   range(len(self.data)):
+        #     m_ampl = np.array([blbWlkr['ampl'][0][:,j].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        #     for i in range(m_ampl.shape[0]):
+        #         result[(j, self.repRootNames[i], 'ampl', 0)] = m_ampl[i,:]
+        #
+        #     m_ampl = np.array([blbWlkr['ampl'][0][...,j].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T     # Means of the amplitudes
+        #     S_ampl = np.array([blbWlkr['ampl'][1][...,j] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T             # Covariance matrices of the amplitudes
+        #     #result[(j, '.', 'ampl', 'covr')] = np.array([blbWlkr['ampl'][1][...,j] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        #     result[(j, '.', 'ampl', 'mean')] = m_ampl
+        #     result[(j, '.', 'ampl', 'covr')] = S_ampl
+        #     result[(j, '.', 'sigma2', 0)] = sigma2[j, 1,:] / (sigma2[j, 0,:]-1)     # Mean estimator for sigma
+        #     result[(j, '.', 'sigma2', 'distr')] = sigma2[j,...]
+        #
+        #     # Theta
+        #     key = (j, '.', 'theta', 0)
+        #     result[key] = theta[j,...].ravel()
+        #     self.smplDistF[key] = smplSpec_from_data(result[key])
 
         return(result)
 
@@ -1507,7 +1542,16 @@ class Datum():
 
     # @profile
     def __getattr__(self, attr):
-        """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+        """Called with the dot notation for attributes not found in the class
+        (e.g. parameters shared between many spectra in the series, c0, f0, etc.).
+
+        """
+
+        # return references to the parent series or entire workspace
+        if attr == 'ser':
+            return self.parent
+        if attr == 'wsp':
+            return self.parent.parent
 
         # Return the adaptive frequency range
         if attr == 'f' and self._f is not None:
@@ -2705,8 +2749,8 @@ class Datum():
             result[key] = flatchain[:, i]
             self.smplDistF[key] = smplSpec_from_data(result[key])
 
-        m_ampl = np.array([blbWlkr['ampl'][0].ravel() for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T     # Means of the amplitudes
-        S_ampl = np.array([blbWlkr['ampl'][1] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T             # Covariance matrices of the amplitudes
+        m_ampl = np.array([blb[0]['ampl'][0].ravel() for blb in sampler.blobs.ravel()]).T     # Means of the amplitudes
+        S_ampl = np.array([blb[0]['ampl'][1] for blb in sampler.blobs.ravel()]).T             # Covariance matrices of the amplitudes
         # Generate random samples of amplitudes
         nrep = 3     # Number of repeats for each case of parsKeys to sample the amplitudes from the Gaussian distributions
         indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled explicitely
@@ -2720,13 +2764,13 @@ class Datum():
                     self.smplDistF[key] = smplSpec_from_data(result[key])
 
         # Sigma2
-        sigma2 = np.array([blbWlkr['sigma2'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).T
+        sigma2 = np.array([blb[0]['sigma2'] for blb in sampler.blobs.ravel()]).T
         result[('.', 'sigma2', 0)] = sigma2[1,:] / (sigma2[0,:]-1)     # Sample sigma
         result[('.', 'sigma2', 'distr')] = sigma2
 
         # Theta
         key = ('.', 'theta', 0)
-        result[key] = np.array([blbWlkr['theta'] for blbSmpl in sampler.blobs for blbWlkr in blbSmpl]).ravel()
+        result[key] = np.array([blb[0]['theta'] for blb in sampler.blobs.ravel()]).ravel()
         self.smplDistF[key] = smplSpec_from_data(result[key])
 
         return result
@@ -3190,6 +3234,65 @@ def gmm_pdf(x, m, S, w=None):
 def gmm_hdr(m, S, w=None):
     # Computes the highest density regions for the Gaussian mixture model given a density function func and the precision level alpha
     pass
+
+def addDatumFromFile(path, dest):
+    """Add new Datum entries specified by the path to the series object.
+
+    Args:
+        path: str
+            Location of the spectrum file.
+        dest: Series, Datum, or Workspace
+            A series to which the new spectra should be added. If a Datum is
+            passed, the spectrum will be added to its parent Series. If a Workspace
+            is passed, its first Series will be used. If the parameters of the
+            Series are not consistent with the imported spectrum (e.g. field
+            strength c0), will try to find first suitable Series in the Workspace,
+            or create a new one.
+
+    Returns:
+        dat: Datum
+            The newly added Datum. If several spectra were added (e.g. if the
+            file contained a series of spectra, all of them will be added but
+            only the last one will be returned)
+
+    """
+
+    # Read the data
+    t, yT, dic = read_any_file(path)
+    c0, f0, dt, name = dic['c0'], dic['f0'], dic['dt'], dic['name']
+
+    # Determine to which Series it should be added
+    wsp = dest.wsp      # The Workspace
+    ser_ID, _ = dest.selfID()
+
+    if len(wsp.series) == 0:
+        wsp.addSeries()
+
+    if ser_ID is None: ser_ID = -1
+    ser = wsp.series[ser_ID]
+
+    # TODO: Check if new c0/f0 are the same as the old ones when loading the rest of the data
+    # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
+    if ser.c0 is None:
+        ser.c0 = c0
+        ser.f0 = f0
+        ser.t = t
+        ser.fullReset()
+    elif np.abs(ser.c0 - c0) > 1e-3:
+        # Create a new series and put the data into it
+        print('The aquisition parameters do not match the current values. Creating a new Series...')
+        ser = wsp.addSeries()
+        ser.c0 = c0
+        ser.f0 = f0
+        ser.t = t
+        ser.fullReset()
+
+    # Add the data to the current series
+    for i in range(yT.shape[1]):
+        dat = ser.addDatum(yT[:,i].reshape(-1,1),
+                    name = name+str(i+1) if yT.shape[1] > 1 else name, extra=dic)
+
+    return dat
 
 def plotGaussianMixture(m, S, w=None, lims=None, npts=100):
     """Plots a pdf for a mixture of nc Gaussian nd-dimensional components (nd<=2)
