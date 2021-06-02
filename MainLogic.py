@@ -22,6 +22,7 @@ import scipy.signal
 from collections import OrderedDict, MutableMapping
 import os, time
 import nmrglue
+from nmrglue.process.proc_autophase import _ps_acme_score, _ps_peak_minima_score
 
 # Functions needed only for Matlab
 from operator import getitem
@@ -2406,7 +2407,9 @@ class Datum():
                                self.getCrntVal(key = ('.', 'tau', 0)) )
 
         # Run the autophasing algorithm from nmrglue
-        p0, p1 = nmrglue.process.proc_autophase.automatic_ps(yF.ravel(), 'acme', p0=-p0deg, p1=-p1deg, fit_Ph1=fit_Ph1)     # 'peak_minima'
+        print('AutoPhase')
+        p0, p1 = automatic_ps(yF.ravel(), 'acme', p0=-p0deg, p1=-p1deg, fit_Ph1=fit_Ph1)     # 'peak_minima'
+        # p0, p1 = nmrglue.process.proc_autophase.automatic_ps(yF.ravel(), 'acme', p0=-p0deg, p1=-p1deg, fit_Ph1=fit_Ph1)     # 'peak_minima'
         p0deg, p1deg = -p0, -p1
 
         # # Check if the phase needs to be flipped
@@ -3810,6 +3813,48 @@ def wden(x_in, wname = 'sym8', tptr='sqtwolog', sorh='hard', scal='mln', wsize=1
     return x_out
 
 # Phasing cost
+def automatic_ps(data, fn, p0=0.0, p1=0.0, fit_Ph1=True):
+    """
+    Automatic linear phase correction
+
+    Parameters
+    ----------
+    data : ndarray
+        Array of NMR data.
+    fn : str or function
+        Algorithm to use for phase scoring. Built in functions can be
+        specified by one of the following strings: "acme", "peak_minima"
+    p0 : float
+        Initial zero order phase in degrees.
+    p1 : float
+        Initial first order phase in degrees.
+
+    Returns
+    -------
+    ndata : ndarray
+        Phased NMR data.
+
+    """
+    if not callable(fn):
+        fn = {
+            'peak_minima': _ps_peak_minima_score,
+            'acme': _ps_acme_score,
+        }[fn]
+
+    if fit_Ph1:
+        opt = [p0, p1]
+        opt = scipy.optimize.fmin(fn, x0=opt, args=(data, ))
+
+        p0, p1 = opt[0], opt[1]
+    else:
+        opt = [p0]
+        opt = scipy.optimize.fmin(lambda x : fn((x, p1), data), x0=opt)
+        p0 = opt[0]
+
+    # phasedspc = ps(data, p0=opt[0], p1=opt[1])
+
+    return p0, p1
+
 def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
     """Calculate the cost function for phasing the data.
     yF - measured (unphased) spectrum
