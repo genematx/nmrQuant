@@ -13,6 +13,7 @@ import itertools
 import numexpr as ne
 import copy
 from operator import itemgetter
+from molparser.convertmol import parse_sdf_file
 
 # Ordered set class to store children of a node
 import collections
@@ -80,31 +81,15 @@ class OrderedSet(collections.MutableSet):
 
 # --- Loading the database in JSON format ---
 class chemSpec:
-    """Class for database entires."""
+    """Class for database entires of chemical species."""
 
     def __init__(self, name='', chshH=None, chshC=None, jcplH=None, multH=None, multC=None, chshLabileH=None, jcplHC=None, meqSpins=None, meqLinks=None, Mw=None, nH_labile=0, spsyCombH=None, spsyCombC=None, **kwargs):
         self.name = name
         self.chshH = chshH if chshH is not None else []       # List of chshH parsSpec's
         self.chshC = chshC if chshC is not None else []
         self.jcplH = jcplH if jcplH is not None else []    # List of jcplH parsSpec's
-        self.spsyCombH = spsyCombH if spsyCombH is not None else []
+        self.spsyCombH = spsyCombH if spsyCombH is not None else []    # Combinations of spin systems, if any
         self.spsyCombC = spsyCombC if spsyCombC is not None else []
-
-        # if meqSpins is None:
-        #     # Old format
-        #     self.nSpinH = nSpinH if nSpinH is not None else [1]*len(self.chshH)    # List of int 1..3 indicating the number of spins for each chshH
-        #     self.pairHH = pairHH if pairHH is not None else [None]*len(self.jcplH)     # List of tuples; each tuple contains indices of coupled protons
-        #
-        #     # Find multiplicities for different spin systems
-        #     self._spsyAsgnSpins, self._nSpsyH = [], 0   # list of size 1 x nSpinH; each entry is the index of spin system to which this proton is assigned
-        #     self.assignSpsy()      # Compute assignment of spins to spin systems
-        #     self.multH = multH if multH is not None or [] else [1]*self._nSpsyH       # Multiplicities of different spin systems (uncoupled, but with the same chemical shifts)
-        #     self.multC = multC if multC is not None or [] else [1]*len(self.chshC)
-        #
-        #     self.meqSpins = [spinVert(indx, n_spin) for indx, n_spin in enumerate(self.nSpinH)]
-        #     self.meqLinks = [spinEdge(indx, sorted([pair[0], pair[1]])) for indx, pair in enumerate(self.pairHH)] if pairHH is not None else []
-        #
-        # else:
 
         # New format
         self.meqSpins = meqSpins if meqSpins is not None else []
@@ -2630,8 +2615,276 @@ def parsSpec2array(par):
     """Converts arrays of parsSpec namedtuples to 2D arrays of min and max values."""
     return [(v.min, v.max) for v in par]
 
+def readSDF(fname):
+    """Import a model for chemical species from an .sdf file.
+
+        This function loads a .mol table and chemical shifts/J-coupling
+        assignemts from nmrdb.org and relates them to each other. It is
+        assumed that the _orders_ of indices of spins in both arrays are
+        the same (though actual indices may differ).
+
+        The entries from the .mol (.sdf) file are reffered to as atoms,
+        and those from the nmrdb table -- as spins.
+
+        Args:
+            fname: str
+                A path to the .mol or .sdf file containing nmrdb data.
+        Returns:
+            chemModel: chemSpec
+                Chemical species model in chemSpec format.
+    """
+
+    def find_by_attr(arr, key, val):
+        """Find the index (order) of an element (atom or bond) in a list of dictionaries.
+        Args:
+            arr : list
+                A list of dictionaries, e.g. atom, bonds, or spins
+            key : hashable
+                A dictionary key to match, e.g. 'indx'
+            val : object
+                A value in the dictionary key:val pair to match
+        Returns:
+            i : int or None
+                Index of the dictionary in the list such that dict[key] == val. None if such dictionary is not found.
+        """
+
+        for i, x in enumerate(arr):
+            if x[key] == val:
+                return i
+        return None
+
+    def get_bond_matrix(atoms, bonds):
+        """Compute the connectivity matrix given a list of atoms and bonds.
+
+            The entries encode the number of bonds between the atoms.
+        """
+
+        bond_matrix = np.zeros((len(atoms), len(atoms)), dtype=int)
+        for bond in bonds:
+            a1, a2 = bond['atom_ids']     # Indices of connected atoms
+            i1, i2 = find_by_attr(atoms, 'indx', a1), find_by_attr(atoms, 'indx', a2)
+            bond_type_int = {'Single':1, 'Double':2, 'Triple':3}[bond['type']]
+            bond_matrix[i1, i2] = bond_type_int
+            bond_matrix[i2, i1] = bond_type_int
+        return bond_matrix
+
+    def assign_spsy(conn_H_matrix):
+        """Determine the assignment of spins to spin systems."""
+
+        n_spin = conn_H_matrix.shape[0]
+
+        # Build the (block) connectivity matrix _within_ spin systems (1 if spins in the same system, 0 - otherwise)
+        _old = np.minimum(conn_H_matrix + np.eye(n_spin, dtype=int), 1)
+        while True:
+            conn_matrix = np.minimum(_old.dot(_old), 1)
+            if (_old == conn_matrix).all():
+                break
+            _old = conn_matrix
+
+        #
+        asgn_list = []   # List of assignemts; each element - array of spin indices assigned to a correpondingspin system
+        unassigned = list(range(n_spin))   # Indices of spins (atoms) yet to be assigned to spin systems
+        while len(unassigned) > 0:
+            asgn_list.append( np.argwhere(conn_matrix[unassigned[0],:]).ravel() )
+            unassigned = [x for x in unassigned if x not in asgn_list[-1]]
+
+        return asgn_list
+
+    mol = parse_sdf_file(fname)
+
+    # Extract all atoms and bonds; order according to the unique atom indx
+    # atom['indx'] start from 1 and can have missing values, e.g. [1, 2, 5, 6, 8]
+    # Ideally, indx should be related to IUPAC assignements
+    atoms = sorted([x for key, x in mol.items() if 'atom' in key], key=lambda x: x['indx'])
+    bonds = [x for key, x in mol.items() if 'bond' in key]
+
+    bond_matrix = get_bond_matrix(atoms, bonds)
+
+    # Add hydrogens, if missing
+    valence = np.array([{'C':4, 'O':2, 'N':3, 'H':1}[x['symbol']] for x in atoms],
+                       dtype=int)    # Maximum number of connections per atom
+    boundHs = valence - bond_matrix.sum(axis=0)    # Number of H's for each atom
+    if sum(boundHs) > 0:
+        # There are hydrogens to add to the list of atoms
+        new_atoms, new_bonds = [], []
+        last_indx = atoms[-1]['indx']        # The largest index of the atoms
+        for i, nH in enumerate(boundHs):
+            base_atom = atoms[i]      # The backbone atom bound to the new H
+            labile = (base_atom['symbol'] in ['O', 'N'])
+            for _ in range(nH):
+                # Add a proton and assign the next index to it
+                last_indx += 1     # Indx of the new proton
+                new_atoms.append({'indx': last_indx,
+                                  'labile': labile,
+                                  'symbol': 'H',
+                                  'base_indx' : base_atom['indx'],          # The index of the backbone (base atom) to which the H is attached
+                                  'label': 'H'+str(base_atom['indx'])})
+                new_bonds.append({'atom_ids': [base_atom['indx'], last_indx],
+                                  'type': 'Single'})
+        atoms.extend(new_atoms)
+        bonds.extend(new_bonds)
+
+    # Check that all hydrogens have the 'labile' flag assigned
+    for atom in atoms:
+        if atom['symbol'] == 'H' and ('base_indx' not in atom.keys() or 'labile' not in atom.keys()):
+            for bond in bonds:
+                if atom['indx'] in bond['atom_ids']:
+                    atom['base_indx'] = set(bond['atom_ids']).difference([atom['indx']]).pop()   # Index of the backbone atom
+                    base_atom = atoms[find_by_attr(atoms, 'indx', atom['base_indx'])]   # The backbone atom to which the current H atom is connected
+                    atom['labile'] = (base_atom['symbol'] in ['O', 'N'])
+                    break
+
+    #Update the bond matrix
+    bond_matrix = get_bond_matrix(atoms, bonds)
+
+    # Compute the connectivity matrices of various degrees d (1 - if two atoms are d bonds apart)
+    conn_1_matrix = np.where(bond_matrix>0, 1, 0) \
+                    * (1-np.eye(bond_matrix.shape[0], dtype=int) )
+    conn_2_matrix = np.where(bond_matrix.dot(bond_matrix)>0, 1, 0) \
+                    * (1-np.eye(bond_matrix.shape[0], dtype=int) ) * (1-conn_1_matrix)
+    conn_3_matrix = np.where(bond_matrix.dot(bond_matrix).dot(bond_matrix)>0, 1, 0) \
+                    * (1-np.eye(bond_matrix.shape[0], dtype=int) ) * (1-conn_1_matrix) * (1-conn_2_matrix)
+    conn_4_matrix = np.where(bond_matrix.dot(bond_matrix).dot(bond_matrix).dot(bond_matrix)>0, 1, 0) \
+                    * (1-np.eye(bond_matrix.shape[0], dtype=int) ) * (1-conn_1_matrix) * (1-conn_2_matrix) * (1-conn_3_matrix)
+
+    # Determine array indices of all non-labile (fixed) protons from mol file (labile protons are not considered by nmrdb.org)
+    i_Hfixed = np.array([ i for i, atom in enumerate(atoms) if atom['symbol']=='H' and not atom['labile'] ])
+    atoms_H_fixed = [atoms[i] for i in i_Hfixed]
+    # Build a connectivity mtrix restricted to fixed protons only indicating the number of bonds between them
+    conn_H_matrix = 2*conn_2_matrix[np.ix_(i_Hfixed, i_Hfixed)] + \
+                    3*conn_3_matrix[np.ix_(i_Hfixed, i_Hfixed)]# + \
+    #                 4*conn_4_matrix[np.ix_(i_Hfixed, i_Hfixed)]
+
+    # ----- Read chemical shifts and J-couplings in the NMRDB format ------
+    # Returns a list spins_H_nmrdb whose length and order corresponds to spins in conn_H_matrix
+    if 'NMRDB-H' in mol.keys():
+        spins_H_nmrdb = []
+        chshH = []
+        for chsh_asgn, row in enumerate(mol['NMRDB-H'].split('\n')[1:]):
+            # Each row corresponds to a distinct chemical shift
+            try:
+                ids, chsh_val, _, _, jcpl_arr = row.split()
+                jcpl_arr = [float(x) for x in jcpl_arr.split(',')]
+            except ValueError:
+                # If there are no J-couplings
+                ids, chsh_val, _, _ = row.split()
+                jcpl_arr = []
+            chsh_val = float(chsh_val)
+            chshH.append(parsSpec(dval=chsh_val, min=chsh_val-0.01, max=chsh_val+0.01))
+            for indx in ids.split(','):
+                spins_H_nmrdb.append({'indx':int(indx),          # Index in the nmrdb entry
+                                      'chsh_asgn':chsh_asgn,   # Which chemical shift parameter is assigned to this spin
+                                      'jcpl_arr':jcpl_arr})      # Array of related J-couplings
+        # Sort the spins according to their indices from mol file (to match the order in conn_H_matrix)
+        spins_H_nmrdb.sort(key=lambda x : x['indx'])
+    #     # Set labels to nmrdb spins inferred from the backbone connectivity in .mol file
+        for a, s in zip(atoms_H_fixed, spins_H_nmrdb):
+    #         print(a, s)
+            s['label'] = 'H'+str(a['base_indx'])
+
+    else:
+        print('No NMR information is available in the imported .mol file.\n{}'.format(fname))
+        return None
+
+    # TODO: Read C NMR assignments
+    if 'NMRDB-C' in mol.keys():
+        pass
+
+    # Assign fixed H spins (only) to their spin systems.
+    # Each entry in the list corresponds to a spin system, with the elements in the arrays --
+    # to the positional indices of spins in the global connectivity matrix of fixed H's.
+    spsy_asgn_list = assign_spsy(conn_H_matrix)
+
+    # Determine multiplicities of the spin systems
+    spsy_list = []
+    jcplH, meqSpins, meqLinks = [], [], []     # All J coulings and links
+    i_sp = 0         # Index to run over all magnetically inequivalent spins
+    for spsy_asgn in spsy_asgn_list: #spsy_asgn_dict.keys():
+        # Find positional indices of spins in the global connectivity matrix, conn_H_matrix
+        # Sort H spins in each spin system according to their assigned chsh id's (not chsh values as those may not be unique!)
+        i_in_CM = np.array(sorted(spsy_asgn, key=lambda x : spins_H_nmrdb[x]['chsh_asgn']), dtype=int)
+
+        # Keep only magnetically inequivalent spins (that have different chsh_asgn within same spin system)
+        # TODO: More advanced checks for aromatic rings
+        chsh_asgn = [spins_H_nmrdb[i]['chsh_asgn'] for i in i_in_CM]   # Assignment of chemical shifts
+        chsh_asgn, _unique_indx, spin_mult = np.unique(chsh_asgn, return_index=True, return_counts=True)
+        i_in_CM = i_in_CM[_unique_indx]
+
+        # Connectivity (sub-)matrix in the right order
+        conn_matrix = conn_H_matrix[np.ix_(i_in_CM, i_in_CM)]
+
+        # Create a list of arrays of J-couplings
+        jcpl_arrs = [spins_H_nmrdb[i]['jcpl_arr'] for i in i_in_CM]
+
+        # Set (unique) labels
+        spin_labels = ['H'+str(atoms_H_fixed[i]['base_indx']) for i in i_in_CM]
+        counts = {k: v if v>1 else 0 for k, v in zip(*np.unique(spin_labels, return_counts=True))}     # Number of occurences of each label
+        for i, lbl in enumerate(spin_labels):
+            spin_labels[i] = lbl+{1:'a', 2:'b', 3:'c', 0:''}[counts[lbl]]
+            counts[lbl] = max(0, counts[lbl]-1)
+
+        # Create new spin system record
+        new_spsy = {'i_in_CM': i_in_CM,
+                    'spin_labels': spin_labels,
+                    'conn_matrix': conn_matrix,
+                    'chsh_asgn': chsh_asgn,
+                    'jcpl_arrs': jcpl_arrs,
+                    'spin_mult': spin_mult,     # Multiplicities of each spin
+                    'spsy_mult': 1           # Multiplicity of the entire spin system
+                   }
+
+        # Check if an equivalent system is already in the list
+        added = False
+        for existing_spsy in spsy_list:
+            if np.array_equal(existing_spsy['conn_matrix'], new_spsy['conn_matrix']) \
+                and np.array_equal(existing_spsy['chsh_asgn'], new_spsy['chsh_asgn']):
+                existing_spsy['spsy_mult'] += 1
+                added = True
+                break
+
+        # If it is a new system, add it to the list and add spins to meqSpins
+        if not added:
+            # Assign chemical shift parameters
+            spin_indx_glob = []      # Global (reordered) indices of spins in the meqSpins array
+            # Loop over spins in the new spin system
+            for indxChsh, nspin, label in zip(chsh_asgn, spin_mult, spin_labels):
+                meqSpins.append(spinVert(indxChsh=indxChsh, nspin=nspin))
+                chshH[indxChsh] = chshH[indxChsh]._replace(label=label)   # Set a label to the chemical shift parameter
+                spin_indx_glob.append(i_sp)
+                i_sp += 1
+            new_spsy['spin_indx_glob'] = spin_indx_glob
+
+            # Assign J-coupling parameters - use common values in arrays for both spins in each pair
+            for i, j in zip( *np.nonzero(np.triu(conn_matrix)) ):
+                # Loop over unique pairs of coupled spins
+                if conn_matrix[i,j] == 2:
+                    # The protons are bonded to the same carbon, no info in nmrdb in this case; use default value
+                    jcpl_val = -12.0
+                elif conn_matrix[i,j] == 3:
+                    # Use a common value between the spins
+                    _arr1, _arr2 = jcpl_arrs[i], jcpl_arrs[j]
+                    common = set(_arr1).intersection(_arr2)
+                    if len(common) > 0:
+                        jcpl_val = max(common)
+                    else: jcpl_val = 7.0   # If no common - use default
+
+
+                jcplH.append(parsSpec(dval=jcpl_val, min=jcpl_val-0.5, max=jcpl_val+0.5,
+                                      label='-'.join(sorted( [spin_labels[i], spin_labels[j]] )) ))
+                i_jj = len(jcplH) - 1     # Index of the new jcpl
+                meqPair = sorted([spin_indx_glob[i], spin_indx_glob[j]])   # Indices of coupled spins
+                meqLinks.append( spinEdge(indxJcpl=i_jj, indxVert=meqPair) )
+
+            # Add spin system to the list
+            spsy_list.append(new_spsy)
+
+    chemModel = { mol['name']:chemSpec(name=mol['name'], chshH=chshH, jcplH=jcplH, multH=None,
+                         meqSpins=meqSpins, meqLinks=meqLinks, Mw=mol['MW'], nH_labile=0) }
+    return chemModel
+
 def readChemDB(fname='chemDB.json'):
-    """Reads a chemDB in JSON or .cdb format and convers it to a dictionary of chemSpec class objects."""
+    """Read a chemDB in JSON or .cdb format and convers it to a dictionary of chemSpec class objects.
+    """
     root, ext = os.path.splitext(fname)
 
     if ext == '.json':
@@ -2691,6 +2944,7 @@ def writeChemDB(chemDB, fname='result.json'):
             for kk in ['multH', 'multC']:      # Make sure that all single numbers are stored within arrays
                 if isinstance(v[kk], int):
                     v[kk] = [v[kk]]
+                if v[kk] == [1]: v[kk] = []
             # Remove empty records
             chemDB[k] = {kk:vv for kk, vv in chemDB[k].items() if
                         (kk != 'Mw' and len(vv) > 0) or (kk == 'Mw' and vv is not None)}
@@ -2707,54 +2961,79 @@ def printChemDB():
     for k, v in chemDB.items():
         print(k,v)
 
-def loadChemLibrary(path=None):
+def loadChemLibrary(chemLib=None, path=None):
     """Loads the chemical library (a dictionary of chemDB dictionaries)."""
+    chemdb_path = os.path.join(os.getcwd(), 'chemdb')       # Path to chemdb folder
     if path is None:
-        path = os.path.join(os.getcwd(), 'chemdb')
+        path = chemdb_path
 
     # Define a DB for common chemicals
-    chemLib = {'Built-in models' :
-                {'Water' : chemSpec(name='Water',
-                                   chshH=[parsSpec(min=3.75, max=5.75, label='H_water')],
-                                   meqSpins=[spinVert(0, 2)],
-                                   multH=[1]),
-                'TMS' : chemSpec(name='TMS',
-                                   chshH=[parsSpec(min=-0.25, max=0.25)],
-                                   chshC=[parsSpec(min=-0.25, max=0.25)],
-                                   meqSpins=[spinVert(0, 3)],
-                                   multH=[4],
-                                   multC=[4]),
-                'TMSP' : chemSpec(name='TMSP',
-                                   chshH=[parsSpec(min=-0.25, max=0.25)],
-                                   chshC=[parsSpec(min=-0.25, max=0.25)],
-                                   meqSpins=[spinVert(0, 3)],
-                                   multH=[3],
-                                   multC=[3]),
-                'Ethanol' : chemSpec(name='Ethanol',
-                                   chshH=[parsSpec(min=0.5, max=1.5, label='H1'), parsSpec(min=3.0, max=4.0, label='H2')],
-                                   chshC=[parsSpec(min=14.9, max=15.1, label='C1'), parsSpec(min=57.9, max=58.1, label='C2')],
-                                   jcplH=[parsSpec(min=6.0, max=8.0, label='H1-H2',dval=7.0402)],
-                                   meqSpins=[spinVert(0, 3), spinVert(1, 2)],
-                                   meqLinks=[spinEdge(0, (0,1))],
-                                   multH=[1],
-                                   multC=[1, 1]),
-                'Chloroform' : chemSpec(name='Chloroform',
-                                   chshH=[parsSpec(min=7.2, max=7.3, label='H_Chfm')],
-                                   meqSpins=[spinVert(0, 1)],
-                                   multH=[1]),
-                 }
-               }
+    # chemLib is a dictionary of dictionaries; the first level used for grouping
+    # and the second level contains chemSpec entries
+    if chemLib is None:
+        chemLib = {'Built-in models' :
+                    {'Water' : chemSpec(name='Water',
+                                       chshH=[parsSpec(min=3.75, max=5.75, label='H_water')],
+                                       meqSpins=[spinVert(0, 2)],
+                                       multH=[1]),
+                    'TMS' : chemSpec(name='TMS',
+                                       chshH=[parsSpec(min=-0.25, max=0.25)],
+                                       chshC=[parsSpec(min=-0.25, max=0.25)],
+                                       meqSpins=[spinVert(0, 3)],
+                                       multH=[4],
+                                       multC=[4]),
+                    'TMSP' : chemSpec(name='TMSP',
+                                       chshH=[parsSpec(min=-0.25, max=0.25)],
+                                       chshC=[parsSpec(min=-0.25, max=0.25)],
+                                       meqSpins=[spinVert(0, 3)],
+                                       multH=[3],
+                                       multC=[3]),
+                    'Ethanol' : chemSpec(name='Ethanol',
+                                       chshH=[parsSpec(min=0.5, max=1.5, label='H1'), parsSpec(min=3.0, max=4.0, label='H2')],
+                                       chshC=[parsSpec(min=14.9, max=15.1, label='C1'), parsSpec(min=57.9, max=58.1, label='C2')],
+                                       jcplH=[parsSpec(min=6.0, max=8.0, label='H1-H2',dval=7.0402)],
+                                       meqSpins=[spinVert(0, 3), spinVert(1, 2)],
+                                       meqLinks=[spinEdge(0, (0,1))],
+                                       multH=[1],
+                                       multC=[1, 1]),
+                    'Chloroform' : chemSpec(name='Chloroform',
+                                       chshH=[parsSpec(min=7.2, max=7.3, label='H_Chfm')],
+                                       meqSpins=[spinVert(0, 1)],
+                                       multH=[1]),
+                     }
+                   }
 
-    # Try loading all JSON and .cdb files in the working directory
-    # List all files in a directory using os.listdir
+    # Try loading all JSON, .cdb, .mol, and .sdf files in the working directory
     for entry in os.listdir(path):
         fullpath = os.path.join(path, entry)
+
+        # Default database name used to group the items (relative path to the containing folder)
+        db_name = os.path.relpath(os.path.dirname(fullpath), chemdb_path)
+
         if os.path.isfile(fullpath):
             fname, ext = os.path.splitext(entry)
+            _new_dict = {}         # Dictionary of chemSpec entries
             if ext in ['.json', '.cdb']:
+                if db_name == '.':
+                    db_name = fname
 #                try:
-                chemLib[fname] = readChemDB(fullpath)
+                _new_dict.update(readChemDB(fullpath))
 #                except UnpicklingError: pass
+            elif ext in ['.mol', '.sdf']:
+                try:
+                    _new_dict.update(readSDF(fullpath))
+                except:
+                    print('Failed to load {}.'.format(fullpath))
+
+            # Add to the library
+            if db_name in chemLib.keys():
+                chemLib[db_name].update(_new_dict)
+            else:
+                chemLib[db_name] = _new_dict
+
+        elif os.path.isdir(fullpath):
+            # Call the function recursively
+            chemLib = loadChemLibrary(chemLib, fullpath)
 
     return chemLib
 

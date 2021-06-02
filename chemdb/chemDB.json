@@ -1670,6 +1670,29 @@
       ]
     ],
     "name": "Ethanol_noWater",
+    "chshC": [
+      [
+        18.9,
+        19.1,
+        "C1",
+        "Uniform",
+        null,
+        null,
+        null
+      ],
+      [
+        51.9,
+        52.1,
+        "C2",
+        "Uniform",
+        null,
+        null,
+        null
+      ]
+    ],
+    "multC": [
+      1, 1
+    ],
     "multH": [
       1
     ]

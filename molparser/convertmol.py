@@ -1,4 +1,5 @@
 import json
+import os.path
 from pprint import pprint
 
 radical_dict = {
@@ -368,7 +369,7 @@ def parse_mol(lines):
 def parse_sdf_file(filename):
     ret = {}
     curr = []
-    with open(filename,"r") as molefile:
+    with open(filename, "r") as molefile:
         for line in molefile:
             line = line.rstrip('\r\n')
             if not '$$$$' in line:
@@ -376,6 +377,24 @@ def parse_sdf_file(filename):
 
         if len(curr) > 0:
             ret = parse_mol(curr)
+
+    # Set the name of the molecule
+    if not ret['name'].isalpha():
+        if 'GENERIC_NAME' in ret.keys():
+            name = ret['GENERIC_NAME']
+        else:
+            # Use the filename as the name of the molecule
+            name = os.path.split(os.path.splitext(filename)[0])[1]
+        ret['name'] = name
+
+    # Add molecular weight
+    # Add molecular weight
+    if 'MW' in ret.keys():
+        Mw = float(ret['MW'])
+    elif 'MOLECULAR_WEIGHT' in ret.keys():
+        Mw = float(ret['MOLECULAR_WEIGHT'])
+    else: Mw = None
+    ret['MW'] = Mw
 
     return ret
 
