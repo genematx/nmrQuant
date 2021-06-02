@@ -2409,7 +2409,6 @@ class Datum():
         # Run the autophasing algorithm from nmrglue
         print('AutoPhase')
         p0, p1 = automatic_ps(yF.ravel(), 'acme', p0=-p0deg, p1=-p1deg, fit_Ph1=fit_Ph1)     # 'peak_minima'
-        # p0, p1 = nmrglue.process.proc_autophase.automatic_ps(yF.ravel(), 'acme', p0=-p0deg, p1=-p1deg, fit_Ph1=fit_Ph1)     # 'peak_minima'
         p0deg, p1deg = -p0, -p1
 
         # # Check if the phase needs to be flipped
