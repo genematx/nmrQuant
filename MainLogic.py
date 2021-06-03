@@ -1999,7 +1999,12 @@ class Datum():
 
     # @profile
     def _get_signals_in_freq(self, evalParsH, frqBlkIds=None, freqMask=None, wnd=None, numberField=None, allowShift=False, shiftingRange=0.1):
-        """Returns a matrix of modelled signals and the y vector in frequency domain. shiftingRange - maximum allowed deviation of chemical shift in ppm (on each side) before the spectrum is recomputed."""
+        """Return a matrix of modelled signals and the y vector in frequency domain.
+
+        shiftingRange - maximum allowed deviation of chemical shift in ppm
+        (on each side) before the spectrum is recomputed.
+        """
+
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
         if numberField is None:
@@ -2857,7 +2862,8 @@ class Datum():
         return parsKeys, autoKeys
 
     def modelled_signal(self, phased=True, bl_corr=False):
-        # TODO: will be removed
+        """Return the modelled signal in time domain and its spectrum."""
+
         nt, nf = len(self.t), len(self.f)
         evalParsH = self.crntParsH
         tau, theta = 0.0, 0.0
@@ -3026,9 +3032,9 @@ class Datum():
         if showRanges:
             for i, blk in enumerate(self.freqBlocks):
                 if showRanges == 'all':
-                    ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2 if i in self.steps[-1].frqBlkIds else 0.05, facecolor='yellow')
+                    ax_main.axvspan(blk.min, blk.max, alpha=0.2 if i in self.steps[-1].frqBlkIds else 0.05, facecolor='yellow')
                 elif showRanges == 'active' and i in self.steps[-1].frqBlkIds:
-                    ax_main.axvspan(blk.min - dref_chsh, blk.max - dref_chsh, alpha=0.2, facecolor='yellow')
+                    ax_main.axvspan(blk.min, blk.max, alpha=0.2, facecolor='yellow')
 
         if showLegend: ax_main.legend(loc=0)
 
@@ -3040,8 +3046,9 @@ class Datum():
 
         if returnSignals: return f, yFph, xF, zF
 
-    def signals_for_plot(self, frqBlkIds=None, showComponents=False, onlyInRange=False):
-        """Computes the signals for plotting. Applies subsampling to the parts of the signals that are out ouf the fitting ranges."""
+    def signals_for_plot(self, frqBlkIds=None, showComponents=False, onlyInRange=False, subsample=True):
+        """Computes the signals for plotting. Applies subsampling to the parts of
+           the signals that are out ouf the fitting ranges."""
 
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
@@ -3057,15 +3064,18 @@ class Datum():
             # self.setCrntVal(key=('.', 'theta', 0), val=theta)
             yFph *= -1
 
-        # Subsample out-of-range parts of the spectrum
-        inRange, outRange = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
-        if onlyInRange: outRange.clear()
+        # Shift the frequency range
         dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0           # Find global chemical shift that will be used to shift the ppm scale on the graph
         f = self.f - dref_chsh
-        rmsResidual = 0.0
-        allRange = sorted(inRange+outRange, key=lambda x : x[0])
-        supsRatio = ceil(yFph.size / (2**12))   # Subsampling ratio; take no more than 2^12 points
-        allIndx = np.concatenate( [np.arange(r.imin(f), r.imax(f), supsRatio if r in outRange else 1) for r in allRange] )
+
+        # Subsample out-of-range parts of the spectrum
+        if subsample:
+            inRange, outRange = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
+            if onlyInRange: outRange.clear()
+            allRange = sorted(inRange+outRange, key=lambda x : x[0])
+            supsRatio = ceil(yFph.size / (2**12))   # Subsampling ratio; take no more than 2^12 points
+            allIndx = np.concatenate( [np.arange(r.imin(f), r.imax(f), supsRatio if r in outRange else 1) for r in allRange] )
+        else: allIndx = np.arange(len(f))
 
         f, yFph = f[allIndx, :], yFph[allIndx, :]
 

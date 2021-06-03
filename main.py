@@ -2120,14 +2120,15 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
     def addStep(self):
         if not isinstance(self.datum, Workspace):
-            newStep = Step(frqBlkIds = copy.copy(self.datum.steps[-1].frqBlkIds), autoKeys = copy.copy(self.datum.steps[-1].autoKeys))
+            newStep = Step(frqBlkIds = copy.copy(self.datum.steps[-1].frqBlkIds),
+                           autoKeys = copy.copy(self.datum.steps[-1].autoKeys))
         else:
             return False
 
         parent = QtCore.QModelIndex()
         self.beginInsertColumns(parent, self.columnCount(), self.columnCount())
         self.datum.steps.append(newStep)
-        self.actvStepIndx = len(self.datum.steps) - 1            # Set the last step as active
+        self.actvStepIndx = len(self.datum.steps)-1  # Set the last step as active
         self.endInsertColumns()
 
     def delStep(self):
@@ -2436,7 +2437,7 @@ class ChemTreeView(QTreeView):
         self.header().sectionPressed.connect(self.model().setActiveStep)
         self.header().sectionMoved.connect(self.onHeaderSectionMoved)
 
-        #self.header().setDefaultSectionSize(20)
+        # self.header().setDefaultSectionSize(20)
         self.setColumnWidth(0, 150)
         self.setColumnWidth(1, 50)
         self.setColumnWidth(2, 50)
@@ -2456,7 +2457,7 @@ class ChemTreeView(QTreeView):
         self.changedSelected.emit(key_crnt, key_prev)
 
     def rowsInserted(self, parent, start, end):
-        """Is called to update the view when rows have been inserted."""
+        """Called to update the view when rows have been inserted."""
         super().rowsInserted(parent, start, end)
         self.hideExcessiveRows()
 
@@ -2655,7 +2656,7 @@ class ChemTreeView(QTreeView):
         if node.nodeType in ['param'] and clmn in [0, 1, 2, 3]:
             key = node.name    # Usual parameter
             param = self.model().datum.getPrior(key)
-            if isinstance(self.datum, Datum):
+            if isinstance(self.model().datum, Datum):
                 crntVal = self.model().datum.getCrntVal(key)
             else: crntVal = None
 
@@ -3202,11 +3203,6 @@ class FittingThread(QThread):
             elif actnToRun == 'PhA0':
                 # Autophasing, only Ph0
                 fileToFit.auto_phase(fit_Ph1=False)
-
-class MySpecPlot(FigureCanvas):
-
-    def __init__(self, figure):
-        pass
 
 class MainNMRWindowBase(QMainWindow):
     """Abstract class of the main GUI window.
