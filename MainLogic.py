@@ -16,7 +16,7 @@ from dataio import read_any_file
 from scipy import optimize
 from scipy.optimize import minimize
 import scipy as sp
-import scipy.sparse
+#import scipy.sparse
 import scipy.linalg
 import scipy.signal
 from collections import OrderedDict, MutableMapping

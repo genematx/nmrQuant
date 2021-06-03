@@ -204,7 +204,7 @@ class chemSpec:
             spsyBig = spsySpec(chsh=self.chshC, jcpl=[], chshAsgn=list(range(1,len(self.chshC)+1)), jcplAsgn = None)
             mult = self.multC
         elif mode == '1H':
-            print(self.meqSpins, self.meqLinks)
+            # print(self.meqSpins, self.meqLinks)
             spsyBig = spsySpec(self.chshH, self.jcplH, *meqv2asgn(self.meqSpins, self.meqLinks))
             mult = self.multH
 
@@ -2154,9 +2154,13 @@ class chemNodeDB(chemNode):
             self.addChild(SPSY)
 
 class chemNodeQM(chemNode, chemSpec):
-    """Class for a node describing a chemical from the database, inherited from chemNode. The node can be specified either by passing a name of a species in the database or the QDpars structure (an instance of chemSpec class.)"""
-    def __init__(self, name, chsh = None, alph = None, alphQD = None, ampl = None, phase = None, intn = 1., alias='', HCmode='1H', QDpars=None, nameDB=None):
+    """Class for a node describing a chemical from the database, inherited from chemNode.
 
+    The node can be specified either by passing a name of a species in the database
+    or the QDpars structure (an instance of chemSpec class.)
+    """
+
+    def __init__(self, name, chsh = None, alph = None, alphQD = None, ampl = None, phase = None, intn = 1., alias='', HCmode='1H', QDpars=None, nameDB=None):
         if QDpars is None:
             # Load from the database if QD parameters are not supplied
             chemDB = {key:val for _, db in chemLib.items() for key, val in db.items()}
@@ -2167,7 +2171,9 @@ class chemNodeQM(chemNode, chemSpec):
                 raise RuntimeError("The chemical \'" + self.name + '\' is not in the database and no QD parameters are supplied.')
 
         QDpars.name = name
+        # TODO: Fix multiple inheritance (worked in Python 3.5...)
         super().__init__(chsh=chsh, alph=alph, ampl=ampl, phase=phase, intn=intn, alias=alias, **QDpars.asdict())
+        chemSpec.__init__(self, chsh=chsh, alph=alph, ampl=ampl, phase=phase, intn=intn, alias=alias, **QDpars.asdict())
 
         # Reset the topology of the spin systems
         self.HCmode = HCmode

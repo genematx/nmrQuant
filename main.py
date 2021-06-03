@@ -2184,7 +2184,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         elif source == 'DB':
             newName, QDpars, accepted = ChooseFromDBDialog.run( forbidden_names=list(self.datum.T.keys()) )
             if accepted:
-                X = chemNodeQM(newName, QDpars=QDpars)      # X = chemNodeDB(newName, QDpars=QDpars)
+                X = chemNodeQM(name=newName, QDpars=QDpars)      # X = chemNodeDB(newName, QDpars=QDpars)
             else:
                 return 0
         elif source == 'spsy':
