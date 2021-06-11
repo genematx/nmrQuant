@@ -3455,18 +3455,22 @@ class MainNMRWindowBase(QMainWindow):
 
     def importDataFiles(self, filePathList):
         """Loads several files from a list and inserts them into the workspace."""
+        self.naviTreeModel.beginResetModel()
+
         # Load the new files
         for filePath in filePathList:
             dat = addDatumFromFile(filePath, self._crnt)
 
         self.setCurrent(dat)
+        self.naviTreeModel.endResetModel()
 
     def runImportDataDialog(self):
         """Run a dialog to import a new file."""
         filter = "All supported files (*.pyfid; *.dx; *.jdx; *.1d; *.2d; *.txt; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx; *.jdx);;Mnova FID (*.txt);;Bruker FID (fid)"
         pathList = [path for path in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter=filter)[0] ]   # ;;JEOL FID (*.jdf)
 
-        self.importDataFiles(pathList)
+        if pathList:
+            self.importDataFiles(pathList)
 
     def runLoadWspDialog(self):
         """Runs a dialog for loading a new Workspace."""
@@ -4060,7 +4064,9 @@ class MainNMRWindowBase(QMainWindow):
             filePathList = read_spinsolve_subfolders(filePath, filePathList)
 
         # Set the DATA_PATH to the dropped directory or to the parent directory, if several folders were dropped
-        if len(filePathList) == 1:
+        if len(filePathList) == 0:
+            return None
+        elif len(filePathList) == 1:
             self.DATA_PATH = os.path.dirname(filePathList[0])
         elif len(filePathList) > 1:
             self.DATA_PATH = os.path.dirname(os.path.dirname(filePathList[0]))
