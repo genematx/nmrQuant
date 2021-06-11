@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import time
+from ssnake.specIO import loadFile, loadJEOLDelta
 
 # Functions fro reading different file formats.
 # Each function has standardized inputs and outputs.
@@ -226,6 +227,30 @@ def read_spinsolve(path):
 
     return yT, c0, f0, dt, dic
 
+def read_jeol(path):
+    """Import data in Jeol Delta format."""
+    spec = loadJEOLDelta(path)   # ssnake Spectrum object
+
+    if spec.ndim() > 1:
+        raise RuntimeError('Only 1D JEOL data is currently supported.')
+
+    # Store the dictionary of parameters
+    dic = spec.metaData
+    dic.update({'name':spec.name})
+
+    if spec.spec[0]:
+        # Compute FID if the data is in the frequency domain (spectrum)
+        spec.complexFourier(axis=0)
+    n_gd = 0    # Group delay
+    yT = spec.getData().data.reshape(-1,1)[n_gd:, :]
+    c0 = spec.freq[0] * 1e-06
+    f0 = (spec.freq[0] - spec.ref[0])
+    # sw = spec.sw[0]
+    sw = dic['x_sweep']
+    dt = 1/sw
+
+    return yT, c0, f0, dt, dic
+
 def read_spinsolve_subfolders(rootPath, pathList=None):
     """Recursively open folders and returns paths to data.1d files, if found.
 
@@ -256,7 +281,7 @@ def read_any_file(path):
     """Read any file format and return an FID dataset and a dictionary of parameters."""
 
     dic = {}
-    
+
     if path.endswith('.pyfid'):
         with open(path, 'rb') as fp:
             data = [float(x.strip()) if i != 5 else x.strip() for i, x in enumerate(fp.readlines())]
@@ -323,32 +348,13 @@ def read_any_file(path):
         name = os.path.split(os.path.dirname(path))[1]
 
     # Read a JEOL FID file
-    elif path[-3:] == 'jdf':
-        print(path)
-        #
-        # dic, data = ng.fileio.bruker.read(path[:-3])
-        #
-        # acqus = dic['acqus']
-        # ntgrp = acqus['GRPDLY']    # Number of time samples of the Bruker filter response;
-        # swh = acqus['SW_h']     # Spectral width in Hz
-        # f0 = acqus['O1']        # Offset in Hz
-        # c0 = acqus['SFO1']      # Frequency of the local oscillator in MHz
-        # dt = 1 / swh         # Sampling period (dwell time)
-        # tau = acqus['DE'] * (1e-06)   # Ringdown time delay in sec
-        #
-        # yT = data[ntgrp:].reshape(-1, 1)
-        # # nt = min(16384, len(yT))
-        # nt = len(yT)
-        # t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-        # # yT = yT[:nt].reshape(-1, 1)
-        #
-        # ## Subsample if the frequency range is too large
-        # #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-        # #t = t[::k]
-        # #yT = yT[::k, :]
-        #
-        # name = os.path.split(os.path.dirname(path))[1]
-        pass
+    elif path.endswith('.jdf'):
+        yT, c0, f0, dt, dic = read_jeol(path)
+
+        nt = yT.shape[0]
+        t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
+        name = os.path.split(path)[1]    # File name
+        # print(path)
 
     # Read a Spinsolve data.1d file
     elif path.endswith('.1d') or path.endswith('.2d'):

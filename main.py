@@ -3466,7 +3466,7 @@ class MainNMRWindowBase(QMainWindow):
 
     def runImportDataDialog(self):
         """Run a dialog to import a new file."""
-        filter = "All supported files (*.pyfid; *.dx; *.jdx; *.1d; *.2d; *.txt; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JCAMP (*.dx; *.jdx);;Mnova FID (*.txt);;Bruker FID (fid)"
+        filter = "All supported files (*.pyfid; *.dx; *.jdx; *.1d; *.jdf; *.2d; *.txt; fid);;Converted FID (*.pyfid);;Spinsolve binary (*.1d; *.2d);;JEOL Delta (*.jdf);;JCAMP (*.dx; *.jdx);;Mnova FID (*.txt);;Bruker FID (fid)"
         pathList = [path for path in QFileDialog.getOpenFileNames(None, 'Import file', '.', filter=filter)[0] ]   # ;;JEOL FID (*.jdf)
 
         if pathList:
