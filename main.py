@@ -241,7 +241,7 @@ class ChooseFromDBDialog(QDialog):
         else: return (None, None, result == QDialog.Accepted)
 
 class SettingsDialog(QDialog):
-    def __init__(self, oldSettings, parent = None):
+    def __init__(self, parent = None):
         super(SettingsDialog, self).__init__(parent)
 
         self.setWindowTitle('Settings')
@@ -273,14 +273,9 @@ class SettingsDialog(QDialog):
         rbtnGroup.setLayout(groupLayout)
 
         # ----------- Settings for the QD simulations --------------------------
-        self.cmboxHCSelector = QComboBox()
-        self.cmboxHCSelector.addItem("1H")
-        self.cmboxHCSelector.addItem("13C")
-        self.cmboxHCSelector.setCurrentIndex( self.cmboxHCSelector.findText(oldSettings['HCmode']) )
         self.editRerunThreshold = MyDoubleEdit(config.QD_RerunQDchshThreshold)
         self.editAggregateThreshold = MyDoubleEdit(config.QD_AggregatePeaksThreshold)
         groupLayout = QFormLayout()
-        groupLayout.addRow("Nucleus", self.cmboxHCSelector)
         groupLayout.addRow("Merge resonances closer than, Hz", self.editAggregateThreshold)
         groupLayout.addRow("Update if chsh changed by, Hz", self.editRerunThreshold)
         qdConfigGroup = QGroupBox("QD settings")
@@ -361,7 +356,6 @@ class SettingsDialog(QDialog):
         # Update the QD settings
         config.QD_RerunQDchshThreshold = self.editRerunThreshold.value()
         config.QD_AggregatePeaksThreshold = self.editAggregateThreshold.value()
-        newSettings['HCmode'] = self.cmboxHCSelector.currentText()
 
         # Update the optimization settings
         config.OPTIM_maxBasinhoppingSteps = self.spbxBasinhopping.value()
@@ -384,14 +378,12 @@ class SettingsDialog(QDialog):
 
     # static method to create the dialog and return
     @staticmethod
-    def run(oldSettings, parent = None):
-        dialog = SettingsDialog(oldSettings, parent)
+    def run(parent = None):
+        dialog = SettingsDialog(parent)
         result = dialog.exec_()
         if result == QDialog.Accepted:    # If OK was clicked
             newSettings = dialog.getEntries()
-        else: newSettings = oldSettings
-        #else: chkdForAll = False
-        return QDialog.Accepted, newSettings
+        return QDialog.Accepted
 
 class SpectrumPlotItem(pg.PlotItem):
     """A customized PlotItem with zoomed out view."""
@@ -1704,18 +1696,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             # The list of steps is the same (the new Datum is in the same Series)
             self.datum = datum
             self.notifyDataChanged()
-
-    def setHCmode(self, new_HCmode):
-        """Sets the HC mode of the workspace."""
-        if self.datum.HCmode != new_HCmode:
-
-            self.beginResetModel()
-
-            self.datum.setHCmode(new_HCmode)
-            self.resetChemTree(flag=False)
-            self.resetLshapeTree(flag=False)
-
-            self.endResetModel()
 
     def fullReset(self, datum):
         self.beginResetModel()
@@ -3315,8 +3295,18 @@ class MainNMRWindowBase(QMainWindow):
         # Clear workspace action
         new = QAction(QIcon('icons\icon_new.png'), 'Clear workspace', self)
         new.setStatusTip('Clear the workspace')
-        new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None))
+        new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None, HCmode=self.wsp.HCmode))
         self._actions['Clear workspace'] = new
+
+        new = QAction(QIcon('icons\icon_new_1H.png'), 'New 1H workspace', self)
+        new.setStatusTip('New 1H workspace')
+        new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None, HCmode='1H'))
+        self._actions['New 1H workspace'] = new
+
+        new = QAction(QIcon('icons\icon_new_13C.png'), 'New 13C workspace', self)
+        new.setStatusTip('New 13C workspace')
+        new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None, HCmode='13C'))
+        self._actions['New 13C workspace'] = new
 
         # Add import datafile action
         new = QAction(self._icon('icon_addFile.png'), 'Import files', self)
@@ -3429,13 +3419,14 @@ class MainNMRWindowBase(QMainWindow):
 
         # ------------------------- set the menubar ----------------------------
         fileMenu = menubar.addMenu('&File')
-        for actn in ['Import file','Remone file','Load workspace','Save workspace', 'Exit']:
+        for actn in ['Import file','Remove file','Load workspace','Save workspace', 'Exit']:
             fileMenu.addAction(self._actions[actn])
         helpMenu = menubar.addMenu('&Help')
         helpMenu.addAction(self._actions['Show about'])
 
         # ------------------------- Set the toolbar ----------------------------
-        for actn in ['Clear workspace','Import file','Remone file','Show settings',None,
+        for actn in ['Clear workspace','New 1H workspace','New 13C workspace',
+                     'Import file','Remove file','Show settings',None,
                      'Load workspace','Save workspace', None, 'Undo', 'Redo', None,
                      'Fit one step', 'Fit all steps', 'Fit all files', None,
                      'Report results', 'Save results', 'Exit']:
@@ -3542,12 +3533,13 @@ class MainNMRWindowBase(QMainWindow):
         filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
         if filename:
             with open(filename, 'rb') as fp:
+                # Load the new workspace: a tuple, 1st element - packed wsp object, 2nd element - GUI settings
                 dataUnPack = dill.load(fp)
 
             # Reset the settings and the Workspace
             self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
 
-    def onResetWspAction(self, newWorkspace=None, newSettings=None):
+    def onResetWspAction(self, newWorkspace=None, newSettings=None, HCmode='1H'):
         """Clears the workspace including the stepClass, signals and the tree."""
         self.naviTreeModel.beginResetModel()
 
@@ -3570,7 +3562,6 @@ class MainNMRWindowBase(QMainWindow):
                 stngConfig = None
             settings.update(newSettings)
         else:
-            settings.update({"HCmode":"1H"})
             stngView, stngConfig = None, None
 
         # Reset the undo and redo stacks
@@ -3580,7 +3571,7 @@ class MainNMRWindowBase(QMainWindow):
         self._actions['Redo'].setEnabled(False)
 
         # Reset the workspace
-        self.wsp.reset()
+        self.wsp.reset(HCmode=HCmode)
         if newWorkspace is not None:
             self.wsp.unpack(newWorkspace)
 
@@ -3617,10 +3608,7 @@ class MainNMRWindowBase(QMainWindow):
 
     def showSettingsDialog(self):
         """Shows an input dialog and updates settings"""
-        accepted, newSettings = SettingsDialog.run(oldSettings={'HCmode': self.wsp.HCmode})
-
-        if accepted:
-            self.treeModel.setHCmode(newSettings['HCmode'])
+        accepted = SettingsDialog.run()
 
     def showAboutMessage(self):
         """Displays the About message."""
@@ -4395,7 +4383,7 @@ class MainView_nmrQuant(MainNMRWindowBase):
         helpMenu.addAction(self._actions['Show about'])
 
         # ------------------------- Set the main toolbar -----------------------
-        for actn in ['Clear workspace','Import file','Remove file','Show settings',None,
+        for actn in ['New 1H workspace','New 13C workspace','Import file','Remove file','Show settings',None,
                      'Load workspace','Save workspace', None, 'Add freqBlock', 'Remove freqBlock',
                      'Modify freqBlock', 'Show transitions', 'Show components', 'Show residual',
                      'Autoscale', None, 'Undo', 'Redo', None, 'Autophase both', 'Set lineshape', 'Remove lineshape',
@@ -4510,162 +4498,6 @@ class MainView_nmrQuant(MainNMRWindowBase):
         """Slot for the signal indicating the change in the currently selected Series/Datum"""
 
         self.setCurrent(newCrnt = index.internalPointer() if index.isValid() else None)
-
-    def loadChemTree(self):
-        """Calls a dialog and loads a new chemical tree from file."""
-        filename = QFileDialog.getOpenFileName(self, 'Import parameter tree', '.', filter = "Chemical trees (*.ctr)")[0]
-
-        T = loadTree(filename)
-
-        self.treeModel.resetChemTree(T)
-
-    def onSaveWspAction(self):
-        """Saves the workspace including the stepClass class and the steps array."""
-        filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')[0]
-        if filename:
-            if filename[-4:] != '.wsp': filename += '.wsp'
-
-            # Pack the logic of the workspace
-            dataPack = self.wsp.pack()
-
-            # Pack the settings
-            stngPack = copy.deepcopy(settings)
-            stngView = {'stepsEditText' : self.stepsEdit.toPlainText(),\
-                        'hiddenTreeViewNodes' : [node.name for node in self.treeModel.TP.items() if node.hidden]}
-            stngConfig = config.as_dict()
-
-            stngPack['_view'] = stngView
-            stngPack['_config'] = stngConfig
-
-            with open(filename, 'wb') as fp:
-                dill.dump([dataPack, stngPack], fp)
-
-    def onLoadWspAction(self):
-        """Loads the workspace including the stepClass class and the steps array."""
-        filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
-        if filename:
-            with open(filename, 'rb') as fp:
-                dataUnPack = dill.load(fp)
-
-            # Reset the settings and the Workspace
-            self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
-
-    def onResetWspAction(self, newWorkspace=None, newSettings=None):
-        """Clears the workspace including the stepClass, signals and the tree."""
-        self.naviTreeModel.beginResetModel()
-
-        # Update the global settings
-        settings.clear()
-        settings.update({"ax0Limits": None,
-                        "ax1Limits": {'ylim':(0, 5)},
-                        "ax2Limits": None,
-                        "startFromPars" : "current",          # Starting values of parameters when fitting multiple files (current, previous, default) - will be copied from crntParsH of this file, previous file or dfltParsH
-                        "autoPhase" : False,
-                        "autoPick" : False})
-        if newSettings is not None:
-            try:
-                stngView = newSettings.pop('_view')
-            except KeyError:
-                stngView = None
-            try:
-                stngConfig = newSettings.pop('_config')
-            except KeyError:
-                stngConfig = None
-            settings.update(newSettings)
-        else:
-            settings.update({"HCmode":"1H"})
-            stngView, stngConfig = None, None
-        settings.update({"ax0Limits":None, "ax1Limits":None, "ax2Limits":None})
-
-        # Reset the undo and redo stacks
-        self._undoStack.clear()
-        self._actions['Undo'].setEnabled(False)
-        self._redoStack.clear()
-        self._actions['Redo'].setEnabled(False)
-
-        # Reset the workspace
-        self.wsp.reset()
-        if newWorkspace is not None:
-            self.wsp.unpack(newWorkspace)
-
-        # Reset the tree model
-        self.treeModel.fullReset(self._crnt)
-
-        self.naviTreeModel.endResetModel()
-
-        self.setCurrent()          # Sets the current display to the first Datum or the entire workspace if there is no Datum
-
-        # Update the views (e.g. shown/hidden rows, etc.)
-        if stngView is not None:
-            self.stepsEdit.setPlainText(stngView['stepsEditText'])
-            for node in stngView['hiddenTreeViewNodes']:
-                self.treeModel.TP[node].hidden = True
-            self.treeView.hideExcessiveRows()
-
-        # Update the global config
-        if stngConfig is not None:
-            config.from_dict(config, stngConfig)
-        self._actions['Toggle TLS'].setChecked(config.SAMPL_funcType == 'TLS')
-
-    def resetSignals(self, zff=None, apod=None, flagAdapFreq=None):
-        self._crnt.resetFreqs(zff, apod)
-
-        if flagAdapFreq is not None:
-            for dat in self._crnt.parent.data:
-                dat.resetSignals(flagAdapFreq)           # Or simply dat.resetSignals(flagAdapFreq) to reset the adaptive flag for a single (current) Datum only
-
-        self.preprocTool.setNewDatum(self._crnt)         # Update the statistics display
-        self.plotCurrent(autoRange=(apod is None))       # Do not autorange if what has changed is only apodization
-
-    def showSettingsDialog(self):
-        """Shows an input dialog and updates settings"""
-        accepted, newSettings = SettingsDialog.run(oldSettings={'HCmode': self.wsp.HCmode})
-
-        if accepted:
-            self.treeModel.setHCmode(newSettings['HCmode'])
-
-    def showAboutMessage(self):
-        """Displays the About message."""
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Information)
-
-        msg.setText("Quantitative NMR analysis with quantum mechanical models.")
-        msg.setInformativeText("The license expires on {:s}.".format(time.strftime('%B %d, %Y', time.gmtime(self._expiryTime))) )
-        msg.setWindowTitle("About qNMR")
-        # msg.setDetailedText("The details are as follows:")
-        msg.setStandardButtons(QMessageBox.Close)
-
-        msg.exec_()            # Returns the values of pressed button
-
-    def onAssigned(self):
-        """Updates the tree and plots when model peaks have been assigned to picked peaks."""
-        self.plotCurrent(autoRange=False)
-        self.treeWidget.showStep()
-        #self.phasingTool.setVals(self.steps[0])
-        #dataFiles[self.indxCrntFile].update()
-        pass
-
-    def pullUndo(self):
-        """Restores the last state from the Undo stack."""
-        dats_list, pars_list = self._undoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
-        self._redoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
-
-        # Set the stored values to the Datums
-        for dat, par in zip(dats_list, pars_list):
-            dat.setCrntVals(par)
-
-        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
-
-    def pullRedo(self):
-        """Restores the last state from the Redo stack."""
-        dats_list, pars_list = self._redoStack.pop()       # Outputs list of Datums and list of parsF dictionaries
-        self._undoStack.append([dats_list, [dat.getCrntVals(keys=list(par.keys())) for dat, par in zip(dats_list, pars_list)]])
-
-        # Set the stored values to the Datums
-        for dat, par in zip(dats_list, pars_list):
-            dat.setCrntVals(par)
-
-        self.startThread(queueFiles=dats_list, pushUndo=False)   # This will also update the undo/redo buttons
 
 # ------------------------ Parameter list --------------------------------------
     def updateParsList(self, indxStep = None):
