@@ -2074,7 +2074,12 @@ class chemNodeT(chemNode):
         return (name[0]+'-SPSY'+indx[0] if int(indx[0])>0 else name[0], pars, int(indx[1])-1)
 
 class chemNodeDB(chemNode):
-    """Class for a node describing a chemical from the database, inherited from chemNode. The node can be specified either by passing a name of a species in the database or the QDpars structure (an instance of chemSpec class.)"""
+    """Class for a node describing a chemical from the database, inherited from
+       chemNode. The node can be specified either by passing a name of a species
+       in the database or the QDpars structure (an instance of chemSpec class.)
+
+       NOTE: chemNodeQM to be used instead.
+    """
     def __init__(self, name, chsh = None, alph = None, alphQD = None, ampl = None, phase = None, intn = 1., alias='', nameDB=None, QDpars=None):
         super().__init__(name, chsh, alph, ampl, phase, intn, alias)
         chemDB = {key:val for _, db in chemLib.items() for key, val in db.items()}
@@ -2216,11 +2221,6 @@ class chemNodeQM(chemNode, chemSpec):
         pars["alphQD"] = [par for par in self.alphQD]
         if self.HCmode == '1H':
             pars["jcplQD"] = [par for par in self.jcplH]
-        # result["chshH"] = [par for par in self.chshH]
-        # result["chshC"] = [par for par in self.chshC]
-        # result["jcplH"] = [par for par in self.jcplH]
-        # result["alphH"] = [par for par in self.alphH]
-        # result["alphC"] = [par for par in self.alphC]
         return result
 
     def setDefaultQD(self, key, dval, min=None, max=None):
@@ -2273,14 +2273,16 @@ class chemNodeQM(chemNode, chemSpec):
 
                 self.spinTopo.append(spinGroup(meqSpins_sub, meqLinks_sub, mult=self.multH[indxSpsy]))
 
-        elif HCmode == '13C':
+        elif self.HCmode == '13C':
             self.spinTopo.extend( [spinGroup(meqSpins=[spinVert(0, 1)], meqLinks=[], mult=self.multC[i]) for i in range(len(self.chshC))] )
-            self._indxChsh_by_spsy.extend(list(range(len(self.chshC))))
+            self._indxChsh_by_spsy.extend( [[i] for i in range(len(self.chshC))] )
+            self._indxJcpl_by_spsy.extend( [[] for _ in range(len(self.chshC))] )
 
-        # Dendrolize the node
-        # Creates chemTrees based on the QD parameters of the node. Each new child node corresponds to a chshQD parameter, not meqSpins
+        # 3. -------------- Dendrolize the node -----------------
+        # Creates chemTrees based on the QD parameters of the node. Each new
+        # child node corresponds to a chshQD parameter, not meqSpins
 
-        # 3. Add nodes to the tree
+        # Add nodes to the tree
         for chld in self.children():             # Loop backwards to avoid missing children when the index increases but the number of children decreases
             self.removeChild(chld)
 
@@ -2299,17 +2301,15 @@ class chemNodeQM(chemNode, chemSpec):
                     break
 
             for j in range(spsy.n_chsh()):
-                label = self.chshH[self._indxChsh_by_spsy[i][j]].label if self.HCmode == '1H' else self.chshC[self._indxChsh_by_spsy[i][j]].label
+                label = self.chshQD[self._indxChsh_by_spsy[i][j]].label# if self.HCmode == '1H'\
+                                    #else self.chshC[self._indxChsh_by_spsy[i][j]].label
                 nodeT = chemNodeQT(self.name + '-' + str(i+1) + '.' + str(j+1), intn = spsy.mult * spsy.n_spin()[j],
                                         alias = self.name + ' ' + label if label != '' else  '')
                 prntNode.addChild(nodeT)
 
     def reset(self):
-        """Resets the saved old parameters in the node. Evrything will be recomputed on the next step."""
+        """Reset the saved old parameters in the node. Evrything will be recomputed on the next step."""
         super().reset()
-        # # print('resetting')
-        # for spsy in self.spinTopo:
-        #     spsy.reset()
 
     # @profile
     def getPoles(self, c0, chsh=[], alph=[], chshQD=[], alphQD=[], jcplQD=[], **kwargs):
