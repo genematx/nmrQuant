@@ -378,11 +378,13 @@ class Workspace():
         self.repRootNames = newRoots
 
     def addTreeNode(self, X, prntName=None, priors = None):
-        """Grafts a subtree X to the parent node with name prntName and updates the parameters and priors."""
+        """Grafts a subtree X to the parent node with name prntName and updates
+           the parameters and priors."""
 
         # Dendrolize nodes if necessary
         for node in X.items():
-            if type(node) in [chemNodeDB, chemNodeQM] and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
+            if type(node) in [chemNodeDB, chemNodeQM] and node.HCmode != self.HCmode:
+                node.dendrolize(self.HCmode)
 
         # Insert the node
         if prntName is None:
