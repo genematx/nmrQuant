@@ -2276,6 +2276,7 @@ class chemNodeQM(chemNode, chemSpec):
         elif self.HCmode == '13C':
             self.spinTopo.extend( [spinGroup(meqSpins=[spinVert(0, 1)], meqLinks=[], mult=self.multC[i]) for i in range(len(self.chshC))] )
             self._indxChsh_by_spsy.extend( [[i] for i in range(len(self.chshC))] )
+            self._indxJcpl_by_spsy.extend( [[] for _ in range(len(self.chshC))] )
 
         # 3. -------------- Dendrolize the node -----------------
         # Creates chemTrees based on the QD parameters of the node. Each new
@@ -2290,8 +2291,6 @@ class chemNodeQM(chemNode, chemSpec):
             self.addChild(chemNode(self.name + '-COMB' + str(i+1), intn=comb.intn, alias=comb.name))
 
         # Add the terminal nodes
-        print(len(self.spinTopo))
-        print(self.spsyComb)
         for i, spsy in enumerate(self.spinTopo):
             # Add a QD node with their own terminal nodes
             prntNode = self           # The parent node to which the spin system will be attached; by default, directly to chemNodeQM
@@ -2302,7 +2301,6 @@ class chemNodeQM(chemNode, chemSpec):
                     break
 
             for j in range(spsy.n_chsh()):
-                print(self._indxChsh_by_spsy)
                 label = self.chshQD[self._indxChsh_by_spsy[i][j]].label# if self.HCmode == '1H'\
                                     #else self.chshC[self._indxChsh_by_spsy[i][j]].label
                 nodeT = chemNodeQT(self.name + '-' + str(i+1) + '.' + str(j+1), intn = spsy.mult * spsy.n_spin()[j],
