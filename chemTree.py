@@ -2937,7 +2937,7 @@ def readChemDB(fname='chemDB.json'):
     return chemDB
 
 def writeChemDB(chemDB, fname='result.json'):
-    """Writes the chemDB in JSON format and stores it file name"""
+    """Writes the chemDB in JSON format and stores it file."""
     print('Saving the chemDB database into file {:s}'.format(fname))
     root, ext = os.path.splitext(fname)
 
