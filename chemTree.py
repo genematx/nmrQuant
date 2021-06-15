@@ -14,6 +14,8 @@ import numexpr as ne
 import copy
 from operator import itemgetter
 from molparser.convertmol import parse_sdf_file
+from openpyxl import load_workbook
+import xlsxwriter
 
 # Ordered set class to store children of a node
 import collections
@@ -2621,7 +2623,7 @@ def parsSpec2array(par):
     """Converts arrays of parsSpec namedtuples to 2D arrays of min and max values."""
     return [(v.min, v.max) for v in par]
 
-def readSDF(fname):
+def readChemDB_SDF(fname):
     """Import a model for chemical species from an .sdf file.
 
         This function loads a .mol table and chemical shifts/J-coupling
@@ -2888,7 +2890,7 @@ def readSDF(fname):
                          meqSpins=meqSpins, meqLinks=meqLinks, Mw=mol['MW'], nH_labile=0) }
     return chemModel
 
-def readChemDB(fname='chemDB.json'):
+def readChemDB_JSON(fname='chemDB.json'):
     """Read a chemDB in JSON or .cdb format and convers it to a dictionary of chemSpec class objects.
     """
     root, ext = os.path.splitext(fname)
@@ -2936,8 +2938,137 @@ def readChemDB(fname='chemDB.json'):
 
     return chemDB
 
-def writeChemDB(chemDB, fname='result.json'):
-    """Writes the chemDB in JSON format and stores it file name"""
+def readChemDB_XLSX(ws):
+    """Read a chemDB from Excel worksheet
+        Args:
+            ws - openpyxl worksheet
+        Returns:
+            chemDB - dict of chemSpecs
+    """
+
+    def read_chem(ws, firstrow=1):
+        """Read an entire chemSpec entry from an openpyxl worksheet starting at firstrow."""
+
+        def read_row(ws, col1, col2, row):
+            """Read a (sub-)row in an Excel worksheet.
+                Args:
+                    ws - openpyxl worksheet
+                    col1, col2 - column literals
+                    row - row index (numerical)
+                Retruns:
+                    A list of values in the columns. For example, if col1=B, col2=D, row=5,
+                    will return the values in the range B5:D5.
+            """
+            cells = ws['{}{}'.format(col1, row):'{}{}'.format(col2, row)][0]
+            cells = [cell.value for cell in cells]
+
+            return cells
+
+        # Read the general information
+        name = ws.cell(firstrow, 1).value
+        mW = ws.cell(firstrow+3, 2).value
+        nH_labile = ws.cell(firstrow+4, 2).value
+
+        # Read the 1H chemical shift parameters
+        row, chshH = firstrow+3, []
+        while True:
+            cells = read_row(ws, 'E', 'L', row)
+            if any(cells):
+                _, label, dval, minval, maxval, distr, p1, p2 = cells
+                if dval is not None:
+                    if minval is None: minval=dval-0.01
+                    if maxval is None: maxval=dval+0.01
+                if label is None: label=''
+                chshH.append(parsSpec(label=label, dval=dval, min=minval, max=maxval, distr=distr, p1=p1, p2=p2))
+                row +=1
+            else: break
+
+        # Read the J coupling parameters
+        row, jcplH = firstrow+3, []
+        while True:
+            cells = read_row(ws, 'N', 'U', row)
+            if any(cells):
+                _, label, dval, minval, maxval, distr, p1, p2 = cells
+                if dval is not None:
+                    if minval is None: minval=dval-0.5
+                    if maxval is None: maxval=dval+0.5
+                if label is None: label=''
+                jcplH.append(parsSpec(label=label, dval=dval, min=minval, max=maxval, distr=distr, p1=p1, p2=p2))
+                row +=1
+            else: break
+
+        # Read 13C chemical shifts parameters
+        row, chshC, multC = firstrow+3, [], []
+        while True:
+            cells = read_row(ws, 'W', 'AE', row)
+            if any(cells):
+                _, label, nspin, dval, minval, maxval, distr, p1, p2 = cells
+                if dval is not None:
+                    if minval is None: minval=dval-1.0
+                    if maxval is None: maxval=dval+1.0
+                if label is None: label=''
+                chshC.append(parsSpec(label=label, dval=dval, min=minval, max=maxval, distr=distr, p1=p1, p2=p2))
+                multC.append(nspin)
+                row +=1
+            else: break
+
+        # Read the 1H spins
+        row, meqSpins, meqLinks = firstrow+3, [], []
+        while True:
+            cells = read_row(ws, 'AI', 'AJ', row)
+            if any(cells):
+                indxChsh, nspin = cells
+                meqSpins.append(spinVert(indxChsh=indxChsh-1, nspin=nspin))
+                row +=1
+            else: break
+
+        # Read the connectivity matrix (only the upper part)
+        for i in range(len(meqSpins)):
+            for j in range(i+1, len(meqSpins)):
+                indxJcpl = ws.cell(row=firstrow+3+i, column=38+j).value
+                if indxJcpl:
+                    meqLinks.append( spinEdge(indxJcpl=indxJcpl-1, indxVert=[i,j]) )
+
+        # Read the information about spin systems multiplicities
+        multH = []
+        for i in range(len(meqSpins)):
+            cells = read_row(ws, 'AG', 'AH', firstrow+3+i)
+            if all(cells): multH.append(cells[1])
+
+        # Read the spin system groups
+        spsyCombH = []
+        if any(read_row(ws, 'A', 'C', row=firstrow+5)):
+            row = firstrow+6
+            while True:
+                row += 1
+                cells = read_row(ws, 'A', 'C', row)
+                if any(cells):
+                    indxSpsy = [int(i)-1 for i in cells[2][1:-1].split(',')]
+                    spsyCombH.append(spsyComb(name=cells[0], intn=cells[1], indxSpsy=indxSpsy))
+                else:break
+
+        return chemSpec(name=name, mW=mW, nH_labile=nH_labile, chshH=chshH, chshC=chshC, \
+                        jcplH=jcplH, multC=multC, multH=multH, spsyCombH=spsyCombH, meqSpins=meqSpins, meqLinks=meqLinks)
+
+    # Detrermine initial rows for each chemical
+    firstrows, in_entry = [], False
+    for i, row in enumerate(ws.rows):
+        valid_row = any([c.value for c in row])
+        if valid_row and (not in_entry):
+            firstrows.append(i+1)
+            in_entry=True
+        elif (not valid_row) and (i>firstrows[-1]+2):
+            in_entry = False
+
+    chemDB = {}
+    for row in firstrows:
+        new_chem = read_chem(ws, row)
+        chemDB[new_chem.name] = new_chem
+
+    return chemDB
+
+def writeChemDB_JSON(chemDB, fname='chemDB_saved.json'):
+    """Writes the chemDB in JSON format and stores it file."""
     print('Saving the chemDB database into file {:s}'.format(fname))
     root, ext = os.path.splitext(fname)
 
@@ -2962,16 +3093,140 @@ def writeChemDB(chemDB, fname='result.json'):
         with open(fname, 'wb') as fp:
             dill.dump(chemDB, fp)
 
-def printChemDB():
-    """Prints chemDB."""
-    for k, v in chemDB.items():
-        print(k,v)
+def writeChemLib_XLSX(chemLib, fname='chemDB_saved.xlsx'):
+    """Export chemLib into xlsx file using xlsxwriter."""
 
-def loadChemLibrary(chemLib=None, path=None):
+    workbook = xlsxwriter.Workbook(fname)
+    fmt_center = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'text_wrap':True})
+    fmt_cenrot = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'rotation': 90})
+
+    def write_chem(worksheet, chemToSave, firstrow=0):
+        """Write a chemSpec entry to Excel file.
+
+            Args:
+                worksheet - xlsxwriter Excel worksheet
+                chemToSave - chemSpec object
+                firstrow - index of the row to start writing from
+        """
+
+        # TODO: Reimplement this function with openpyxl
+        firstcol = 0                 # First col for a chemical (zero-indexed)
+        lastrow = firstrow           # The last written row for this chemical
+        worksheet.merge_range(firstrow, 4, firstrow, 11, '1H chemical shifts', fmt_center)
+        for i, (text, col_width) in enumerate(zip(['ID chsh', 'Label', 'Default, ppm', 'Min, ppm', 'Max, ppm', 'Distribution', 'p1', 'p2'],
+                                                  [4, 5, 6, 6, 6, 8, 6, 6])):
+            col = i+4     # Column index to write to
+            worksheet.merge_range(firstrow+1, col, firstrow+2, col, text, fmt_center)
+            worksheet.set_column(col, col, col_width)
+
+        # Parameters of chemical shifts
+        row, col = firstrow+3, firstcol+4
+        for i, chsh in enumerate(chemToSave.chshH):
+            worksheet.write_row(row, col, [i+1, chsh.label, chsh.dval, chsh.min, chsh.max, chsh.distr, chsh.p1, chsh.p2])
+            row += 1
+        lastrow = max(lastrow, row)
+
+        # Parameters of J couplings
+        worksheet.merge_range(firstrow, 13, firstrow, 20, '1H J-couplings', fmt_center)
+        for i, (text, col_width) in enumerate(zip(['ID jcpl', 'Label', 'Default, Hz', 'Min, Hz', 'Max, Hz', 'Distribution', 'p1', 'p2'],
+                                                  [4, 5, 6, 6, 6, 8, 6, 6])):
+            col = i+13     # Column index to write to
+            worksheet.merge_range(firstrow+1, col, firstrow+2, col, text, fmt_center)
+            worksheet.set_column(col, col, col_width)
+
+        row, col = firstrow+3, firstcol+13
+        for i, jcpl in enumerate(chemToSave.jcplH):
+            worksheet.write_row(row, col, [i+1, jcpl.label, jcpl.dval, jcpl.min, jcpl.max, jcpl.distr, jcpl.p1, jcpl.p2])
+            row += 1
+        lastrow = max(lastrow, row)
+
+        # Carbon Chemical shifts
+        worksheet.merge_range(firstrow, 22, firstrow, 30, '13C spins', fmt_center)
+        for i, (text, col_width) in enumerate(zip(['ID', 'Label', 'N spins', 'Default, ppm', 'Min, ppm', 'Max, ppm', 'Distribution', 'p1', 'p2'],
+                                                  [3, 5, 3, 6, 6, 6, 8, 6, 6])):
+            col = i+22     # Column index to write to
+            worksheet.merge_range(firstrow+1, col, firstrow+2, col, text, fmt_center)
+            worksheet.set_column(col, col, col_width)
+
+        row, col = firstrow+3, firstcol+22
+        for i, (chsh, mult) in enumerate(zip(chemToSave.chshC, chemToSave.multC)):
+            worksheet.write_row(row, col, [i+1, chsh.label, mult, chsh.dval, chsh.min, chsh.max, chsh.distr, chsh.p1, chsh.p2])
+            row += 1
+        lastrow = max(lastrow, row)
+
+        # 1H spins and connections
+        n_spinH = len(chemToSave.asdict()['meqSpins'])           # Total umber of spins
+        worksheet.merge_range(firstrow, 32, firstrow, 36, '1H spins', fmt_center)
+        for i, (text, col_width) in enumerate(zip(['ID spsy', 'Mult. spsy', 'ID chsh', 'N spins', 'ID spin'], [2.5, 2.5, 4, 3, 3])):
+            col = i+32     # Column index to write to
+            worksheet.merge_range(firstrow+1, col, firstrow+2, col, text, fmt_center)
+            worksheet.set_column(col, col, col_width)
+        worksheet.merge_range(firstrow, 37, firstrow+1, 36+max(5, n_spinH), 'IDs of J-couplings', fmt_center)
+        for i in range(n_spinH):
+            col = i+37     # Column index to write to
+            worksheet.write(firstrow+2, col, i+1, fmt_center)
+            worksheet.set_column(col, col, width=2.5)
+        # Write the 1H meq spins
+        row, col = firstrow+3, firstcol+32
+        for i, spin in enumerate(chemToSave.meqSpins):
+            indxSpsy = chemToSave._spsyAsgnSpins[i] # Index of the spin system to which the spin is assigned
+            worksheet.write_row(row, col, [indxSpsy+1, chemToSave.multH[indxSpsy], spin.indxChsh+1, spin.nspin, i+1])
+            row += 1
+        lastrow = max(lastrow, row)
+        # Merge rows for each spin system
+        row = firstrow+3
+        for indxSpsy, mult in enumerate(chemToSave.multH):
+            nspin = len([True for i in chemToSave._spsyAsgnSpins if i == indxSpsy])    # Number of spins in the spin system
+            worksheet.merge_range(row, firstcol+32, row+nspin-1, firstcol+32, indxSpsy+1, fmt_center)
+            worksheet.merge_range(row, firstcol+33, row+nspin-1, firstcol+33, mult, fmt_center)
+            row += nspin
+        # Write the 1H meq links
+        row, col = firstrow+3, firstcol+37    # Top left corner of the connectivity matrix
+        for link in chemToSave.meqLinks:
+            worksheet.write(row+min(link.indxVert), col+max(link.indxVert), link.indxJcpl+1)
+
+        # Set other column widths (intial columns and separators)
+        worksheet.merge_range(firstrow, firstcol, firstrow+2, firstcol+2, chemToSave.name, fmt_center)
+        for col, width in zip([0,1,2,3, 12,21,31], [8, 4, 8, 2, 1, 1, 1]):
+            worksheet.set_column(col, col, width)
+        worksheet.write(firstrow+3, 0, 'Mw, g/mol')
+        worksheet.merge_range(firstrow+3, 1, firstrow+3, 2, chemToSave.Mw)
+        worksheet.write(firstrow+4, 0, 'Number of labile protons')
+        worksheet.merge_range(firstrow+4, 1, firstrow+4, 2, chemToSave.nH_labile)
+        lastrow = max(lastrow, firstrow+5)
+
+        # Write spin system combinations
+        if len(chemToSave.spsyCombH) > 0:
+            worksheet.merge_range(firstrow+5, 0, firstrow+5, 2, '1H spin system groups', fmt_center)
+            worksheet.write_row(firstrow+6, 0, ['Name', 'Intensity', 'Spsy IDs'])
+            row=firstrow+7
+            for comb in chemToSave.spsyCombH:
+                worksheet.write_row(row, 0, [comb.name, comb.intn, repr([i+1 for i in comb.indxSpsy])])
+                row += 1
+            lastrow = max(lastrow, row)
+
+        return lastrow
+
+    for db_name, db in chemLib.items():
+        worksheet = workbook.add_worksheet(db_name)
+        firstrow = 0
+        chemNames = sorted(list(db.keys()))
+        for name in chemNames:
+            chemToSave = db[name]
+            print('Saving {}/{}'.format(db_name, name))
+            lastrow = write_chem(worksheet, chemToSave, firstrow)
+            firstrow = lastrow+2
+
+    # worksheet = workbook.add_worksheet('chemDB')
+    # write_chem(worksheet, chemToSave)
+    workbook.close()
+
+def loadChemLibrary(chemLib=None, dirpath=None):
     """Loads the chemical library (a dictionary of chemDB dictionaries)."""
     chemdb_path = os.path.join(os.getcwd(), 'chemdb')       # Path to chemdb folder
-    if path is None:
-        path = chemdb_path
+    if dirpath is None:
+        dirpath = chemdb_path
+
 
     # Define a DB for common chemicals
     # chemLib is a dictionary of dictionaries; the first level used for grouping
@@ -3009,9 +3264,17 @@ def loadChemLibrary(chemLib=None, path=None):
                      }
                    }
 
+        # Load the databases from XLSX file
+        chemLibXLSX_path = os.path.join(chemdb_path, 'chemLib.xlsx')
+        if os.path.exists(chemLibXLSX_path):
+            wb = load_workbook(filename=chemLibXLSX_path)
+            for ws_name in wb.sheetnames:
+                chemDB = readChemDB_XLSX(wb[ws_name])
+                chemLib[ws_name] = chemDB
+
     # Try loading all JSON, .cdb, .mol, and .sdf files in the working directory
-    for entry in os.listdir(path):
-        fullpath = os.path.join(path, entry)
+    for entry in os.listdir(dirpath):
+        fullpath = os.path.join(dirpath, entry)
 
         # Default database name used to group the items (relative path to the containing folder)
         db_name = os.path.relpath(os.path.dirname(fullpath), chemdb_path)
@@ -3019,15 +3282,16 @@ def loadChemLibrary(chemLib=None, path=None):
         if os.path.isfile(fullpath):
             fname, ext = os.path.splitext(entry)
             _new_dict = {}         # Dictionary of chemSpec entries
-            if ext in ['.json', '.cdb']:
+            if ext == '.xlsx':
+                # TODO: Load all excel files
+                continue
+            elif ext in ['.json', '.cdb']:
                 if db_name == '.':
                     db_name = fname
-#                try:
-                _new_dict.update(readChemDB(fullpath))
-#                except UnpicklingError: pass
+                _new_dict.update(readChemDB_JSON(fullpath))
             elif ext in ['.mol', '.sdf']:
                 try:
-                    _new_dict.update(readSDF(fullpath))
+                    _new_dict.update(readChemDB_SDF(fullpath))
                 except:
                     print('Failed to load {}.'.format(fullpath))
 

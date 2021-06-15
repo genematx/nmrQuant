@@ -1455,7 +1455,7 @@ class NavigationTreeView(QTreeView):
         actnPasteCrnt = QAction(QIcon('icons\icon_pasteCrnt.png'), 'Paste as current', self)
         actnPasteCrnt.setStatusTip('Paste as current values')
         actnPasteCrnt.triggered.connect(lambda : self.requestPasteCrnt.emit(selected))     # Emit a list of selected datums to paste the currently copied parameters to them
-        actnPasteDflt = QAction(QIcon('icons\icon_pasteDflt.png'), 'Paste as defualt', self)
+        actnPasteDflt = QAction(QIcon('icons\icon_pasteDflt.png'), 'Paste as default', self)
         actnPasteDflt.setStatusTip('Paste as default values')
         actnPasteDflt.triggered.connect(lambda : self.requestPasteDflt.emit(selected))     # Emit a list of selected datums to paste the currently copied parameters to them
         actnfitSelected = QAction(QIcon('icons\icon_fitSelected.png'), 'Fit selected', self)

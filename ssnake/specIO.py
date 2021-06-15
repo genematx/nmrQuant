@@ -1130,7 +1130,6 @@ def getBrukerFilter(pars):
     else:
         return None
 
-
 def loadBrukerTopspin(filePath):
     """
     Loads Bruker Topspin/Xwinnmr data (i.e. time-domain data).
@@ -1201,8 +1200,6 @@ def loadBrukerTopspin(filePath):
         pass
     masterData.addHistory("Bruker TopSpin data loaded from " + filePath)
     return masterData
-
-
 
 def loadBrukerImagingTime(filePath):
     """
