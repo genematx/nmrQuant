@@ -245,8 +245,8 @@ def read_jeol(path):
     yT = spec.getData().data.reshape(-1,1)[n_gd:, :]
     c0 = spec.freq[0] * 1e-06
     f0 = (spec.freq[0] - spec.ref[0])
-    # sw = spec.sw[0]
-    sw = dic['x_sweep']
+    sw = spec.sw[0]
+    # sw = dic['x_sweep']
     dt = 1/sw
 
     return yT, c0, f0, dt, dic
@@ -291,6 +291,7 @@ def read_any_file(path):
         t = np.array(data[6:nt+6]).reshape(-1,1)
         yT = (np.array(data[nt+6:2*nt+6]) + 1j*np.array(data[-nt:])).reshape(-1,1)
         name = path[path.rfind('\\')+1:path.rfind('.')]
+        dt = t[1]-t[0]
 
     # Read a JCAMP-DX file
     elif path.endswith('.dx') or path.endswith('.jdx'):
@@ -340,11 +341,6 @@ def read_any_file(path):
         t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
         # yT = yT[:nt].reshape(-1, 1)
 
-        ## Subsample if the frequency range is too large
-        #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-        #t = t[::k]
-        #yT = yT[::k, :]
-
         name = os.path.split(os.path.dirname(path))[1]
 
     # Read a JEOL FID file
@@ -388,11 +384,6 @@ def read_any_file(path):
         # Form the arrays
         t = np.linspace(0, dt*(nt-1), nt).reshape(-1,1)
         yT = (data[::2] - 1j*data[1::2]).reshape(-1,1)
-
-        ## Subsample if the frequency range is too large
-        #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-        #t = t[::k]
-        #yT = yT[::k, :]
 
         name = path[path.rfind('\\')+1:path.rfind('.')]
 
