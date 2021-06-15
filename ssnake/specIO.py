@@ -694,7 +694,7 @@ def loadJEOLDelta(filePath):
             data[i] = np.concatenate(np.concatenate(data[i], 1), 1)
     eS = (slice(None),) #empty slice
     for dim in range(NDIM): #Cut data for every dim
-        useSlice = eS * (NDIM - dim - 1) +(slice(0, dataStop[dim] + 1, None),) + eS * dim
+        useSlice = eS * (NDIM - dim - 1) +(slice(dataStart[0]+1, dataStop[dim]+1, None),) + eS * dim
         for i, _ in enumerate(data):
             data[i] = data[i][useSlice]
     freq = baseFreq[0:NDIM][::-1] * 1e6
@@ -721,7 +721,9 @@ def loadJEOLDelta(filePath):
         for i in range(NDIM):
             if spec[-1 - i] == 1:
                 data[k] = np.flip(data[k], NDIM -1 - i)
-    masterData = sc.Spectrum(hc.HComplexData(np.array(data), hyper), (filePath, None), freq, sw, spec, ref=ref, dFilter=dFilter, metaData=hdrPars)
+    masterData = sc.Spectrum(hc.HComplexData(np.array(data), hyper), \
+                             (filePath, None), freq, sw, spec, ref=ref, \
+                             dFilter=dFilter, metaData=hdrPars)
     masterData.addHistory("JEOL Delta data loaded from " + filePath)
     return masterData
 

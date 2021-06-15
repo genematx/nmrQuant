@@ -1,0 +1,1 @@
+The code in this folder is part of the ssnake package, https://www.ru.nl/science/magneticresonance/software/ssnake/.

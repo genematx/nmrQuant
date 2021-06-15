@@ -3269,8 +3269,9 @@ def loadChemLibrary(chemLib=None, dirpath=None):
         if os.path.exists(chemLibXLSX_path):
             wb = load_workbook(filename=chemLibXLSX_path)
             for ws_name in wb.sheetnames:
-                chemDB = readChemDB_XLSX(wb[ws_name])
-                chemLib[ws_name] = chemDB
+                if not ws_name.startswith('_'):
+                    chemDB = readChemDB_XLSX(wb[ws_name])
+                    chemLib[ws_name] = chemDB
 
     # Try loading all JSON, .cdb, .mol, and .sdf files in the working directory
     for entry in os.listdir(dirpath):
