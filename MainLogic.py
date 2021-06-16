@@ -2748,10 +2748,14 @@ class Datum():
         m_ampl = np.array([blb[0]['ampl'][0].ravel() for blb in sampler.blobs.ravel()]).T     # Means of the amplitudes
         S_ampl = np.array([blb[0]['ampl'][1] for blb in sampler.blobs.ravel()]).T             # Covariance matrices of the amplitudes
         # Generate random samples of amplitudes
+        print(m_ampl.shape, S_ampl.shape)
         nrep = 3     # Number of repeats for each case of parsKeys to sample the amplitudes from the Gaussian distributions
-        indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled explicitely
+        indx = [i for i, name in enumerate(reportedNames) \
+                if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' \
+                and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled explicitely
         if len(indx) > 0:
-            smpl = np.hstack([np.linalg.cholesky(np.squeeze(S_ampl[np.ix_(indx, indx, [i])])).dot(np.random.randn(len(indx), nrep)) \
+            smpl = np.hstack([np.linalg.cholesky(np.squeeze(S_ampl[np.ix_(indx, indx, [i])], axis=2)).\
+                              dot(np.random.randn(len(indx), nrep)) \
                              + m_ampl[indx,i].reshape(-1,1) for i in range(S_ampl.shape[-1])])              # Multivariate Gaussian random samples
             for i, id in enumerate(indx):
                 key = (reportedNames[id], 'ampl', 0)
