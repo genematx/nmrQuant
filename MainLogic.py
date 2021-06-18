@@ -27,32 +27,6 @@ from nmrglue.process.proc_autophase import _ps_acme_score, _ps_peak_minima_score
 # Functions needed only for Matlab
 from operator import getitem
 
-# Classes and functions for the basinhopping algorithm
-class RandomDisplacementBounds(object):
-    """random displacement with bounds"""
-    def __init__(self, xmin, xmax, stepsize=0.5):
-        self.xmin = xmin
-        self.xmax = xmax
-        self.stepsize = stepsize
-
-    def __call__(self, x):
-        """take a random step but ensure the new position is within the bounds"""
-        while True:
-            # this could be done in a much more clever way, but it will work for example purposes
-            xnew = x + np.random.uniform(-self.stepsize, self.stepsize, np.shape(x))
-            if np.all(xnew < self.xmax) and np.all(xnew > self.xmin):
-                break
-        return xnew
-
-class MyTakeStep(object):
-    # Using a custom step taking routine
-    def __init__(self, stepsize=0.5):
-        self.stepsize = stepsize
-    def __call__(self, x):
-        s = self.stepsize
-        x = np.random.uniform(-1, 1, x.shape)
-        return x
-
 ##### ------------ Main classes for the general program logic ------------ #####
 
 minmaxTuple = namedtuple('minmaxTuple', 'min, max')
@@ -61,7 +35,20 @@ minmaxTuple.imin = lambda self, f : np.searchsorted(f.ravel(), self.min)
 minmaxTuple.imax = lambda self, f : np.searchsorted(f.ravel(), self.max)
 
 class freqSpec():
-    """A class to store the specifications of frequency blocks along with their baselines"""
+    """Specification of frequency blocks along with their baselines.
+    Attributes:
+        min, max : float
+            Chemical shift boundaries of the frequency block in ppm
+        bslnOrder : 2-tuple of int or int
+            Order of polynomial baseline in real and imaginary parts of the
+            spectrum. If a single int is supplied, the same order is used for
+            Re and Im parts.
+        _indxFreq : nf_x_1 np.array
+            Indices of spectral points corresponding to the frequency block
+        _bF : nf_x_k np.array
+            Arrays of k precomputed polynomial baselines. The number of
+            baselines k=bslnOrder[0]+bslnOrder[1]
+    """
 
     def __init__(self, min=-np.inf, max=np.inf, bslnOrder=(None, None)):
         self.min = min
@@ -81,14 +68,21 @@ class freqSpec():
         else: raise RuntimeError
 
     def repr(self):
-        return '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
+        """String representation of the frequency block."""
+
+        if not (self.min == -float('inf') and self.max == float('inf')):
+            return '{:.2f} ... {:.2f}'.format(self.min, self.max)
+        else:
+            return 'Entire range'
 
     def bline(self, nf, numberField='Cx'):
-        """Creates a set of base polynomial functions to store the baseline of length nf."""
+        """Create a set of base polynomial functions to store the baseline of length nf."""
         if self._bF is None or self._bF.shape[1] != nf:
             # Define baseline in the frequency domain
-            bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[0]+1)] if (self.bslnOrder[0] is not None) and (numberField in ['Re', 'Cx']) else []
-            bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[1]+1)] if (self.bslnOrder[1] is not None) and (numberField in ['Im', 'Cx']) else []
+            bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[0]+1)] \
+                    if (self.bslnOrder[0] is not None) and (numberField in ['Re', 'Cx']) else []
+            bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[1]+1)] \
+                    if (self.bslnOrder[1] is not None) and (numberField in ['Im', 'Cx']) else []
             self._bF = np.hstack(bFr+bFi) if len(bFr)+len(bFi) > 0 else None
         return self._bF
 
@@ -101,8 +95,12 @@ class freqSpec():
         return np.searchsorted(f.ravel(), self.max)
 
     def indxFreq(self, f, nw2=0):
-        """Returns the indices of array f that fall into the range defined by the block. Optionally can include padding with nw samples on both ends of the range."""
-        # Compute the hash value for the frequency array to determine wethwer update is necessary
+        """Returnsthe indices in array f that fall into the range defined by the
+         block. Optionally can include padding with nw samples on both ends of
+         the range.
+
+         """
+        # Compute the hash value for the frequency array to determine wether update is necessary
         newHash = arrhash(f) + nw2
         if self._indxFreq is None or self._fhash != newHash:
             self._indxFreq = np.arange(self.imin(f) - nw2, self.imax(f) + nw2) % len(f)
@@ -110,7 +108,7 @@ class freqSpec():
         return self._indxFreq
 
     def update(self, lims=None, bslnOrder=None):
-        """Updates the parameters of a frequency block."""
+        """Update the parameters of a frequency block."""
         if lims is not None:
             self.min = min(lims)
             self.max = max(lims)
@@ -126,19 +124,44 @@ class freqSpec():
         return(pars(self.min, self.max, self.bslnOrder))
 
 class Step():
+    """Data processing step. Used to define and group model fitting operations.
 
-    def __init__(self, frqBlkIds = None, parsKeys = None, autoKeys=None, repRootNames=None, fitCustomLshape = False, script=None, nrep=1, fitEach=False, **kwargs):
+    Attributes:
+        frqBlkIds : set of int
+            Active frequency blocks. If the set is empty, will use data in time domain.
+        parsKeys : set of parsKeys tuples
+            Parameter keys in the form ('Chemical name', 'Parameter name', indx)
+            optimized on the given processing step.
+        autoKeys : set of parsKeys tuples
+            Parameter keys that are determined automatically in closed form (e.g.
+            amplitudes with Gaussian priors, zero-order pahsing, variance of noise).
+        script : callable
+            A function that takes as its sole argument a Datum. If defined, will
+            be run instead of optimization on the current Step.
+        fitEach : bool
+            If True, each parameter in parsKeys will be optimized individually;
+            otherwise, all parameters will be optimized in a multidimensional
+            optimization routine.
+        nrep : int
+            Number of repetitions; the same optimization will be run consecutively
+            nrep times to refine the fitting parameters.
+
+    """
+
+    def __init__(self, frqBlkIds = None, parsKeys = None, autoKeys=None, \
+                 repRootNames=None, script=None, nrep=1, fitEach=False, **kwargs):
         self.frqBlkIds = set(frqBlkIds) if frqBlkIds is not None else set()
         self.parsKeys = set(parsKeys) if parsKeys is not None else set()      # Parameters to fit on this step
-        self.autoKeys = set(autoKeys) if autoKeys is not None else set( [('.', 'sigma2', 0)] )      # ('.', 'theta', 0),                 # Potentially autofittable parameters that will be excluded from fitting on this step (may contain, theta, gamma, sigma2, and any amplitudes)
-        if repRootNames is not None:
-            self.autoKeys.update([(name, 'ampl', 0) for name in repRootNames])
-        self.fitCustomLshape = fitCustomLshape
+        self.autoKeys = set(autoKeys) if autoKeys is not None else set( [('.', 'sigma2', 0)] )
         self.script = script
         self.fitEach = fitEach          # Fit each parameter individually
         self.nrep = nrep       # Number of repeats
 
     def clear_autoKeys(self, keep_sigma2=True, keep_theta=False):
+        """Reset the autoKeys set. Optionally keep theparameters for zero-order
+        phasing and the variance of noise.
+
+        """
         self.autoKeys.clear()
         if keep_sigma2:
             self.autoKeys.add(('.', 'sigma2', 0))
@@ -146,7 +169,9 @@ class Step():
             self.autoKeys.add(('.', 'theta', 0))
 
     def run(self, DDD):
-        pars_start = np.array([DDD.getCrntVal(key) for key in self.parsKeys]) if len(self.parsKeys) > 0 else 0.0
+        """Given a Datum DDD, run the parameter optimization of a script, if defined."""
+        pars_start = np.array([DDD.getCrntVal(key) for key in self.parsKeys]) \
+                               if len(self.parsKeys) > 0 else 0.0
 
         for _ in range(self.nrep):
             if self.script is not None:
@@ -156,16 +181,63 @@ class Step():
                 if self.fitEach:
                     # First, fit each parameter individually
                     for par in self.parsKeys:
-                        DDD.optimize(parsKeys=[par], autoKeys=self.autoKeys, frqBlkIds=self.frqBlkIds, evaluatePriors=False)
-                DDD.optimize(parsKeys=self.parsKeys, autoKeys=self.autoKeys, frqBlkIds=self.frqBlkIds, evaluatePriors=False)
+                        DDD.optimize(parsKeys=[par], autoKeys=self.autoKeys, \
+                                     frqBlkIds=self.frqBlkIds, evaluatePriors=False)
+                DDD.optimize(parsKeys=self.parsKeys, autoKeys=self.autoKeys, \
+                             frqBlkIds=self.frqBlkIds, evaluatePriors=False)
 
-            # Stop fitting if the relative change in the fitting parameters is below the OPTIM_convergenceEps threshold
-            if len(self.parsKeys) > 0:
-                pars_found = np.array([DDD.getCrntVal(key) for key in self.parsKeys])
-                if np.max(np.abs(pars_found-pars_start) / pars_start) < config.OPTIM_convergenceEps:
-                    break
+                # Stop fitting if the relative change in the fitting parameters is below the OPTIM_convergenceEps threshold
+                if len(self.parsKeys) > 0:
+                    pars_found = np.array([DDD.getCrntVal(key) for key in self.parsKeys])
+                    if np.max(np.abs(pars_found-pars_start) / pars_start) < config.OPTIM_convergenceEps:
+                        break
 
 class Workspace():
+    """Main class to hold the processed data. The data is organized in
+        a hierarchical structure as follows:
+
+        Workspace
+        |
+        - Series 1
+            |
+            - Datum 1
+            - Datum 2
+              ...
+            - Datum n
+        - Series 2
+        ...
+        -Series m
+
+        Each Series is intended to contain datasetes (spectra) aquired at the
+        same field strength, similar acquisition parameters and conditions (notably,
+        they should have the same dwell time). Such datasets would normally arise
+        from e.g. reaction monitoring experiments. If datasets from multiple
+        spectrometers need to be analysed, they can be arranged in separate Series.
+
+        The tree of chemical species is shared across the workspace; optimization
+        steps (including definitions of optimization ranges and optimizaed parameters)
+        may differ in different series, but are the same for all Datums within the Series.
+
+    Attributes:
+        HCmode : str, '1H' or '13C'
+            A flag that defines wether the Workspace contains 1H or 13C data.
+            Mixing 1H/13C datasets within the same workspace is not allowed.
+        series : list of Series
+            All Series contained in the Workspace
+        repRootNames : list of str
+            List of chemical names (more generally, nodes in the chemTree), whose
+            intensities will be estimated in the analysis.
+        parsSpecDict : dict
+            Dictionary of prior distributions for model parameters. Keys are
+            parsSpec tuples in the form ('Chemical name', 'Parameter name', indx);
+            values are instances of parsSpec type.
+        extra : dict
+            Any additional data specific to a particular application (e.g. a flag
+            to indicate that the Workspace corresponds to the wine analysis.)
+        T : chemNode and its derivatives
+            A hierarchical tree structure defining the chemical species included
+            in the analysis.
+    """
 
     def __init__(self, HCmode='1H'):
         self.extra = {}
@@ -199,12 +271,11 @@ class Workspace():
         else:
             return self.series[selfID[0]].data[selfID[1]]
 
-    def reset(self, HCmode='1H', lshapeOrder=2):
+    def reset(self, HCmode='1H'):
         # Resets the entire workspace
         self.series = []
         self.HCmode = HCmode
         self.repRootNames = []
-        self.lshapeOrder = 0
         self.extra.clear()     # Any additional data specific to a particular application
 
         # Define default priors. All Series and Datums will be affected by these priors if not explicitely overwritten.
@@ -213,12 +284,14 @@ class Workspace():
                             ('.', 'sigma2', 0): parsSpec(distr='Inverse-Gamma', p1=2., p2=10., dval=0.), \
                             ('.', 'theta', 0): parsSpec(distr='Uniform', min=-np.pi, max=np.pi), \
                             ('.', 'gamma', 0): parsSpec(distr='Uniform', min=0.0, max=1.0-1e-09, dval=0.0)}
-        if lshapeOrder is not None: self.set_lshapeOrder(lshapeOrder)
+        self.set_lshapeOrder()
         self.setTree(chemNode('Mixture', chsh = [parsSpec(min=-0.1, max=0.1)], \
                               alph=[parsSpec(min=-5., max=25., dval=2.0)]))
 
     def getPrior(self, key):
-        """Returns the specification of a parameter in the current tree or tau. Start by looking for the specification in the current datum structure, then proceed to the series level andthe tree if the parameter is not found."""
+        """Returns the specification of a parameter in the current tree or tau.
+            Start by looking for the specification in the current datum structure,
+            then proceed to the series level andthe tree if the parameter is not found."""
         # TODO: Make it nicer...
         try:
             return self.parsSpecDict[key]
@@ -233,7 +306,12 @@ class Workspace():
                 return getattr(self.T[key[0]], key[1])[key[2]]
 
     def setGlobalPrior(self, key, prior=None, reset=True, **kwargs):
-        """Sets the specification of a parameter in the current tree or tau; val is of parsSpec type."""
+        """Sets the specification of a parameter in the current tree or tau
+        Args:
+            key : tuple of parsKeys in the form
+            val : parsSpec
+
+        """
         if prior is None:
             prior = self.getPrior(key)
             prior = prior._replace(**kwargs)
@@ -256,11 +334,18 @@ class Workspace():
                     except KeyError:
                         pass
 
-    def set_lshapeOrder(self, newOrder):
-        """Sets a new lineshape correction order."""
-        if self.lshapeOrder < newOrder:
+    def set_lshapeOrder(self, newOrder=None):
+        """Defines the parameters for a new lineshape correction order."""
+        if newOrder is None:
+            newOrder = config.MODEL_LineShapeOrder
+
+        # Determine the curently set order
+        oldOrder = len([key for key in self.parsSpecDict.keys() \
+                        if key[0] == '.' and key[1] == 'lshapeR'])
+
+        if oldOrder < newOrder:
             # Need to add new parameters
-            for i in range(self.lshapeOrder, newOrder):
+            for i in range(oldOrder, newOrder):
                 self.parsSpecDict[('.', 'lshapeR', i)] = parsSpec(-2.5, 2.5, dval=0.0)
                 self.parsSpecDict[('.', 'lshapeI', i)] = parsSpec(-2.5, 2.5, dval=0.0)
                 for parsH in [dat.crntParsH for ser in self.series for dat in ser.data]:
@@ -271,9 +356,9 @@ class Workspace():
                         parsH['.']['lshapeR'] = [0.0]
                         parsH['.']['lshapeI'] = [0.0]
 
-        elif self.lshapeOrder > newOrder:
+        elif oldOrder > newOrder:
             # Need to remove some parameters
-            for i in range(newOrder, self.lshapeOrder):
+            for i in range(newOrder, oldOrder):
                 for psdict in [self.parsSpecDict]+[ser.parsSpecDict for ser in self.series]+[dat.parsSpecDict for ser in self.series for dat in ser.data]:
                     try: psdict.pop(('.', 'lshapeR', i))
                     except KeyError: pass
@@ -283,8 +368,6 @@ class Workspace():
                 for parsH in [dat.crntParsH for ser in self.series for dat in ser.data]:
                     parsH['.']['lshapeR'].pop(i)
                     parsH['.']['lshapeI'].pop(i)
-
-        self.lshapeOrder = newOrder
 
     def setTree(self, T, priors = None):
         # Load the tree
@@ -314,7 +397,7 @@ class Workspace():
         return T
 
     def allParsKeys(self, node_name=None, parsKind=None, globPars=False, amplitudes=False):
-        """Returns all parameter keys for a (sub)tree starting from a specific node."""
+        """Return a list of all parameter keys for a (sub)tree starting from a specific node."""
         if node_name is None:
             node = self.T.findRoot()
         else: node = self.T[node_name]
@@ -328,8 +411,8 @@ class Workspace():
         if globPars:
             # Global parameter keys
             parsKeys.extend([('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] + \
-                            [('.', 'lshapeR', i) for i in range(self.lshapeOrder)] + \
-                            [('.', 'lshapeI', i) for i in range(self.lshapeOrder)])
+                            [('.', 'lshapeR', i) for i in range(config.MODEL_LineShapeOrder)] + \
+                            [('.', 'lshapeI', i) for i in range(config.MODEL_LineShapeOrder)])
 
         if amplitudes:
             # Include the amplitude parameters for all reported nodes
@@ -339,10 +422,16 @@ class Workspace():
         return parsKeys
 
     def _updateParameters(self):
-        """Updates the existing dictionaries of parameters after the tree has changed (e.g. when adding/removing nodes or setting new root nodes). Updates the structure to match with the new default parameters but keeps the old values."""
+        """Update the existing dictionaries of parameters after the tree has been
+            changed (e.g. when adding/removing nodes or setting new root nodes).
+            Updates the structure to match the new default parameters but keeps
+            the existing values.
+
+        """
+
         oldRoots = self.repRootNames
 
-        newParsH = defaultTreePars(self.T, lshapeOrder=self.lshapeOrder)
+        newParsH = defaultTreePars(self.T)
         newRoots = [node.name for node in self.T.repRoots()]
 
         # Update parameter dictionaries
@@ -411,11 +500,7 @@ class Workspace():
         return True
 
     def renameTreeNode(self, oldName, newName):
-        # Rename all children, if it's a spin system node
-        # if isinstance(self.T[oldName], chemNodeQD):
-        #     for chld in self.T[oldName].children():
-        #         suffix = chld.name[chld.name.rfind('-'):]
-        #         self.renameTreeNode(chld.name, newName + suffix)
+        """Rename a tree node known by oldName to newName."""
 
         # List all top levels of al parameter keys that will neeed to be updated
         parsKeysTopOld = [desc.name for desc in self.T[oldName].descendants(include_self=True)]
@@ -474,7 +559,11 @@ class Workspace():
         return True
 
     def toggleRepRoot(self, key):
-        """Toggles the reportability of a certain root node and updates the parameters accordingly."""
+        """Toggle the reportability (whether the intensity is estimated or not)
+        of a certain root node and update the parameters accordingly.
+
+        """
+
         self.T[key].toggleReported()
         self._updateParameters()
 
@@ -496,7 +585,9 @@ class Workspace():
         return SSS
 
     def _search(self, costFuncOpti, bounds, crntVal=None, nval=None):
-        """Evaluates the cost function on a range of values between the bounds and selects the minimum one. costFuncOpti must be a function of a single variable."""
+        """Evaluate the cost function on a range of values between the bounds and
+            select the minimum. costFuncOpti must be a function of a single variable.
+        """
         if nval is None:
             nval = config.OPTIM_nvalLinearSearch
 
@@ -518,7 +609,7 @@ class Workspace():
             res = optimize.basinhopping(costFuncOpti, initVals, \
                   niter = nhop if nhop is not None else config.OPTIM_maxBasinhoppingSteps, \
                   niter_success = nhop if nhop is not None else config.OPTIM_niterSuccess, T = 10, disp = verbose, \
-                  minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )     #    , take_step=MyTakeStep())
+                  minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )
         else:
             # Perform the linear search on the inital values
             if config.OPTIM_nvalLinearSearch > 0:
@@ -749,7 +840,6 @@ class Workspace():
         result = {'HCmode' : self.HCmode,
                 'T' : T,
                 'parsSpecDict' : self.parsSpecDict,
-                'lshapeOrder' : self.lshapeOrder,
                 'series' : [],
                 'extra' : self.extra}
         for ser in self.series:
@@ -791,10 +881,7 @@ class Workspace():
 
     def unpack(self, packed):
         """Unpackes a saved workspace from the dictionary."""
-        try: lshapeOrder = packed['lshapeOrder']    # Needed for older packed Workspaces that did not include lineshape correction parameters
-        except KeyError: lshapeOrder = None
-
-        self.reset(packed['HCmode'], lshapeOrder)
+        self.reset(packed['HCmode'])
         try: self.extra.update(packed['extra'])
         except KeyError: pass
         T = packed['T']
@@ -835,7 +922,7 @@ class Workspace():
             for stp in ser['steps']:
                 newStep = Step()
                 newStep.frqBlkIds, newStep.parsKeys = stp.frqBlkIds, stp.parsKeys
-                for attr in ['autoKeys', 'fitCustomLshape', 'script', 'nrep', 'fitEach']:
+                for attr in ['autoKeys', 'script', 'nrep', 'fitEach']:
                     try: setattr(newStep, attr, getattr(stp, attr) )
                     except AttributeError: pass
                 newSeries.steps.append(newStep)
@@ -852,15 +939,17 @@ class Workspace():
                 if 'jointPrior' in dat.keys():
                     newDatum.setJointPrior(dat['jointPrior'])
 
-        if lshapeOrder is None: self.set_lshapeOrder(2)
-
         # Add missing parameters (needed for back-compatibility)
         for parsH in [dat.crntParsH for ser in self.series for dat in ser.data]:
             if 'gamma' not in parsH['.'].keys():
                 parsH['.']['gamma'] = [0.0]
 
 class Series():
-    """Class for the data series (e.g. in reaction monitoring)."""
+    """Class for the data series (useful for e.g. reaction monitoring).
+    Attributes:
+
+    """
+
 
     def __init__(self, parent, name = None, c0=None, f0=None, t=None, zff=0, apod=0, priors=None, extra=None, **kwargs):
         self.parent = parent     # The workspace that contains the tree
@@ -870,7 +959,8 @@ class Series():
         self.t = t.reshape(-1,1) if t is not None else np.array([])
         self.f = np.array([])
         self.data = []               # A list of Datum structures
-        self.steps = [Step(repRootNames=self.repRootNames)]               # Fitting steps; each entry is a set of parsKeys tuples and set of frqBlkIds
+        self.steps = [Step(autoKeys=[('.', 'sigma2', 0)]+\
+                      [(name, 'ampl', 0) for name in self.repRootNames])]
         self.freqBlocks = []         # a list of optimization frequency ranges
         self.apod = apod
         self.zff = zff               # zero-filling factor (exponent of 2)
@@ -926,7 +1016,7 @@ class Series():
 
     def getDfltParsH(self):
         """Returns a complete hierarchical dictionary of default parameters."""
-        result = defaultTreePars(self.T, lshapeOrder=self.lshapeOrder)
+        result = defaultTreePars(self.T)
 
         # Update the default parameters using priors defined for the Series, if there are any
         for node_name in result.keys():
@@ -1897,7 +1987,7 @@ class Datum():
 
     def getDfltParsH(self):
         """Returns a complete hierarchical dictionary of default parameters."""
-        result = defaultTreePars(self.T, lshapeOrder=self.lshapeOrder)
+        result = defaultTreePars(self.T)
         for node_name in result.keys():
             for par_name, par_array in result[node_name].items():
                 for i in range(len(par_array)):
@@ -3909,7 +3999,8 @@ def flims(dt, nf):
 
 def split_steps(dat, step):
     """Splits the list of fited parameters and returns a list of corresponding steps."""
-    return [Step(frqBlkIds = step.frqBlkIds, parsKeys = [key], autoKeys=step.autoKeys, fitCustomLshape = step.fitCustomLshape) for key in step.parsKeys]
+    return [Step(frqBlkIds = step.frqBlkIds, parsKeys = [key], autoKeys=step.autoKeys)\
+            for key in step.parsKeys]
 
 # ------------------------------ License files ---------------------------------
 

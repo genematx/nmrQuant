@@ -1633,11 +1633,8 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self._parsSigma2 = viewNode(('.', 'sigma2', 0), alias=None, nodeType='param')       # alias='Variance of noise, s2'
         self._parsPH0 = viewNode(('.', 'theta', 0), alias=None, nodeType='param')         # alias='Zero-order phase (PH0)'
         self._parsPH1 = viewNode(('.', 'tau', 0), alias=None, nodeType='param')       # alias='Acquisition delay (PH1)'
-        # self._ratioTLS = viewNode(('.', 'gamma', 0), alias='TLS ratio', nodeType='param')
-        # self._lshape = viewNode('_lshape', alias='Lineshape correction', nodeType='lshape')           # self._lshape = viewNode('lshapeX', alias='Fit custom shape', nodeType='bool')
 
         self.resetChemTree(flag=False)
-        self.resetLshapeTree(flag=False)
 
     def resetChemTree(self, T=None, flag=True):
         """Updates the chemical tree."""
@@ -1649,21 +1646,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         # The tree of parameters to be displayed
         self.TP = getDisplayTree(self.datum.T) if self.datum.T is not None else viewNode('')
         self._unfittableParsKeys = None       # A list (or set) of keys that can not be fitted
-
-        if flag: self.endResetModel()
-
-    def resetLshapeTree(self, flag=True):
-        """Updates the tree of lineshape correction parameters."""
-        if flag: self.beginResetModel()
-
-        # Uncomment to show 2nd and 3rd order coreection parameters
-        # # Reset the lineshape correction subtree
-        # self._lshape.clearChildren()
-        # self._lshape.addChild(viewNode('lshapeX', alias='Fit custom shape', nodeType='bool'))       # Custom lineshape
-        # supscr = ['nd', 'rd'] + ['th']*(self.datum.lshapeOrder-2)
-        # for i in range(self.datum.lshapeOrder):
-        #     self._lshape.addChild(viewNode(('.','lshapeR',i), alias='{}{} order Re'.format(i+2, supscr[i]), nodeType='param'))
-        #     self._lshape.addChild(viewNode(('.','lshapeI',i), alias='{}{} order Im'.format(i+2, supscr[i]), nodeType='param'))
 
         if flag: self.endResetModel()
 
@@ -1701,7 +1683,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.beginResetModel()
         self.datum = datum
         self.resetChemTree(flag=False)
-        self.resetLshapeTree(flag=False)
         self.endResetModel()
 
     def notifyDataChanged(self, key=None):
@@ -1837,8 +1818,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 else:
                     return Qt.Unchecked
 
-            elif node.name == 'lshapeX':
-                return self.datum.steps[step_indx].fitCustomLshape
 
             else: return None
 
@@ -1920,8 +1899,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     elif node.name[1][:4] == "chsh":
                         displayIcon = QIcon("icons\icon_delta.png")
                 elif node.nodeType == 'lshape':
-                    displayIcon = QIcon('icons\icon_lshape.png')
-                elif node.name == 'lshapeX':
                     displayIcon = QIcon('icons\icon_lshape.png')
                 else:
                     displayIcon = QIcon("icons\icon_chemMixture.png")
@@ -2082,14 +2059,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                             for step in self.datum.steps:
                                 step.parsKeys.add(node.name)
 
-            elif node.nodeType == 'bool':
-                if node.name == 'lshapeX':
-                    self.datum.steps[step_indx].fitCustomLshape = not self.datum.steps[step_indx].fitCustomLshape
-
-                    # Repeat for the rest of the steps
-                    if shiftPressed:
-                        for step in self.datum.steps:
-                            step.fitCustomLshape = not self.datum.steps[step_indx].fitCustomLshape
 
             if shiftPressed:
                 self.dataChanged.emit(self.index(row,0), self.index(row, self.columnCount()))                # Update the entire current row
@@ -2219,19 +2188,20 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
     def increaseOrder(self):
         """Increases the order of the lineshape correction polynomial."""
-        lshapeOrder = self.datum.lshapeOrder           # Current order of the lineshape
-        self.beginInsertRows(self.index(4, 0), 2*lshapeOrder, 2*lshapeOrder+1) # Parent node, first and last position
-        self.datum.set_lshapeOrder(lshapeOrder+1)
-        self.resetLshapeTree(flag=False)
+        oldOrder = config.MODEL_LineShapeOrder  # Current order of the lineshape
+        self.beginInsertRows(self.index(4, 0), 2*oldOrder, 2*oldOrder+1) # Parent node, first and last position
+        config.MODEL_LineShapeOrder = oldOrder+1
+        self.datum.set_lshapeOrder()
         self.endInsertRows()
 
     def decreaseOrder(self):
         """Increases the order of the lineshape correction polynomial."""
-        lshapeOrder = self.datum.lshapeOrder           # Current order of the lineshape
-        self.beginRemoveRows(self.index(4, 0), 2*lshapeOrder-1, 2*lshapeOrder) # Parent node, first and last position
-        self.datum.set_lshapeOrder(lshapeOrder-1)
-        self.resetLshapeTree(flag=False)
-        self.endRemoveRows()
+        oldOrder = config.MODEL_LineShapeOrder  # Current order of the lineshape
+        if oldOrder > 0:
+            self.beginRemoveRows(self.index(4, 0), 2*oldOrder-1, 2*oldOrder) # Parent node, first and last position
+            config.MODEL_LineShapeOrder = oldOrder-1
+            self.datum.set_lshapeOrder()
+            self.endRemoveRows()
 
     def clmn2step(self, clmn):
         """A utility function to convert a column index to the corresponding step index."""

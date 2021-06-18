@@ -2429,14 +2429,15 @@ class chemNodeQT(chemNode):
 
 # ------------------------- Functions for working with trees -------------------------------
 
-def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, lshapeOrder=2, gamma=0.0, startFromRoot=True):
+def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, gamma=0.0, startFromRoot=True):
     """Returns a nested array of default tree parameters."""
     if startFromRoot:
         tree = tree.findRoot()
     pars = {node.name : node.default_pars() for node in tree.descendants(include_self=True)}
     pars["."] = {"tau" : [tau], "theta" : [theta],  # "ampl" : [1.0]*len([i for i in tree.repRoots()]),
                  "mult" : [1.0], "sigma2" : [sigma2], 'gamma':[gamma],
-                 "lshapeR" : [0.0]*lshapeOrder, "lshapeI" : [0.0]*lshapeOrder}
+                 "lshapeR" : [0.0]*config.MODEL_LineShapeOrder,
+                 "lshapeI" : [0.0]*config.MODEL_LineShapeOrder}
     return pars
 
 #@profile
