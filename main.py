@@ -1307,7 +1307,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         elif role == Qt.DecorationRole:
             if isinstance(node, Datum):
                 displayIcon = QIcon('icons\icon_gof_none.png')
-                # gof = node.goodness_of_fit()
+                # gof = node.quality_of_fit()
                 # if gof is None:
                 #     displayIcon = QIcon('icons\icon_gof_none.png')
                 # elif gof > 0.9:

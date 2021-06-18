@@ -947,12 +947,61 @@ class Workspace():
 class Series():
     """Class for the data series (useful for e.g. reaction monitoring).
     Attributes:
+        name : str
+            Name of the Series
+        parent : Workspace
+            The containing Workspace
+        data : list of Datum instances
+            List of datasets assigned to this Series
+        steps : list of Step instances
+            All processing steps performed in this Series
+        freqBlocks : list of freqSpec
+            List of specification for the frequency blocks used in optimization.
+            The 0th block is automatically defined to correspond to the entire
+            frequency range of the spectra.
+        c0, f0 : float
+            The field strength of the spectrometer in MHz and the spectral offset
+            in Hz, respectively. Given a chemical shift in ppm, its corresponding
+            frequency in Hz is computeed as: [Hz] = c0*[ppm]-f0.
+        t : nt_x_1 np.array
+            Array of time samples of the FID signals.
+        f : nf_x_1 np.array
+            Chemical shift array (in ppm) used to plot the spectra.
+        apod : float
+            Rate of the exponential line-broadedng applied to all Datums in the
+            Series, *exp(-apod*t).
+        zff : int
+            Zero-filling factor; the resulting spectrum will have the length of
+            the next power of 2 of nt*(2^zff).
+        crntMetaF : dict
+            A flat (F) dictionary of meta parameters assigned to the Series. Keys
+            are 2-tuples indicating meta parameters.
+        smplDistF : dict
+            A dictionary of parameters' samples obtained by MCMC. Keys correspond
+            to parsKeys tuples; values are of smplSpec type.
+        _meta : callable
+            A function that can be run during the evaluation of the model fit in
+            the Series (before evaluating actual model parameters). The inputs
+            to this function should be arranged as:
+            meta(evalParsH, evalMetaF, parsDict).
+            Normally, it would take the values of meta parameters in the evalMetaF
+            dictionary and update the evalParsH dictionary and/or the dictionary
+            of parameter priors, parsDict.
+            This fucntoin can be set/removed using the setMetaFunction and
+            remMetaFunction methods.
+        _joint : callable
+            A function defining a joint prior distribution of the parameters. Takes
+            a hierarchical dictionary of parameter values, evalParsH, and returns
+            the vlaue of log-prior (float).
+            Can be set/removed using the setJointPrior and remJointPrior methods.
+        extra : dict
+            Any additional data specific to a particular application.
 
     """
 
 
     def __init__(self, parent, name = None, c0=None, f0=None, t=None, zff=0, apod=0, priors=None, extra=None, **kwargs):
-        self.parent = parent     # The workspace that contains the tree
+        self.parent = parent     # The workspace that contains the Series
         self.name = name if name is not None else 'Series ' + str(len(self.parent.series)+1)
         self.c0 = c0
         self.f0 = f0
@@ -996,6 +1045,13 @@ class Series():
         return self.log(depth)
 
     def selfID(self):
+        """Identifier of the Seriies in the containing Workspace.
+            Returns a 2-tuple with the first element corresponding to the index of
+            the Series in the list of series in the Workspace; the second element
+            is set to None.
+
+        """
+
         return (self.parent.series.index(self), None)
 
     def getCrntVal(self, key):
@@ -1600,7 +1656,53 @@ class Series():
         return x_arr, llkl_arr, lpri_arr, lpst_arr, crntVal
 
 class Datum():
-    """A single data instance. Contains signals of a single NMR experiment."""
+    """A single data instance. Contains signals of a single NMR experiment.
+    Attributes:
+        name : str
+            Name of the data (spectrum).
+        parent : Series
+            Containing Series instance
+        _f : np.array
+            An array of spectral points defining the chemical shift range in ppm.
+            Can be non-uniform and/or subsampled, If None, the default frequency
+            array from the Series will be used.
+        _flagAdapFreq : bool
+            A flag indicating wether the frequency (chemical shift) scale uses an
+            adaptive sampling (e.g. more dense around peaks in the spectrum).
+            If True, _f will be set to the array of chemical shift.
+        yT : nt_x_1 np.array
+            The main data in the time domain, FID.
+        arrVal : float
+            Value of an arrayed parameter that varies across the Series, e.g.
+            reaction time, concetration, etc.
+        parsSpecDict : dict
+            dictionary of specifications of priors for the model parameters. If
+            not empty, its entries will replace the corresponding parameters defined
+            in the Series, Workspace, and the Tree levels.
+        crnParsH : dict of dict of list of float
+            A dictionary of current values of all model parameters arranged
+            hierarchically, i.e.
+            {'node name' : {'parameter name' : [list of values]}}
+        smplDistF : dict
+            A dictionary of parameters' samples obtained by MCMC. Keys correspond
+            to parsKeys tuples; values are of smplSpec type.
+        xclRootNames : set of str
+            Names of chemTree nodes excluded form analysis for this Datum (e.g.
+            if a certain component is absent in the sample, its intensity will
+            be set to 0 and it will not be fitted).
+        _joint : callable
+            A function defining a joint prior distribution of the parameters. Takes
+            a hierarchical dictionary of parameter values, evalParsH, and returns
+            the vlaue of log-prior (float).
+            Can be set/removed using the setJointPrior and remJointPrior methods.
+        _qof : float
+            Quality of fit
+            TODO: not defined
+        extra : dict
+            Any additional data specific to a particular application.
+
+
+    """
 
     def __init__(self, yT, parent, name='', arrVal=None, crntParsH=None, flagAdapFreq=None, priors=None, xclRootNames=None, extra=None, **kwargs):
         self.name = name
@@ -1616,7 +1718,7 @@ class Datum():
         self.xclRootNames = set(xclRootNames) if xclRootNames is not None else set([])       # Excluded RootNames
         self._joint = None            # A joint prior of all parameters
         self._flagAdapFreq = flagAdapFreq if flagAdapFreq is not None else (len(self.yT) > 2**16)
-        self._gof = None              # Computed goodness of fit
+        self._qof = None              # Computed goodness of fit
         self.extra = {}
         self.fullReset(crntParsH, priors, flagAdapFreq, extra)
 
@@ -1647,7 +1749,13 @@ class Datum():
         return self.name
 
     def selfID(self):
-        """Returns indices of the Series in the Workspace and the Datum in the Series"""
+        """Identifier of the Datun in the containing Workspace.
+            Returns a 2-tuple with the first element corresponding to the index of
+            the parent Series in the list of series in the Workspace; the second
+            element is the index of the Datum in the Series.
+
+        """
+
         return (self.parent.parent.series.index(self.parent), self.parent.data.index(self))
 
     def isAdapFreq(self):
@@ -1675,7 +1783,7 @@ class Datum():
         self.zF_corr, self.bF_corr = None, None           # Corrections for the model matrix and the baseline
         self.sF, self.sT = None, None        # A lineshape kernel
         self.Gz = None
-        self._gof = None
+        self._qof = None
 
         # Reset the adaptive frequencies flag, if supplied
         if flagAdapFreq is not None:
@@ -1720,7 +1828,7 @@ class Datum():
         self.smplDistF.clear()          # A flat dictionary of sampled (or marginalized) parameters
         self.mdldPeaks.clear()
         self.pckdPeaks.clear()
-        self._gof = None
+        self._qof = None
 
     def fullReset(self, crntParsH=None, priors=None, flagAdapFreq=None, extra=None):
         self.resetSignals(flagAdapFreq)
@@ -1932,7 +2040,7 @@ class Datum():
 
     def setCrntVal(self, key, val=None):
         """Updates the current value of the parameter key."""
-        self._gof = None           # Need to update the goodness of fit
+        self._qof = None           # Need to update the goodness of fit
 
         if val is None:
             val = self.getPrior(key).dflt()
@@ -2264,7 +2372,6 @@ class Datum():
             Gz = 1.0*np.abs(Z)
 
         Gz[:, na:] = 0
-        # print(np.sum(np.abs(Z), axis=0))
         result, ampl, sigma2, meta = log_likelihood(Z, y, ampl0=ampl, sigma2_0=sigma2, \
             Gz=Gz, Gy=None, gamma0=gamma, m0=m0, iS0=iS0, a_sigma2_0=a_sigma2, b_sigma2_0=b_sigma2, \
             funcType=funcType, robust=robust, nonnegative=True, na=na)
@@ -2305,7 +2412,7 @@ class Datum():
                 self.zF = np.fft.fftshift(np.fft.fft(Z, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
             else:
                 self.zF = np.zeros((len(self.f),na), dtype=complex)
-                self.zF[indxInRangeStacked,:] = zFinRange ### / Znrm[:, 0:na]
+                self.zF[indxInRangeStacked,:] = zFinRange
 
             # Save the characteristics of the marginalized distributions
             for i in range(na):
@@ -2324,7 +2431,7 @@ class Datum():
             self.bF[indxInRangeStacked] = np.dot(bFinRange, m_ampl[-(nz-na):])
 
         meta['sigma2'] = (2.0, sigma2)
-        meta['theta'] = theta       # distr = {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
+        meta['theta'] = theta
         meta['ampl'] = (np.abs(m_ampl[:na]), S_ampl[:na, :na].real)
 
         return result, meta         # Output the log value and parameters of the marginalized distributions
@@ -2387,12 +2494,15 @@ class Datum():
         return snr
 
     def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False, allowShift=False, shiftingRange=0.1):
-        """Evaluates the objective function (logLikelihood + sum of logPriors).
+        """Evaluate the objective function (logLikelihood + sum of logPriors).
            Inputs:
            evalParsH - hierarchical dictionary of parameters (node name -> parameter name -> list of parameters); use crntParsH by default
            parsKeys - list of parameter tuples (node name, parameter name, parameter index)
            frqBlkIds - list of indices of frequency blocks over which to evaluate the function; evaluate in time domain by default, []
-           evaluatePriors - if True, will add values of priors to the likelihood function to compute the posterior. Only those priors specified by parsKeys will be evaluated. """
+           evaluatePriors - if True, will add values of priors to the likelihood
+           function to compute the posterior. Only those priors specified by parsKeys will be evaluated.
+
+        """
 
         if parsKeys is None or autoKeys is None:
             parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds, customPriors, verbose=False)
@@ -2446,9 +2556,9 @@ class Datum():
 
         return result, meta
 
-    def goodness_of_fit(self, frqBlkIds=None):
+    def quality_of_fit(self, frqBlkIds=None):
         """Evaluates how well the model is fitted to the data on the scale from 0.0 (bad) to 1.0 (good)."""
-        if self._gof is None:
+        if self._qof is None:
             # print('Calculating GOF')
             self.evaluate(autoKeys=[], returnSignals=True)
             f, yFph, xF, _, bF = self.signals_for_plot(frqBlkIds=frqBlkIds, onlyInRange=True)
@@ -2465,13 +2575,13 @@ class Datum():
             # print('GOF scores = ', score1, score2, score3)
 
             if score1 < 0.05 and score3 < 20.0:
-                self._gof = 1.0
+                self._qof = 1.0
             elif 0.05 <= score1 and score1 < 0.2:
-                self._gof = 0.5
+                self._qof = 0.5
             else:
-                self._gof = 0.0
+                self._qof = 0.0
 
-        return self._gof
+        return self._qof
 
     def auto_phase(self, fit_Ph1=True):
         """Run the autophasing algorithm."""
@@ -2706,7 +2816,7 @@ class Datum():
         if self.isAdapFreq():
             raise RuntimeError('Custom lineshapes are not supported with adaptive frequency scale.')
 
-        self._gof = None
+        self._qof = None
         nt, nf = len(self.t), len(self.f)
         nw = config.MODEL_ShapeKernelSize         # Length of the adaptive lineshape window (in frequency domain)
         nw2 = int(nw/2)
@@ -2782,7 +2892,7 @@ class Datum():
         """Resets the custom lineshape to its default values (None)."""
         self.sT = None
         self.sF = None
-        self._gof = None
+        self._qof = None
 
     def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nwalkers=None, nsteps=None):
         """Samples the posterior distribution using the MCMC algorithm."""
