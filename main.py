@@ -3659,6 +3659,12 @@ class MainNMRWindowBase(QMainWindow):
 
     def continueThread(self):
         """Continues fitting the thread if there are any files left."""
+        
+        def split_steps(dat, step):
+            """Splits the list of fited parameters and returns a list of corresponding steps."""
+            return [Step(frqBlkIds = step.frqBlkIds, parsKeys = [key], autoKeys=step.autoKeys)\
+                    for key in step.parsKeys]
+
         if len(self._fittingQueue) > 0:
             fileToFit, actnToRun = self._fittingQueue.pop(0)
 
