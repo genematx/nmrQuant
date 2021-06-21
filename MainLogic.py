@@ -29,11 +29,6 @@ from operator import getitem
 
 ##### ------------ Main classes for the general program logic ------------ #####
 
-minmaxTuple = namedtuple('minmaxTuple', 'min, max')
-minmaxTuple.__new__.__defaults__ = (-np.inf, np.inf)
-minmaxTuple.imin = lambda self, f : np.searchsorted(f.ravel(), self.min)
-minmaxTuple.imax = lambda self, f : np.searchsorted(f.ravel(), self.max)
-
 class freqSpec():
     """Specification of frequency blocks along with their baselines.
     Attributes:
