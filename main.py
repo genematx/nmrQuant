@@ -3097,8 +3097,8 @@ class MainNMRWindowBase(QMainWindow):
         MEDIUM_SIZE = 12
         BIGGER_SIZE = 14
 
-        rc('font', size=SMALL_SIZE)          # controls default text sizes
-        rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+        # rc('font', size=SMALL_SIZE)          # controls default text sizes
+        # rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
         #rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
         #rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
         #rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
@@ -3949,10 +3949,10 @@ class MainView_nmrQuant(MainNMRWindowBase):
         self.printoutEdit.resize(50, 50)
 
         # ----------------- set up the pie chart figure
-        self.pieFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
-        self.pieCanvas = FigureCanvas(self.pieFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
-        self.pieCanvas.setMaximumHeight(275)
-        self.ax_pie = self.pieFigure.add_subplot(111)    # create axes
+        self.barFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
+        self.barCanvas = FigureCanvas(self.barFigure)             # this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
+        self.barCanvas.setMaximumHeight(275)
+        self.ax_bar = self.barFigure.add_subplot(111)    # create axes
 
         # ------------------ 2. Set up the chemical tree ----------------------
         self.treeView = ChemTreeView()
@@ -4008,7 +4008,7 @@ class MainView_nmrQuant(MainNMRWindowBase):
         layNavi = QVBoxLayout()
         tabNavi.setLayout(layNavi)
         layNavi.addWidget(self.naviTreeView)
-        layNavi.addWidget(self.pieCanvas)
+        layNavi.addWidget(self.barCanvas)
         layNavi.setContentsMargins(1,1,1,1)
 
         # ----------------------------------------------------------------------
@@ -4464,7 +4464,7 @@ class MainView_nmrQuant(MainNMRWindowBase):
         """Plots signals corresponding to the currently opened file and current parameters."""
         if isinstance(self._crnt, Series):
             self.mainFigureWidget.reset()
-            self.plotPieChart(reset=True)
+            self.plotBarChart(reset=True)
 
         elif isinstance(self._crnt, Datum):
             f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
@@ -4485,7 +4485,7 @@ class MainView_nmrQuant(MainNMRWindowBase):
                 self.mainFigureWidget.autoRange()
 
             # Output the found results
-            self.plotPieChart()
+            self.plotBarChart()
 
             # Update the phasing widget
             self.mainPhasingWidget.setData(f, yFph, xF,
@@ -4493,7 +4493,7 @@ class MainView_nmrQuant(MainNMRWindowBase):
 
         else:
             self.mainFigureWidget.reset()
-            self.plotPieChart(reset=True)
+            self.plotBarChart(reset=True)
 
     def toggleStems(self):
         """Plots stem lines to indicate modeled peaks."""
@@ -4525,11 +4525,11 @@ class MainView_nmrQuant(MainNMRWindowBase):
             if key_crnt is not None and key_crnt[1] in ['chshQD', 'alphQD']:
                 self.mainFigureWidget.highlightStems((key_crnt[0], 'chshQD', key_crnt[2]), True)
 
-    def plotPieChart(self, reset=False):
-        """Plots a pie chart that represents the found component concentrations."""
+    def plotBarChart(self, reset=False):
+        """Plots a bar chart that represents the found component concentrations."""
 
         def hover(evt):
-            if evt.inaxes == self.ax_pie:
+            if evt.inaxes == self.ax_bar:
                 # Find which bar contains the event
                 for indx, patch in enumerate(bars.patches):
                     if patch.contains(evt)[0]:
@@ -4540,11 +4540,11 @@ class MainView_nmrQuant(MainNMRWindowBase):
 
             self.statusBar.clearMessage()
 
-        self.ax_pie.clear()
+        self.ax_bar.clear()
 
         # Remove the reference to the hovering event
         try:
-            self.pieCanvas.mpl_disconnect(self._cid_hover)
+            self.barCanvas.mpl_disconnect(self._cid_hover)
         except AttributeError: pass
 
         if not reset:
@@ -4554,20 +4554,15 @@ class MainView_nmrQuant(MainNMRWindowBase):
             if sum(cnct) != 0:
                 cnct = cnct / sum(cnct)
             labels = [d[1] for d in data]
-            bars = self.ax_pie.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
+            bars = self.ax_bar.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
                 color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(name)])
-            self.ax_pie.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
-            ttl = self.ax_pie.set_title('Relative concentrations, %', fontsize=12)
+            self.ax_bar.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
+            ttl = self.ax_bar.set_title('Relative concentrations, %', fontsize=12)
             ttl.set_position((0.5, 1.03))
-            # wedges, texts, autotexts = self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
-            # self.ax_pie.legend(wedges, labels,
-            #   loc="bottom",
-            #   bbox_to_anchor=(0, 0.1, 0.5, 1))
-            # self.ax_pie.axis('equal')
 
-            self._cid_hover = self.pieCanvas.mpl_connect("motion_notify_event", hover)
+            self._cid_hover = self.barCanvas.mpl_connect("motion_notify_event", hover)
 
-        self.pieCanvas.draw()
+        self.barCanvas.draw()
 
 # --------------------- Adding and removing frequency blocks -------------------
     def addFreqBlock(self, xmin, xmax):
