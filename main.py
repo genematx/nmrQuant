@@ -2,20 +2,21 @@ import sys
 import numpy as np
 import dill
 from MainLogic import *
-from MainLogic import Series, Datum, Workspace
+from MainLogic import Step, Series, Datum, Workspace
+from chemTree import viewNode
 from dataio import *
 import config
 
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent, QItemSelectionModel
-from PyQt5.QtGui import QBrush, QDoubleValidator, QIcon, QPalette, QPen, QTextCursor
+from PyQt5.QtGui import QBrush, QIcon, QPen
 from PyQt5.QtWidgets import QAction, QActionGroup, QApplication, QCheckBox,\
     QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,\
-    QInputDialog, QItemDelegate, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
-    QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QMainWindow, \
+    QItemDelegate, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
+    QLineEdit, QListWidget, QMenu, QMessageBox, QMainWindow, \
     QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, \
     QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget,\
-    QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
+    QToolButton, QTreeView, QToolBar, QWidget
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
 from matplotlib import rc, rcParams
@@ -1003,68 +1004,8 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
         self.setState()
 
-class QCheckableComboBox(QComboBox):
-    """Checkable ComboBox"""
-
-    selectionChanged = pyqtSignal()
-
-    def __init__(self, items = [], checkedItems = None, parent=None):
-        super().__init__(parent)
-        self.view().pressed.connect(self.onItemPressed)
-        self._changed = False
-        self.setupItems(items, checkedItems)
-        self.view().setMinimumWidth(100)
-
-    def setupItems(self, items = [], checkedItems = None):
-        """Populates the combobox with items and sets their state"""
-        self.clear()
-        for indx, item in enumerate(items):
-            self.addItem(item)
-            if checkedItems is not None:
-                if indx in checkedItems:
-                    self.setItemChecked(indx, True)
-            else:
-                self.setItemChecked(indx, False)
-
-    def addItem(self, item, checked = False):
-        super().addItem(item)
-        newItem = self.model().item(self.model().rowCount()-1, self.modelColumn())
-        if checked:
-            newItem.setCheckState(Qt.Checked)
-        else:
-            newItem.setCheckState(Qt.Unchecked)
-
-    def onItemPressed(self, index):
-        item = self.model().itemFromIndex(index)
-        if item.checkState() == Qt.Checked:
-            item.setCheckState(Qt.Unchecked)
-        else:
-            item.setCheckState(Qt.Checked)
-        self._changed = True
-        self.selectionChanged.emit() # emit a signal to save the change in the treeWidget
-
-    def hidePopup(self):
-        if not self._changed:
-            super().hidePopup()
-        self._changed = False
-
-    def itemChecked(self, index):
-        item = self.model().item(index, self.modelColumn())
-        return item.checkState() == Qt.Checked
-
-    def checkedItems(self):
-        """Returns a list of checked items' indices or [] if all items are unchecked."""
-        return [i for i in range(self.model().rowCount()) if self.itemChecked(i)]
-
-    def setItemChecked(self, index, checked=True):
-        item = self.model().item(index, self.modelColumn())
-        if checked:
-            item.setCheckState(Qt.Checked)
-        else:
-            item.setCheckState(Qt.Unchecked)
-
 class FreqTableModel(QtCore.QAbstractTableModel):
-    """A treeView class for the main navigation view."""
+    """Main model for frequency blocks."""
 
     freqBlockChanged = pyqtSignal(int)    # Returns the index of the changed freqBlock
 
@@ -1208,7 +1149,7 @@ class FreqTableModel(QtCore.QAbstractTableModel):
         self.endRemoveRows()
 
 class FreqTableView(QTableView):
-    """Model/View based class to display frequency ranges for optimization."""
+    """View to display frequency blocks for optimization."""
 
     def __init__(self, parent=None):
         super().__init__(parent)    # Initialize a QTreeWidget
@@ -1231,7 +1172,7 @@ class FreqTableView(QTableView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
 class NavigationTreeModel(QtCore.QAbstractItemModel):
-    """A treeView class for the main navigation view."""
+    """A model class for the main navigation view."""
 
     def __init__(self, wsp, parent = None):
         super().__init__()     # QtCore.QAbstractItemModel.__init__(self)
@@ -1422,7 +1363,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
                 item.copySettings(self._copySettingsFrom)
 
 class NavigationTreeView(QTreeView):
-    """Model/View based class to display loaded datasets."""
+    """A view class to display the loaded datasets."""
 
     requestPasteCrnt = pyqtSignal(list)
     requestPasteDflt = pyqtSignal(list)
@@ -1494,31 +1435,6 @@ class NavigationTreeView(QTreeView):
         # print('Selecting ', key)
         index = self.model().indexByKey(key)
         self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows)
-
-class NavigationTreeDelegate(QItemDelegate):
-
-    def __init__(self, parent=None, *args):
-        super().__init__(parent, *args)
-
-    def paint(self, painter, option, index):
-        painter.save()
-
-        # set background color
-        painter.setPen(QPen(Qt.NoPen))
-        if option.state & QStyle.State_Selected:
-            painter.setBrush(QBrush(Qt.red))
-        else:
-            painter.setBrush(QBrush(Qt.white))
-        painter.drawRect(option.rect)
-
-        # set text color
-        painter.setPen(QPen(Qt.black))
-        value = index.data(Qt.DisplayRole)
-        if value:
-            text = value
-            painter.drawText(option.rect, Qt.AlignLeft, text)
-
-        painter.restore()
 
 def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
     """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
@@ -2385,14 +2301,15 @@ class ChemTreeView(QTreeView):
         self.header().setSectionsClickable(True)
         self.header().sectionPressed.connect(self.model().setActiveStep)
         self.header().sectionMoved.connect(self.onHeaderSectionMoved)
+        self.header().setMinimumSectionSize(18)
+        self.header().setDefaultSectionSize(20)
 
-        # self.header().setDefaultSectionSize(20)
         self.setColumnWidth(0, 150)
         self.setColumnWidth(1, 50)
         self.setColumnWidth(2, 50)
         self.setColumnWidth(3, 50)
         self.setColumnWidth(4, 50)
-        self.header().setResizeMode(0, QtGui.QHeaderView.ResizeToContents)
+        # self.header().setSectionResizeMode(QtGui.QHeaderView.ResizeToContents)
 
         self.setColumnHidden(1, True)
         self.setColumnHidden(2, True)
@@ -3024,66 +2941,6 @@ class PreprocessingWidget(QWidget):
 
             self.parsChanged.emit( {key : val} )
 
-class ParameterDisplayWidget(QWidget):
-    """A widget to display, modify, and sample parameters"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-        # ----------------- set up the histogram figure
-        self.histFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
-        self.histCanvas = FigureCanvas(self.histFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
-        self.axDistr = self.histFigure.add_subplot(111)    # create axes
-        self.axDistr2 = self.axDistr.twinx()    # Separate vertical axis for a histogram plot
-
-        # ----------------- create a table for sampling
-        self.parsListWidget = QListWidget()
-        #self.parsListWidget.itemClicked.connect(self.onSelectParList)
-
-        # ------------ Set up a Block of Widgets for the results ---------------
-        self.editMin = QLineEdit()
-        #self.editMin.editingFinished.connect(self.saveParsForm)
-        self.editMax = QLineEdit()
-        #self.editMax.editingFinished.connect(self.saveParsForm)
-        self.editCrntVal = QLineEdit()
-        #self.editCrntVal.editingFinished.connect(self.saveParsForm)
-        self.cmboxPrior = QComboBox()
-        self.cmboxPrior.addItems(['Uniform', 'Gaussian', 'Log-Normal'])
-        #self.cmboxPrior.activated.connect(self.onPriorNameChanged)
-        self.editPriorMode = QLineEdit()
-        #self.editPriorMode.editingFinished.connect(self.saveParsForm)
-        self.editPriorStdv = QLineEdit()
-        #self.editPriorStdv.editingFinished.connect(self.saveParsForm)
-        self.chkboxUseCrnt = QCheckBox('Use crnt.')
-        #self.chkboxUseCrnt.stateChanged.connect(self.saveParsForm)
-        self.resForm1Layout = QFormLayout()
-        self.resForm1Layout.addRow("Lower bnd.", self.editMin)
-        self.resForm1Layout.addRow("Upper bnd.", self.editMax)
-        self.resForm1Layout.addRow("Current val.", self.editCrntVal)
-        self.resForm1Layout.addRow(" ", None)
-        self.resForm1Layout.addRow("Prior dist.", self.cmboxPrior)
-        self.resForm1Layout.addRow("Mode", self.editPriorMode)
-        self.resForm1Layout.addRow(" ", self.chkboxUseCrnt)
-        self.resForm1Layout.addRow("Deviation", self.editPriorStdv)
-
-        self.bttnSample = QPushButton('Sample')
-        self.bttnSample.clicked.connect(lambda : self.sampleStep(self.treeWidget.indxActvStep))
-        layout = QGridLayout()
-        layout.addWidget(self.parsListWidget, 0, 0, 2, 1)
-        layout.addLayout(self.resForm1Layout, 0, 1)
-        layout.addWidget(self.bttnSample, 1, 1)
-        layout.addWidget(self.histCanvas, 0, 2, 2, 1)
-        layout.setColumnStretch(0, 1)
-        layout.setColumnStretch(1, 1)
-        layout.setColumnStretch(2, 2)
-
-        self.setLayout(layout)
-
-        self.reset()
-
-    def reset(self):
-        pass
-
 class FittingThread(QThread):
     """A worker thread used to fit models to data in several steps."""
 
@@ -3659,7 +3516,7 @@ class MainNMRWindowBase(QMainWindow):
 
     def continueThread(self):
         """Continues fitting the thread if there are any files left."""
-        
+
         def split_steps(dat, step):
             """Splits the list of fited parameters and returns a list of corresponding steps."""
             return [Step(frqBlkIds = step.frqBlkIds, parsKeys = [key], autoKeys=step.autoKeys)\
@@ -4140,8 +3997,6 @@ class MainView_nmrQuant(MainNMRWindowBase):
         self.naviSelection = QItemSelectionModel(self.naviTreeModel)
         self.naviTreeView.setModel(self.naviTreeModel)
         self.naviTreeView.setSelectionModel(self.naviSelection)
-        # self.naviTreeDelegate = NavigationTreeDelegate()
-        # self.naviTreeView.setItemDelegate(self.naviTreeDelegate)
         self.naviSelection.currentChanged.connect(self.onCurrentSelectedChanged)
         self.naviTreeView.requestPasteCrnt.connect(self.treeView.pasteCrntPars)     # Paste copied parameter values to all selected Datums in the naviTreeView
         self.naviTreeView.requestPasteDflt.connect(self.treeView.pasteDfltPars)

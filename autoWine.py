@@ -2,38 +2,31 @@ import sys
 import numpy as np
 import dill
 from MainLogic import *
-from MainLogic import Series, Datum, Workspace
+from MainLogic import Step, Series, Datum, Workspace
 from dataio import *
 import config
 
 from optparse import OptionParser
-from PyQt5.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent, QItemSelectionModel
-from PyQt5.QtGui import QBrush, QDoubleValidator, QIcon, QPalette, QPen, QTextCursor
-from PyQt5.QtWidgets import QAction, QActionGroup, QApplication, QCheckBox,\
-    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,\
-    QInputDialog, QItemDelegate, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
-    QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QMainWindow, \
-    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, \
-    QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget,\
-    QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QDoubleValidator, QIcon, QTextCursor
+from PyQt5.QtWidgets import QAction, QApplication,\
+    QComboBox, QFileDialog, QFormLayout, QVBoxLayout, QHBoxLayout,\
+    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, \
+    QProgressBar, QPushButton, QRadioButton, QSizePolicy, \
+    QToolButton, QTreeView, QToolBar, QToolTip, QWidget
 import pyqtgraph as pg
-import matplotlib.pyplot as plt
-from matplotlib import rc
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.backend_bases import cursors
 from matplotlib.figure import Figure
 import matplotlib.gridspec as gridspec
-from operator import itemgetter
 from os import path
-from random import shuffle
 import re
 import math
 import os, time
 from datetime import date
 from types import MethodType
 
-from main import MainSpectrumWidget, FittingThread, MainNMRWindowBase
+from main import MainSpectrumWidget, MainNMRWindowBase
 
 # Set white background in plots
 pg.setConfigOption('background', 'w')

@@ -3,6 +3,8 @@ from scipy.linalg import block_diag
 import dill
 import copy
 import emcee
+import config
+from chemTree import chemNodeQM, minmaxTuple, evalTreeF, parsSpec, getFID, defaultTreePars
 from chemTree import *
 from leastsquares import *
 import sys
@@ -14,7 +16,6 @@ from dataio import read_any_file
 
 # Functions for generating FIDs and optimization
 from scipy import optimize
-from scipy.optimize import minimize
 import scipy as sp
 #import scipy.sparse
 import scipy.linalg
@@ -23,9 +24,6 @@ from collections import OrderedDict, MutableMapping
 import os, time
 import nmrglue
 from nmrglue.process.proc_autophase import _ps_acme_score, _ps_peak_minima_score
-
-# Functions needed only for Matlab
-from operator import getitem
 
 ##### ------------ Main classes for the general program logic ------------ #####
 
