@@ -1056,7 +1056,10 @@ def QTransClusters(chshQD, jcplQD, meqSpins, meqLinks):
     return freqQPeaks, intnQPeaks
 
 def convolve_multiplets(freqs, intns, freq_offs, n_spin=None):
-    """Convolves peaks of a meq group of spins. freqs and intns are lists of np arrays computd if the spins are included in different subgraphs in the spin system."""
+    """Convolves peaks of a meq group of spins. freqs and intns are lists of np
+       arrays computd if the spins are included in different subgraphs in the
+       spin system.
+    """
     if n_spin is None:
         n_spin = np.mean([np.sum(x) for x in intns])
 
@@ -2087,11 +2090,11 @@ class chemNodeQT(chemNode):
 # ------------------------- Functions for working with trees -------------------------------
 
 def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, gamma=0.0, startFromRoot=True):
-    """Returns a nested array of default tree parameters."""
+    """Returns a nested dictionary of default tree parameters."""
     if startFromRoot:
         tree = tree.findRoot()
     pars = {node.name : node.default_pars() for node in tree.descendants(include_self=True)}
-    pars["."] = {"tau" : [tau], "theta" : [theta],  # "ampl" : [1.0]*len([i for i in tree.repRoots()]),
+    pars["."] = {"tau" : [tau], "theta" : [theta],
                  "mult" : [1.0], "sigma2" : [sigma2], 'gamma':[gamma],
                  "lshapeR" : [0.0]*config.MODEL_LineShapeOrder,
                  "lshapeI" : [0.0]*config.MODEL_LineShapeOrder}
@@ -2099,7 +2102,13 @@ def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, gamma=0.0, startFromRo
 
 #@profile
 def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
-    """Evaluate the entire tree of chemNodes. Returns the time-domain response for the specified (reported) nodes in the tree. tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
+    """Evaluate the entire tree of chemNodes. Returns the time-domain response
+        for the specified (reported) nodes in the tree. tree is a chemNode object --
+        any node in the tree; pars - a nested dictionary of parameters, where the
+        first level is indexed by the names of the nodes, and the second level
+        conatins the names of parameters.
+
+    """
     if pars is None:
         pars = defaultTreePars(tree)
 
@@ -2146,7 +2155,13 @@ def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
 
 # @profile
 def evalTreeF(tree, f, dt, df, c0, f0=0, pars=None, xclRootNames=None, allowShift=False):
-    """Evaluates the entire tree of chemNodes and returns a model spectrum directly in the frequency domain. Tree is a chemNode object -- any node in the tree; pars - a nested dictionary of parameters, where the first level is indexed by the names of the nodes, and the second level conatins the names of parameters"""
+    """Evaluates the entire tree of chemNodes and returns a model spectrum
+        directly in the frequency domain. Tree is a chemNode object -- any node
+        in the tree; pars - a nested dictionary of parameters, where the first
+        level is indexed by the names of the nodes, and the second level conatins
+        the names of parameters
+    """
+
     if pars is None:
         pars = defaultTreePars(tree)
 

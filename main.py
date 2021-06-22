@@ -72,7 +72,7 @@ class EmittingStream(QObject):
 
 class CfunPopup(QWidget):
     """Popup window that shows the objective function"""
-    def __init__(self, cfun):
+    def __init__(self, cfun, lims):
         QWidget.__init__(self)
         self.cfun = cfun
 
@@ -99,7 +99,7 @@ class CfunPopup(QWidget):
         # create and set the central widget
         self.setLayout(self.mainLayout)
 
-        res = np.array([self.cfun(x) for x in np.linspace(-1, 1, 30)])
+        res = np.array([(x, cfun(x)) for x in np.linspace(lims[0], lims[1], 30)])
 
         self.ax[0].clear()    # discards the old graph
         self.ax[0].plot(res[:,0], res[:,1], '-')        # plot data
@@ -2561,11 +2561,13 @@ class ChemTreeView(QTreeView):
             allowShift, shiftingRange = True, 0.0
         else: allowShift, shiftingRange = False, 0.0
 
-        # allowShift, shiftingRange = False, 0.0
+        spec = DDD.getPrior(key)
+        cfun = lambda x : DDD.evaluate(evalParsH=updateFromFlat(evalPars, [key], [x]), \
+                                       autoKeys=actvStep.autoKeys, frqBlkIds=actvStep.frqBlkIds, \
+                                       allowShift=allowShift, shiftingRange=shiftingRange)[0]
+        lims = (spec.min, spec.max)
 
-        costFuncOpti = lambda x : (DDD.getPrior(key).abs(x), DDD.evaluate(evalParsH=updateFromFlat(evalPars, [key], [DDD.getPrior(key).abs(x)]), autoKeys=actvStep.autoKeys, \
-                                                                          frqBlkIds=actvStep.frqBlkIds, allowShift=allowShift, shiftingRange=shiftingRange)[0])
-        self.popupWindow = CfunPopup(costFuncOpti)
+        self.popupWindow = CfunPopup(cfun, lims)
         self.popupWindow.show()
 
     def toggleDflts(self, checked):

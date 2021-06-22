@@ -247,10 +247,21 @@ class Workspace():
         return output
 
     def __getattr__(self, attr):
-        """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+        """Called with the dot notation for attributes not found in the class
+            (e.g. parameters shared between many spectra in the series, c0, f0,
+            etc.).
+        """
 
         if attr == 'wsp':
             return self
+
+    def __getitem__(self, id):
+        if isinstance(id, int):
+            return self.series[id]
+        elif len(id) == 2:
+            ser_id, dat_id = id
+            return self.series[ser_id].data[dat_id]
+        else: return None
 
     def selfID(self):
         return (None, None)
@@ -469,20 +480,19 @@ class Workspace():
                 node.dendrolize(self.HCmode)
 
         # Insert the node
-        if prntName is None:
-            self.T.findRoot().addChild(X)
-        else:
-            self.T[prntName].addChild(X)
+        prntNode = self.T.findRoot() if prntName is None else self.T[prntName]
+        prntNode.addChild(X)
+        prntNode.setReported(False)
 
         # Update the parameters of all series/datasets
         self._updateParameters()
 
         return True
 
-    def delTreeNode(self, node):
+    def delTreeNode(self, nodeName):
         """Removes a node (and the entire subtree) from the tree."""
         try:
-            self.T[node].cut()
+            self.T[nodeName].cut()
         except:
             print("Can not remove the node.")
             return False
@@ -548,8 +558,6 @@ class Workspace():
                         dat.xclRootNames.remove(oldTopKey)
                         dat.xclRootNames.add(newTopKey)
                     except KeyError: pass
-
-        return True
 
     def toggleRepRoot(self, key):
         """Toggle the reportability (whether the intensity is estimated or not)
@@ -1182,6 +1190,14 @@ class Series():
                     DDD.xclRootNames.add(name)
                 DDD.resetSignals()
 
+    def setXclRootName(self, name, flag=True):
+        """Sets the reported root name to excluded."""
+        if not name in self.repRootNames:
+            return None
+
+        for DDD in self.data:
+            DDD.setXclRootName(name, flag)
+
     def addDatum(self, yT, **kwargs):
         """Adds a Datum to the Series."""
         # Create new Datum structure and add it to the Series
@@ -1288,7 +1304,16 @@ class Series():
         return DDD
 
     def resetFreqs(self, zff=None, apod=None):
-        """Resets the frequency scale for the entire Series and computed spectra."""
+        """Reset the frequency scale for the entire Series and computed spectra.
+
+        Args:
+            apod : float
+                Rate of the exponential line-broadedng applied to all Datums in the
+                Series, *exp(-apod*t).
+            zff : int
+                Zero-filling factor; the resulting spectrum will have the length of
+                the next power of 2 of nt*(2^zff).
+        """
 
         # Reset the zero-filling factor if it has been supplied
         if zff is None:
