@@ -2552,7 +2552,6 @@ class ChemTreeView(QTreeView):
     def showCfunPopup(self, key):
         """Plots the cost function with respect to the particular variable specified by a tuple key."""
         DDD = self.model().datum
-        evalPars = copy.deepcopy(DDD.crntParsH)
         actvStep = DDD.steps[-1]
 
         if key[1] == 'chsh':
@@ -2562,7 +2561,7 @@ class ChemTreeView(QTreeView):
         else: allowShift, shiftingRange = False, 0.0
 
         spec = DDD.getPrior(key)
-        cfun = lambda x : DDD.evaluate(evalParsH=updateFromFlat(evalPars, [key], [x]), \
+        cfun = lambda x : DDD.evaluate(evalParsF={key:x}, \
                                        autoKeys=actvStep.autoKeys, frqBlkIds=actvStep.frqBlkIds, \
                                        allowShift=allowShift, shiftingRange=shiftingRange)[0]
         lims = (spec.min, spec.max)

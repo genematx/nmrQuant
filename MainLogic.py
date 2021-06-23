@@ -51,6 +51,11 @@ class freqSpec():
         self._bF = None          # An array of baselines
         self._fhash = None       # Hash value for the previously computed f
 
+    def __str__(self):
+        if not (self.min == -float('inf') and self.max == float('inf')):
+            return '{:.2f} ... {:.2f}'.format(self.min, self.max)
+        else: return 'Entire range'
+
     @staticmethod
     def _parse_bslnOrder(bslnOrder):
         """Checks that the entered baseline order is a 2-tuple of integers."""
@@ -1382,6 +1387,11 @@ class Series():
         else:
             return False
 
+    def showFreqBlocks(self):
+        """Print the list of all defined frequency blocks."""
+        for i, blk in enumerate(self.freqBlocks):
+            print('indx={:d}, range of chemical shifts: {} ppm'.format(i, blk))
+
     def reduce_range(self, lims):
         """Reduces the frequency range of the signals to new limits lims (in ppm)."""
 
@@ -1448,7 +1458,7 @@ class Series():
             parsKeysDatum = set([key[-3:] for key in parsKeys if key[0]==i or len(key)==3]) if parsKeys is not None else None    # Select only keys of non-linear parameters. This will exclude all meta-parameters' keys
             autoKeysDatum = set([key[-3:] for key in autoKeys if key[0]==i or len(key)==3]) if autoKeys is not None else None
             if (not evaluateAll) and (parsKeysDatum == set([])): continue          # Skip some datasets that we don't need to evaluate (there are no keys relating to the i-th dataset)
-            _res, meta = DDD.evaluate(evalParsH[i], parsKeysDatum, autoKeysDatum, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
+            _res, meta = DDD.evaluate(evalParsH[i], None, parsKeysDatum, autoKeysDatum, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
             result += _res
             m_ampl[..., i] = meta['ampl'][0].ravel()
             S_ampl[...,i] = meta['ampl'][1]
@@ -2671,7 +2681,7 @@ class Datum():
 
         return snr
 
-    def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None,
+    def evaluate(self, evalParsH=None, evalParsF=None, parsKeys=None, autoKeys=None, frqBlkIds=None,
                  freqMask=None, funcType=None, evaluatePriors=False, customPriors=None,
                  robust=None, returnSignals=False, allowShift=False, shiftingRange=0.1):
 
@@ -2683,6 +2693,10 @@ class Datum():
                 all parameters arranged hierarchically, i.e.
                 {'node name' : {'parameter name' : [list of values]}}.
                 Uses crntParsH by default.
+            evalParsF : dict
+                A 'flat' dictionary of parameters with keys corresponding to parsKeys
+                tuples and values -- float values of the parameters that will be
+                used to update the evalParsH dictionary.
             parsKeys : list of tuples
                 List of parsKeys whose priors will be evaluated and added to the
                 result if evaluatePriors==True.
@@ -2733,7 +2747,16 @@ class Datum():
         if evalParsH is None:
             evalParsH = self.crntParsH
 
-        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, freqMask, funcType, customPriors=customPriors, returnSignals=returnSignals, robust=robust, allowShift=allowShift, shiftingRange=shiftingRange)
+        # Include parameter values from the flat dictionary
+        if evalParsF is not None:
+            evalParsH = copy.deepcopy(evalParsH)
+            for k, v in evalParsF.items():
+                evalParsH[k[0]][k[1]][k[2]] = v
+
+
+        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, freqMask, \
+                       funcType, customPriors=customPriors, returnSignals=returnSignals, \
+                       robust=robust, allowShift=allowShift, shiftingRange=shiftingRange)
 
         if evaluatePriors:
             result += self._fnc_prior(evalParsH, parsKeys, customPriors=customPriors)
@@ -2790,18 +2813,23 @@ class Datum():
             allowShift = any([key[1] in ['chsh', 'alph'] for key in parsKeys])
             shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])            # Maximum range width of any chemical shift parameter
 
-            costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=False, allowShift=allowShift, shiftingRange=shiftingRange)[0]
+            costFuncOpti = lambda x : -self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, \
+                                        None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, \
+                                        evaluatePriors, robust=False, allowShift=allowShift, \
+                                        shiftingRange=shiftingRange)[0]
 
             # Call the optimization routine
             res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
 
             if res is not None:
                 # Update the stored parameters
-                updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
+                for k, v in zip(parsKeys, res.x):
+                    self.crntParsH[k[0]][k[1]][k[2]] = v
+
                 self.smplDistF.clear()
 
         # Re-evaluate the posterior
-        result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
+        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -2881,7 +2909,7 @@ class Datum():
         # TODO! Make tight bounds, e.g. only xx% of the full range centered at the initial values
         bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
         initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-        costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), \
+        costFuncSmpl = lambda x : self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, None, \
                                                 parsKeys, autoKeys, frqBlkIds, freqMask, \
                                                 funcType, evaluatePriors, robust=robust)
 
@@ -4137,12 +4165,6 @@ def flatten(h, new_key=[]):
                 items.append((tuple(new_key + [k] + [i]), vv))
     items.sort()
     return OrderedDict(items)
-
-def updateFromFlat(hierDict, flatKeys, flatVals):
-    """Updates a hierarchical parameter dictionary with values in its flattened representation."""
-    for k, v in zip(flatKeys, flatVals):
-        hierDict[k[0]][k[1]][k[2]] = v
-    return hierDict
 
 def next_pow_of_2(x):
     # Returns the smallest power of 2 greater than x
