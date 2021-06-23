@@ -147,13 +147,14 @@ class Step():
     """
 
     def __init__(self, frqBlkIds = None, parsKeys = None, autoKeys=None, \
-                 repRootNames=None, script=None, nrep=1, fitEach=False, **kwargs):
+                 repRootNames=None, script=None, nrep=1, fitEach=False, nhop=1, **kwargs):
         self.frqBlkIds = set(frqBlkIds) if frqBlkIds is not None else set()
         self.parsKeys = set(parsKeys) if parsKeys is not None else set()      # Parameters to fit on this step
         self.autoKeys = set(autoKeys) if autoKeys is not None else set( [('.', 'sigma2', 0)] )
         self.script = script
         self.fitEach = fitEach          # Fit each parameter individually
         self.nrep = nrep       # Number of repeats
+        self.nhop = nhop
 
     def clear_autoKeys(self, keep_sigma2=True, keep_theta=False):
         """Reset the autoKeys set. Optionally keep theparameters for zero-order
@@ -182,7 +183,8 @@ class Step():
                         DDD.optimize(parsKeys=[par], autoKeys=self.autoKeys, \
                                      frqBlkIds=self.frqBlkIds, evaluatePriors=False)
                 DDD.optimize(parsKeys=self.parsKeys, autoKeys=self.autoKeys, \
-                             frqBlkIds=self.frqBlkIds, evaluatePriors=False)
+                             frqBlkIds=self.frqBlkIds, evaluatePriors=False, \
+                             nhop=self.nhop)
 
                 # Stop fitting if the relative change in the fitting parameters is below the OPTIM_convergenceEps threshold
                 if len(self.parsKeys) > 0:
@@ -291,7 +293,7 @@ class Workspace():
         self.parsSpecDict = {('.', 'mult', 0): parsSpec(dval=1.), \
                             ('.', 'tau', 0): parsSpec(-1e-04, 1e-04), \
                             ('.', 'sigma2', 0): parsSpec(distr='Inverse-Gamma', p1=2., p2=10., dval=0.), \
-                            ('.', 'theta', 0): parsSpec(distr='Uniform', min=-np.pi, max=np.pi), \
+                            ('.', 'theta', 0): parsSpec(distr='Constant', min=-np.pi, max=np.pi), \
                             ('.', 'gamma', 0): parsSpec(distr='Uniform', min=0.0, max=1.0-1e-09, dval=0.0)}
         self.set_lshapeOrder()
         self.setTree(chemNode('Mixture', chsh = [parsSpec(min=-0.1, max=0.1)], \
@@ -1104,9 +1106,15 @@ class Series():
                     result[key[0]][key[1]][key[2]] = self.getPrior(key).dflt()
         return result
 
-    def setPrior(self, key, customPriors=None, reset=True, **kwargs):
+    def setPrior(self, key, priorSpec=None, customPriors=None, reset=True, **kwargs):
         """Updates the prior key with parameters passed in kwargs (other parameters are left unchanged). Sets a new prior if no prior has been defined for this Series."""
         par = self.getPrior(key, customPriors)
+
+        # Copy from a supplied parsSpec
+        if priorSpec is not None:
+            par = par._replace(**priorSpec._asdict())
+
+        # Update from keywords
         par = par._replace(**kwargs)
 
         if customPriors is not None:
@@ -1237,7 +1245,8 @@ class Series():
             # Update the parameter distributions
             for key, par in serFrom.parsSpecDict.items():
                 try:
-                    self.setPrior(key, min=par.min, max=par.max, label=par.label, distr=par.distr, p1=par.p1, p2=par.p2, dval=par.dval)
+                    self.setPrior(key, min=par.min, max=par.max, label=par.label,\
+                                 distr=par.distr, p1=par.p1, p2=par.p2, dval=par.dval)
                 except (KeyError, IndexError): pass
 
             # Reset apodization and zero-filling
@@ -1516,6 +1525,7 @@ class Series():
                 print('Found values:')
                 for key in parsKeys:
                     print("     {} = {:.5g}".format(str(key), self.getCrntVal(key)))
+                print('\n')
 
         return result, meta
 
@@ -2203,7 +2213,7 @@ class Datum():
                     except KeyError:
                         print("Something is wrong with {}".format(key))
 
-    def setPrior(self, key, customPriors=None, reset=True, fromCurrent=False, chshRange=0.015, **kwargs):
+    def setPrior(self, key, priorSpec=None, customPriors=None, reset=True, fromCurrent=False, chshRange=0.015, **kwargs):
         """Updates the prior distribution of a parameter.
 
             The options for the new distribution can be passed in kwargs (other
@@ -2212,6 +2222,12 @@ class Datum():
         """
 
         par = self.getPrior(key, customPriors)
+
+        # Copy from a supplied parsSpec
+        if priorSpec is not None:
+            par = par._replace(**priorSpec._asdict())
+
+        # Copy from current values
         if fromCurrent:
             # Set min/max/dval as the current value
             val = self.getCrntVal(key)
@@ -2814,7 +2830,7 @@ class Datum():
             shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])            # Maximum range width of any chemical shift parameter
 
             costFuncOpti = lambda x : -self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, \
-                                        None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, \
+                                        parsKeys, autoKeys, frqBlkIds, freqMask, funcType, \
                                         evaluatePriors, robust=False, allowShift=allowShift, \
                                         shiftingRange=shiftingRange)[0]
 
@@ -2837,6 +2853,7 @@ class Datum():
                 print('Found values:')
                 for key in parsKeys:
                     print("     {} = {:.5g}".format(str(key), self.getCrntVal(key)))
+                print('\n')
 
         return result, meta
 
@@ -2954,6 +2971,14 @@ class Datum():
         self.smplDistF[key] = smplSpec_from_data(result[key])
 
         return result
+
+    def run_steps(self, step_ids=None):
+        """Execute a sequence of steps defined for the parent Series."""
+        if step_ids is None:
+            step_ids = list(range(len(self.steps)))
+
+        for i in step_ids:
+            self.steps[i].run(self)
 
     def quality_of_fit(self, frqBlkIds=None):
         """Evaluate how well the model is fitted to the data.
@@ -3110,7 +3135,7 @@ class Datum():
 
         #
         if verbose:
-            print('Found values: ph0 = {:.4f}, ph1 = {:.4f}'.format(ph0, ph1))
+            print('Found values: ph0 = {:.4f}, ph1 = {:.4f}\n'.format(ph0, ph1))
 
     def adjust_residual(self, evalParsH=None, frqBlkIds=None, freqMask=None, mw=2048,
                         correct_comps=True, force_eval=False, verbose=True):
@@ -3504,7 +3529,13 @@ class Datum():
 
         return yFph - self.modelled_signal(bl_corr=True)[1]
 
-    def report(self, full=True):
+    def report_results(self):
+        """Return a dictionary of intensities for all reported nodes."""
+
+        return {name : self.getCrntVal(key=(name, 'ampl', 0)) \
+                for name in self.repRootNames if not self.isXclRootName(name)}
+
+    def print_report(self, full=True):
         """Prints out the current values and results."""
         s = self.selfID()    # Self ID of the Datum
         if full:

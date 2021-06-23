@@ -2529,12 +2529,12 @@ class ChemTreeView(QTreeView):
             dialog = self.ParsSpecDialog(key, param, crntVal, parent=self)
             result = dialog.exec_()
             if result == QDialog.Accepted:    # If OK was clicked
-                newParSpec, resetSeries = dialog.getSelection()
+                newParSpecDict, resetSeries = dialog.getSelection()
                 crnt = self.model().datum
                 if isinstance(crnt, Datum) and resetSeries:
                     crnt = crnt.parent
                 else: pass # It is either a Datum and no series flag was set or it is a Series
-                crnt.setPrior(key, **newParSpec, reset=True)
+                crnt.setPrior(key, **newParSpecDict, reset=True)
 
     def saveSubtree(self, index):
         """Saves the subtree starting with the node index."""
@@ -3335,7 +3335,7 @@ class MainNMRWindowBase(QMainWindow):
         self.treeModel.resetChemTree(T)
 
     def onSaveWspAction(self):
-        """Saves the workspace including the stepClass class and the steps array."""
+        """Saves the workspace class and the steps array."""
         filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')[0]
         if filename:
             if filename[-4:] != '.wsp': filename += '.wsp'
@@ -3356,7 +3356,7 @@ class MainNMRWindowBase(QMainWindow):
                 dill.dump([dataPack, stngPack], fp)
 
     def onLoadWspAction(self):
-        """Loads the workspace including the stepClass class and the steps array."""
+        """Loads the workspace class and the steps array."""
         filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
         if filename:
             with open(filename, 'rb') as fp:
@@ -3367,7 +3367,7 @@ class MainNMRWindowBase(QMainWindow):
             self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
 
     def onResetWspAction(self, newWorkspace=None, newSettings=None, HCmode='1H'):
-        """Clears the workspace including the stepClass, signals and the tree."""
+        """Clears the workspace, signals and the tree."""
         self.naviTreeModel.beginResetModel()
 
         # Update the global settings
@@ -3717,103 +3717,6 @@ class MainNMRWindowBase(QMainWindow):
         #     print('Can not save the results to file.')
 
         self._crnt.saveResults(filename)
-
-# ------------------------ Parameter list --------------------------------------
-    def updateParsList(self, indxStep = None):
-        """Updates and displays the list of optimizaed parameters on the current step."""
-        self.parsListWidget.clear()
-        items = [node.name for node in stepClass.T.repRoots()]
-        if indxStep is not None:
-            items.extend([str(v) for v in self.steps[indxStep].parsKeys])
-        self.parsListWidget.addItems(items)
-
-    def onSelectParList(self, item):
-        """Handles the selection event of a parameter in the list."""
-        indxRow = self.parsListWidget.row(item)
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
-            slctParSpec = stepClass.getPrior(stepClass, key)
-            self.editMin.setText("{:.4g}".format(slctParSpec.min))
-            self.editMax.setText("{:.4g}".format(slctParSpec.max))
-            self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
-            self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
-            if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
-                self.editPriorMode.setEnabled(True)
-                self.editPriorStdv.setEnabled(True)
-                self.chkboxUseCrnt.setEnabled(True)
-                if slctParSpec.prior['mode'] is None:
-                    self.chkboxUseCrnt.setCheckState(Qt.Checked)
-                    self.editPriorMode.setText(self.editCrntVal.text())
-                    self.editPriorMode.setReadOnly(True)
-                else:
-                    self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
-                    self.editPriorMode.setReadOnly(False)
-                    self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
-                self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
-            else:   # Uniform prior
-                    self.editPriorMode.setDisabled(True)
-                    self.editPriorStdv.setDisabled(True)
-                    self.chkboxUseCrnt.setDisabled(True)
-        self.plotDistr(key)    # plot the prior distribution
-
-    def onPriorNameChanged(self, itemIndx):
-        """Handles the event of changing the name of the prior distribution in the combobox."""
-        priorName = self.cmboxPrior.currentText()
-        if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
-            self.editPriorMode.setEnabled(True)
-            self.editPriorStdv.setEnabled(True)
-            self.chkboxUseCrnt.setEnabled(True)
-            if self.chkboxUseCrnt.isChecked:
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-            else:
-                self.editPriorMode.setReadOnly(False)
-                self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
-            self.editPriorStdv.setText("{:.4g}".format(0.5))
-        else:   # Uniform prior
-                self.editPriorMode.setDisabled(True)
-                self.editPriorStdv.setDisabled(True)
-                self.chkboxUseCrnt.setDisabled(True)
-        self.saveParsForm()
-
-    def saveParsForm(self):
-        """Saves the parsSpec entered in the resForm1."""
-        indxRow = self.parsListWidget.currentRow()
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
-            priorName = self.cmboxPrior.currentText()
-            if priorName == 'Uniform':
-                prior = {'name':priorName, 'mode':None, 'stdv':None}
-            elif self.chkboxUseCrnt.isChecked():
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-                prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
-            else:
-                self.editPriorMode.setReadOnly(False)
-                prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
-
-            # Save the parSpec
-            stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
-            # Update the current parameter values
-            self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
-            """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
-            # Display new min/max values in the tree
-            self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
-            self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
-            self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
-            self.treeWidget.blockSignals(False)
-            # Update the rest of parameters based on their values in the tree table
-            for indx, stp in enumerate(self.steps):
-                clmn = indx+3
-                stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
-        # plot the prior distribution
-        self.plotDistr(key)
 
 # --------------------- Adding and removing frequency blocks -------------------
     def addFreqBlock(self, xmin, xmax):
@@ -4329,136 +4232,6 @@ class MainView_nmrQuant(MainNMRWindowBase):
         """Slot for the signal indicating the change in the currently selected Series/Datum"""
 
         self.setCurrent(newCrnt = index.internalPointer() if index.isValid() else None)
-
-# ------------------------ Parameter list --------------------------------------
-    def updateParsList(self, indxStep = None):
-        """Updates and displays the list of optimizaed parameters on the current step."""
-        self.parsListWidget.clear()
-        items = [node.name for node in stepClass.T.repRoots()]
-        if indxStep is not None:
-            items.extend([str(v) for v in self.steps[indxStep].parsKeys])
-        self.parsListWidget.addItems(items)
-
-    def onSelectParList(self, item):
-        """Handles the selection event of a parameter in the list."""
-        indxRow = self.parsListWidget.row(item)
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
-            slctParSpec = stepClass.getPrior(stepClass, key)
-            self.editMin.setText("{:.4g}".format(slctParSpec.min))
-            self.editMax.setText("{:.4g}".format(slctParSpec.max))
-            self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
-            self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
-            if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
-                self.editPriorMode.setEnabled(True)
-                self.editPriorStdv.setEnabled(True)
-                self.chkboxUseCrnt.setEnabled(True)
-                if slctParSpec.prior['mode'] is None:
-                    self.chkboxUseCrnt.setCheckState(Qt.Checked)
-                    self.editPriorMode.setText(self.editCrntVal.text())
-                    self.editPriorMode.setReadOnly(True)
-                else:
-                    self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
-                    self.editPriorMode.setReadOnly(False)
-                    self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
-                self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
-            else:   # Uniform prior
-                    self.editPriorMode.setDisabled(True)
-                    self.editPriorStdv.setDisabled(True)
-                    self.chkboxUseCrnt.setDisabled(True)
-        self.plotDistr(key)    # plot the prior distribution
-
-    def onPriorNameChanged(self, itemIndx):
-        """Handles the event of changing the name of the prior distribution in the combobox."""
-        priorName = self.cmboxPrior.currentText()
-        if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
-            self.editPriorMode.setEnabled(True)
-            self.editPriorStdv.setEnabled(True)
-            self.chkboxUseCrnt.setEnabled(True)
-            if self.chkboxUseCrnt.isChecked:
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-            else:
-                self.editPriorMode.setReadOnly(False)
-                self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
-            self.editPriorStdv.setText("{:.4g}".format(0.5))
-        else:   # Uniform prior
-                self.editPriorMode.setDisabled(True)
-                self.editPriorStdv.setDisabled(True)
-                self.chkboxUseCrnt.setDisabled(True)
-        self.saveParsForm()
-
-    def saveParsForm(self):
-        """Saves the parsSpec entered in the resForm1."""
-        indxRow = self.parsListWidget.currentRow()
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
-            priorName = self.cmboxPrior.currentText()
-            if priorName == 'Uniform':
-                prior = {'name':priorName, 'mode':None, 'stdv':None}
-            elif self.chkboxUseCrnt.isChecked():
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-                prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
-            else:
-                self.editPriorMode.setReadOnly(False)
-                prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
-
-            # Save the parSpec
-            stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
-            # Update the current parameter values
-            self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
-            """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
-            # Display new min/max values in the tree
-            self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
-            self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
-            self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
-            self.treeWidget.blockSignals(False)
-            # Update the rest of parameters based on their values in the tree table
-            for indx, stp in enumerate(self.steps):
-                clmn = indx+3
-                stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
-        # plot the prior distribution
-        self.plotDistr(key)
-
-    def plotDistr(self, key=None):
-        """Plots a prior probability distribution for the parameter key on the middle plot."""
-        # Determine which parameter is selected in the list and plot its samples
-        if key is None:
-            numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-            if self.parsListWidget.currentRow() < numRepRoots:
-                key = self.parsListWidget.currentItem().text()
-            else:
-                key = self.steps[-1].parsKeys[self.parsListWidget.currentRow() - numRepRoots]    # Parameter name
-        # Plot the piror distribution and samples
-        self.axDistr.clear()
-        self.axDistr2.clear()
-        if type(key) is tuple:
-            # Handle adjustible parameters
-            slctParSpec = self.steps[-1].getPrior(key)
-            # Plot the samples
-            if self.steps[-1].sHat is not None:
-                indx = self.steps[-1].sHat['smplKeys'].index(key)       # Index of the sampled parameter in the array of samples
-                smpl_abs = self.steps[-1].sHat['smplVals'][indx, :]
-                self.axDistr2.hist(smpl_abs, bins=50, range=(slctParSpec.min, slctParSpec.max), color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
-            # Plot the prior
-            vals = [slctParSpec.evalPrior(x) for x in np.linspace(-1,1,25)]
-            self.axDistr.plot(np.linspace(slctParSpec.min, slctParSpec.max, 25), vals, color=(0.96, 0.53, 0.20))
-            self.axDistr.set_xlim((slctParSpec.min, slctParSpec.max))
-            self.axDistr.axvline(x=slctParSpec.abs(self.steps[-1].getCrntVal(key)), ymin=0, ymax=0.05, color='r')
-        else:
-            # Handle the amplitudes
-            if self.steps[-1].sHat is not None:
-                indx = self.steps[-1].sHat['labels'].index(key)       # Index of the sampled parameter in the array of samples
-                smpl_abs = np.abs(self.steps[-1].sHat['smplAmpl'][indx,:])
-                self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
-        self.histCanvas.draw()
 
 # ------------------------ Functions for plotting ------------------------------
     def plotCurrent(self, autoRange=True):
