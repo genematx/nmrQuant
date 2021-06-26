@@ -396,3 +396,46 @@ def read_any_file(path):
         dic.update({'acqu_time' : timeString})
 
     return t, yT, dic
+
+def saveFID(xT, c0, f0, dt, tau=0., fname='fid'):
+    """Saves FID signal y in the Spinsolve format in a newly created folder."""
+    # Create a new directory of it does not exist
+    if not os.path.exists(fname):
+        os.makedirs(fname)
+
+    # Reshape and reorganize the data as T-T-T-...-T-R-I-R-I-...-R-I
+    n1, n2, n3, n4 = xT.size, 1, 1, 1   # Dimensions of the data array
+    xT = np.hstack([xT.real.reshape(-1,1), -xT.imag.reshape(-1,1)]).ravel()
+    data = np.concatenate( [np.linspace(0., (n1-1)*dt, n1), xT.ravel()] ).astype('single')
+
+    # Save the binary data
+    with open(os.path.join(fname, 'data.1d'), 'wb') as fid:
+        fid.write(np.array([1347571539, 1145132097, 1446063665, 504, n1, n2, n3, n4], dtype='int32').tobytes())
+        fid.write(data.tobytes())
+
+    # Save the parameter file
+    with open(os.path.join(fname, 'acqu.par'), 'w') as fid:
+        fid.write('Solvent                   = ""\n')
+        fid.write('Sample                    = ""\n')
+        fid.write('startTime                 = {}\n'.format(time.ctime()))
+        fid.write('acqDelay                  = {:0.16f}\n'.format(tau*1e+06))     # Ringdown delay in ms
+        fid.write('b1Freq                    = {:0.16f}\n'.format(c0))            # B1 frequency in MHz
+        fid.write('bandwidth                 = {:0.16f}\n'.format((1/dt)/1000))       # Sweep bandwidth in kHz
+        fid.write('dwellTime                 = {:0.16f}\n'.format(1000*dt))       # Dwell time in ms
+        fid.write('experiment                = "1D"\n')
+        fid.write('expName                   = "1D"\n')
+        fid.write('nrPnts                    = {:d}\n'.format(n1))
+        fid.write('nrScans                   = 1\n')
+        fid.write('repTime                   = 0\n')                              # Repetiotion time in ms
+        fid.write('rxChannel                 = "1H"\n')
+        fid.write('rxGain                    = 0\n')                              # Reciever gain in dB
+        fid.write('lowestFrequency           = {:0.16f}\n'.format(-(1/dt)/2+f0))  # Lowest frequency in Hz
+        fid.write('totalAcquisitionTime      = 42\n')                             # Total acquisition time in sec
+        fid.write('graphTitle                = "1D-1H-"StandardScan""\n')
+        fid.write('userData                  = ""\n')
+        fid.write('90Amplitude               = 0\n')                              # Amplitude of the 90-degree pulse in dB
+        fid.write('pulseLength               = 0\n')                              # Pulse length in ms
+        fid.write('Protocol                  = "1D PROTON"\n')
+        fid.write('Options                   = "Scan(StandardScan)"\n')
+        fid.write('Spectrometer              = "Python"\n')
+        fid.write('Software                  = "Python"')

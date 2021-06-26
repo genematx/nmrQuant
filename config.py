@@ -20,6 +20,7 @@ SAMPL_funcType = 'LS'                       # Defines the type of the cost funct
 SAMPL_numberField = 'Re'                    # 'Re', 'ReIm', or 'Cx'
 
 MODEL_ShapeKernelSize = 13                  # Size of the custom lineshape correction kernel (must be odd)
+MODEL_LineShapeOrder = 2                    # Order of the polynomial lineshape applied to time-domain signals
 
 DISPL_ShiftToReference = True               # Display the chemical shift scale on the spectrum shifted accordingly to the global chsh parameter of the entire mixture
 

@@ -3,6 +3,8 @@ from scipy.linalg import block_diag
 import dill
 import copy
 import emcee
+import config
+from chemTree import chemNodeQM, minmaxTuple, evalTreeF, parsSpec, getFID, defaultTreePars
 from chemTree import *
 from leastsquares import *
 import sys
@@ -14,7 +16,6 @@ from dataio import read_any_file
 
 # Functions for generating FIDs and optimization
 from scipy import optimize
-from scipy.optimize import minimize
 import scipy as sp
 #import scipy.sparse
 import scipy.linalg
@@ -24,44 +25,23 @@ import os, time
 import nmrglue
 from nmrglue.process.proc_autophase import _ps_acme_score, _ps_peak_minima_score
 
-# Functions needed only for Matlab
-from operator import getitem
-
-# Classes and functions for the basinhopping algorithm
-class RandomDisplacementBounds(object):
-    """random displacement with bounds"""
-    def __init__(self, xmin, xmax, stepsize=0.5):
-        self.xmin = xmin
-        self.xmax = xmax
-        self.stepsize = stepsize
-
-    def __call__(self, x):
-        """take a random step but ensure the new position is within the bounds"""
-        while True:
-            # this could be done in a much more clever way, but it will work for example purposes
-            xnew = x + np.random.uniform(-self.stepsize, self.stepsize, np.shape(x))
-            if np.all(xnew < self.xmax) and np.all(xnew > self.xmin):
-                break
-        return xnew
-
-class MyTakeStep(object):
-    # Using a custom step taking routine
-    def __init__(self, stepsize=0.5):
-        self.stepsize = stepsize
-    def __call__(self, x):
-        s = self.stepsize
-        x = np.random.uniform(-1, 1, x.shape)
-        return x
-
 ##### ------------ Main classes for the general program logic ------------ #####
 
-minmaxTuple = namedtuple('minmaxTuple', 'min, max')
-minmaxTuple.__new__.__defaults__ = (-np.inf, np.inf)
-minmaxTuple.imin = lambda self, f : np.searchsorted(f.ravel(), self.min)
-minmaxTuple.imax = lambda self, f : np.searchsorted(f.ravel(), self.max)
-
 class freqSpec():
-    """A class to store the specifications of frequency blocks along with their baselines"""
+    """Specification of frequency blocks along with their baselines.
+    Attributes:
+        min, max : float
+            Chemical shift boundaries of the frequency block in ppm
+        bslnOrder : 2-tuple of int or int
+            Order of polynomial baseline in real and imaginary parts of the
+            spectrum. If a single int is supplied, the same order is used for
+            Re and Im parts.
+        _indxFreq : nf_x_1 np.array
+            Indices of spectral points corresponding to the frequency block
+        _bF : nf_x_k np.array
+            Arrays of k precomputed polynomial baselines. The number of
+            baselines k=bslnOrder[0]+bslnOrder[1]
+    """
 
     def __init__(self, min=-np.inf, max=np.inf, bslnOrder=(None, None)):
         self.min = min
@@ -70,6 +50,11 @@ class freqSpec():
         self._indxFreq = None
         self._bF = None          # An array of baselines
         self._fhash = None       # Hash value for the previously computed f
+
+    def __str__(self):
+        if not (self.min == -float('inf') and self.max == float('inf')):
+            return '{:.2f} ... {:.2f}'.format(self.min, self.max)
+        else: return 'Entire range'
 
     @staticmethod
     def _parse_bslnOrder(bslnOrder):
@@ -81,14 +66,21 @@ class freqSpec():
         else: raise RuntimeError
 
     def repr(self):
-        return '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
+        """String representation of the frequency block."""
+
+        if not (self.min == -float('inf') and self.max == float('inf')):
+            return '{:.2f} ... {:.2f}'.format(self.min, self.max)
+        else:
+            return 'Entire range'
 
     def bline(self, nf, numberField='Cx'):
-        """Creates a set of base polynomial functions to store the baseline of length nf."""
+        """Create a set of base polynomial functions to store the baseline of length nf."""
         if self._bF is None or self._bF.shape[1] != nf:
             # Define baseline in the frequency domain
-            bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[0]+1)] if (self.bslnOrder[0] is not None) and (numberField in ['Re', 'Cx']) else []
-            bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[1]+1)] if (self.bslnOrder[1] is not None) and (numberField in ['Im', 'Cx']) else []
+            bFr = [np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[0]+1)] \
+                    if (self.bslnOrder[0] is not None) and (numberField in ['Re', 'Cx']) else []
+            bFi = [1j*np.linspace(-1,1,nf).reshape(-1,1)**i for i in range(self.bslnOrder[1]+1)] \
+                    if (self.bslnOrder[1] is not None) and (numberField in ['Im', 'Cx']) else []
             self._bF = np.hstack(bFr+bFi) if len(bFr)+len(bFi) > 0 else None
         return self._bF
 
@@ -101,8 +93,12 @@ class freqSpec():
         return np.searchsorted(f.ravel(), self.max)
 
     def indxFreq(self, f, nw2=0):
-        """Returns the indices of array f that fall into the range defined by the block. Optionally can include padding with nw samples on both ends of the range."""
-        # Compute the hash value for the frequency array to determine wethwer update is necessary
+        """Returnsthe indices in array f that fall into the range defined by the
+         block. Optionally can include padding with nw samples on both ends of
+         the range.
+
+         """
+        # Compute the hash value for the frequency array to determine wether update is necessary
         newHash = arrhash(f) + nw2
         if self._indxFreq is None or self._fhash != newHash:
             self._indxFreq = np.arange(self.imin(f) - nw2, self.imax(f) + nw2) % len(f)
@@ -110,7 +106,7 @@ class freqSpec():
         return self._indxFreq
 
     def update(self, lims=None, bslnOrder=None):
-        """Updates the parameters of a frequency block."""
+        """Update the parameters of a frequency block."""
         if lims is not None:
             self.min = min(lims)
             self.max = max(lims)
@@ -126,19 +122,45 @@ class freqSpec():
         return(pars(self.min, self.max, self.bslnOrder))
 
 class Step():
+    """Data processing step. Used to define and group model fitting operations.
 
-    def __init__(self, frqBlkIds = None, parsKeys = None, autoKeys=None, repRootNames=None, fitCustomLshape = False, script=None, nrep=1, fitEach=False, **kwargs):
+    Attributes:
+        frqBlkIds : set of int
+            Active frequency blocks. If the set is empty, will use data in time domain.
+        parsKeys : set of parsKeys tuples
+            Parameter keys in the form ('Chemical name', 'Parameter name', indx)
+            optimized on the given processing step.
+        autoKeys : set of parsKeys tuples
+            Parameter keys that are determined automatically in closed form (e.g.
+            amplitudes with Gaussian priors, zero-order pahsing, variance of noise).
+        script : callable
+            A function that takes as its sole argument a Datum. If defined, will
+            be run instead of optimization on the current Step.
+        fitEach : bool
+            If True, each parameter in parsKeys will be optimized individually;
+            otherwise, all parameters will be optimized in a multidimensional
+            optimization routine.
+        nrep : int
+            Number of repetitions; the same optimization will be run consecutively
+            nrep times to refine the fitting parameters.
+
+    """
+
+    def __init__(self, frqBlkIds = None, parsKeys = None, autoKeys=None, \
+                 repRootNames=None, script=None, nrep=1, fitEach=False, nhop=1, **kwargs):
         self.frqBlkIds = set(frqBlkIds) if frqBlkIds is not None else set()
         self.parsKeys = set(parsKeys) if parsKeys is not None else set()      # Parameters to fit on this step
-        self.autoKeys = set(autoKeys) if autoKeys is not None else set( [('.', 'sigma2', 0)] )      # ('.', 'theta', 0),                 # Potentially autofittable parameters that will be excluded from fitting on this step (may contain, theta, gamma, sigma2, and any amplitudes)
-        if repRootNames is not None:
-            self.autoKeys.update([(name, 'ampl', 0) for name in repRootNames])
-        self.fitCustomLshape = fitCustomLshape
+        self.autoKeys = set(autoKeys) if autoKeys is not None else set( [('.', 'sigma2', 0)] )
         self.script = script
         self.fitEach = fitEach          # Fit each parameter individually
         self.nrep = nrep       # Number of repeats
+        self.nhop = nhop
 
     def clear_autoKeys(self, keep_sigma2=True, keep_theta=False):
+        """Reset the autoKeys set. Optionally keep theparameters for zero-order
+        phasing and the variance of noise.
+
+        """
         self.autoKeys.clear()
         if keep_sigma2:
             self.autoKeys.add(('.', 'sigma2', 0))
@@ -146,7 +168,9 @@ class Step():
             self.autoKeys.add(('.', 'theta', 0))
 
     def run(self, DDD):
-        pars_start = np.array([DDD.getCrntVal(key) for key in self.parsKeys]) if len(self.parsKeys) > 0 else 0.0
+        """Given a Datum DDD, run the parameter optimization of a script, if defined."""
+        pars_start = np.array([DDD.getCrntVal(key) for key in self.parsKeys]) \
+                               if len(self.parsKeys) > 0 else 0.0
 
         for _ in range(self.nrep):
             if self.script is not None:
@@ -156,16 +180,64 @@ class Step():
                 if self.fitEach:
                     # First, fit each parameter individually
                     for par in self.parsKeys:
-                        DDD.optimize(parsKeys=[par], autoKeys=self.autoKeys, frqBlkIds=self.frqBlkIds, evaluatePriors=False)
-                DDD.optimize(parsKeys=self.parsKeys, autoKeys=self.autoKeys, frqBlkIds=self.frqBlkIds, evaluatePriors=False)
+                        DDD.optimize(parsKeys=[par], autoKeys=self.autoKeys, \
+                                     frqBlkIds=self.frqBlkIds, evaluatePriors=False)
+                DDD.optimize(parsKeys=self.parsKeys, autoKeys=self.autoKeys, \
+                             frqBlkIds=self.frqBlkIds, evaluatePriors=False, \
+                             nhop=self.nhop)
 
-            # Stop fitting if the relative change in the fitting parameters is below the OPTIM_convergenceEps threshold
-            if len(self.parsKeys) > 0:
-                pars_found = np.array([DDD.getCrntVal(key) for key in self.parsKeys])
-                if np.max(np.abs(pars_found-pars_start) / pars_start) < config.OPTIM_convergenceEps:
-                    break
+                # Stop fitting if the relative change in the fitting parameters is below the OPTIM_convergenceEps threshold
+                if len(self.parsKeys) > 0:
+                    pars_found = np.array([DDD.getCrntVal(key) for key in self.parsKeys])
+                    if np.max(np.abs(pars_found-pars_start) / pars_start) < config.OPTIM_convergenceEps:
+                        break
 
 class Workspace():
+    """Main class to hold the processed data. The data is organized in
+        a hierarchical structure as follows:
+
+        Workspace
+        |
+        - Series 1
+            |
+            - Datum 1
+            - Datum 2
+              ...
+            - Datum n
+        - Series 2
+        ...
+        -Series m
+
+        Each Series is intended to contain datasetes (spectra) aquired at the
+        same field strength, similar acquisition parameters and conditions (notably,
+        they should have the same dwell time). Such datasets would normally arise
+        from e.g. reaction monitoring experiments. If datasets from multiple
+        spectrometers need to be analysed, they can be arranged in separate Series.
+
+        The tree of chemical species is shared across the workspace; optimization
+        steps (including definitions of optimization ranges and optimizaed parameters)
+        may differ in different series, but are the same for all Datums within the Series.
+
+    Attributes:
+        HCmode : str, '1H' or '13C'
+            A flag that defines wether the Workspace contains 1H or 13C data.
+            Mixing 1H/13C datasets within the same workspace is not allowed.
+        series : list of Series
+            All Series contained in the Workspace
+        repRootNames : list of str
+            List of chemical names (more generally, nodes in the chemTree), whose
+            intensities will be estimated in the analysis.
+        parsSpecDict : dict
+            Dictionary of prior distributions for model parameters. Keys are
+            parsSpec tuples in the form ('Chemical name', 'Parameter name', indx);
+            values are instances of parsSpec type.
+        extra : dict
+            Any additional data specific to a particular application (e.g. a flag
+            to indicate that the Workspace corresponds to the wine analysis.)
+        T : chemNode and its derivatives
+            A hierarchical tree structure defining the chemical species included
+            in the analysis.
+    """
 
     def __init__(self, HCmode='1H'):
         self.extra = {}
@@ -182,10 +254,21 @@ class Workspace():
         return output
 
     def __getattr__(self, attr):
-        """Called with the dot notation for attributes not found in the class (e.g. parameters shared between many spectra in the series, c0, f0, etc.)."""
+        """Called with the dot notation for attributes not found in the class
+            (e.g. parameters shared between many spectra in the series, c0, f0,
+            etc.).
+        """
 
         if attr == 'wsp':
             return self
+
+    def __getitem__(self, id):
+        if isinstance(id, int):
+            return self.series[id]
+        elif len(id) == 2:
+            ser_id, dat_id = id
+            return self.series[ser_id].data[dat_id]
+        else: return None
 
     def selfID(self):
         return (None, None)
@@ -199,26 +282,27 @@ class Workspace():
         else:
             return self.series[selfID[0]].data[selfID[1]]
 
-    def reset(self, HCmode='1H', lshapeOrder=2):
+    def reset(self, HCmode='1H'):
         # Resets the entire workspace
         self.series = []
         self.HCmode = HCmode
         self.repRootNames = []
-        self.lshapeOrder = 0
         self.extra.clear()     # Any additional data specific to a particular application
 
         # Define default priors. All Series and Datums will be affected by these priors if not explicitely overwritten.
         self.parsSpecDict = {('.', 'mult', 0): parsSpec(dval=1.), \
                             ('.', 'tau', 0): parsSpec(-1e-04, 1e-04), \
                             ('.', 'sigma2', 0): parsSpec(distr='Inverse-Gamma', p1=2., p2=10., dval=0.), \
-                            ('.', 'theta', 0): parsSpec(distr='Uniform', min=-np.pi, max=np.pi), \
+                            ('.', 'theta', 0): parsSpec(distr='Constant', min=-np.pi, max=np.pi), \
                             ('.', 'gamma', 0): parsSpec(distr='Uniform', min=0.0, max=1.0-1e-09, dval=0.0)}
-        if lshapeOrder is not None: self.set_lshapeOrder(lshapeOrder)
+        self.set_lshapeOrder()
         self.setTree(chemNode('Mixture', chsh = [parsSpec(min=-0.1, max=0.1)], \
                               alph=[parsSpec(min=-5., max=25., dval=2.0)]))
 
     def getPrior(self, key):
-        """Returns the specification of a parameter in the current tree or tau. Start by looking for the specification in the current datum structure, then proceed to the series level andthe tree if the parameter is not found."""
+        """Returns the specification of a parameter in the current tree or tau.
+            Start by looking for the specification in the current datum structure,
+            then proceed to the series level andthe tree if the parameter is not found."""
         # TODO: Make it nicer...
         try:
             return self.parsSpecDict[key]
@@ -233,7 +317,12 @@ class Workspace():
                 return getattr(self.T[key[0]], key[1])[key[2]]
 
     def setGlobalPrior(self, key, prior=None, reset=True, **kwargs):
-        """Sets the specification of a parameter in the current tree or tau; val is of parsSpec type."""
+        """Sets the specification of a parameter in the current tree or tau
+        Args:
+            key : tuple of parsKeys in the form
+            val : parsSpec
+
+        """
         if prior is None:
             prior = self.getPrior(key)
             prior = prior._replace(**kwargs)
@@ -256,11 +345,18 @@ class Workspace():
                     except KeyError:
                         pass
 
-    def set_lshapeOrder(self, newOrder):
-        """Sets a new lineshape correction order."""
-        if self.lshapeOrder < newOrder:
+    def set_lshapeOrder(self, newOrder=None):
+        """Defines the parameters for a new lineshape correction order."""
+        if newOrder is None:
+            newOrder = config.MODEL_LineShapeOrder
+
+        # Determine the curently set order
+        oldOrder = len([key for key in self.parsSpecDict.keys() \
+                        if key[0] == '.' and key[1] == 'lshapeR'])
+
+        if oldOrder < newOrder:
             # Need to add new parameters
-            for i in range(self.lshapeOrder, newOrder):
+            for i in range(oldOrder, newOrder):
                 self.parsSpecDict[('.', 'lshapeR', i)] = parsSpec(-2.5, 2.5, dval=0.0)
                 self.parsSpecDict[('.', 'lshapeI', i)] = parsSpec(-2.5, 2.5, dval=0.0)
                 for parsH in [dat.crntParsH for ser in self.series for dat in ser.data]:
@@ -271,9 +367,9 @@ class Workspace():
                         parsH['.']['lshapeR'] = [0.0]
                         parsH['.']['lshapeI'] = [0.0]
 
-        elif self.lshapeOrder > newOrder:
+        elif oldOrder > newOrder:
             # Need to remove some parameters
-            for i in range(newOrder, self.lshapeOrder):
+            for i in range(newOrder, oldOrder):
                 for psdict in [self.parsSpecDict]+[ser.parsSpecDict for ser in self.series]+[dat.parsSpecDict for ser in self.series for dat in ser.data]:
                     try: psdict.pop(('.', 'lshapeR', i))
                     except KeyError: pass
@@ -283,8 +379,6 @@ class Workspace():
                 for parsH in [dat.crntParsH for ser in self.series for dat in ser.data]:
                     parsH['.']['lshapeR'].pop(i)
                     parsH['.']['lshapeI'].pop(i)
-
-        self.lshapeOrder = newOrder
 
     def setTree(self, T, priors = None):
         # Load the tree
@@ -314,7 +408,7 @@ class Workspace():
         return T
 
     def allParsKeys(self, node_name=None, parsKind=None, globPars=False, amplitudes=False):
-        """Returns all parameter keys for a (sub)tree starting from a specific node."""
+        """Return a list of all parameter keys for a (sub)tree starting from a specific node."""
         if node_name is None:
             node = self.T.findRoot()
         else: node = self.T[node_name]
@@ -328,8 +422,8 @@ class Workspace():
         if globPars:
             # Global parameter keys
             parsKeys.extend([('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)] + \
-                            [('.', 'lshapeR', i) for i in range(self.lshapeOrder)] + \
-                            [('.', 'lshapeI', i) for i in range(self.lshapeOrder)])
+                            [('.', 'lshapeR', i) for i in range(config.MODEL_LineShapeOrder)] + \
+                            [('.', 'lshapeI', i) for i in range(config.MODEL_LineShapeOrder)])
 
         if amplitudes:
             # Include the amplitude parameters for all reported nodes
@@ -339,10 +433,16 @@ class Workspace():
         return parsKeys
 
     def _updateParameters(self):
-        """Updates the existing dictionaries of parameters after the tree has changed (e.g. when adding/removing nodes or setting new root nodes). Updates the structure to match with the new default parameters but keeps the old values."""
+        """Update the existing dictionaries of parameters after the tree has been
+            changed (e.g. when adding/removing nodes or setting new root nodes).
+            Updates the structure to match the new default parameters but keeps
+            the existing values.
+
+        """
+
         oldRoots = self.repRootNames
 
-        newParsH = defaultTreePars(self.T, lshapeOrder=self.lshapeOrder)
+        newParsH = defaultTreePars(self.T)
         newRoots = [node.name for node in self.T.repRoots()]
 
         # Update parameter dictionaries
@@ -387,20 +487,19 @@ class Workspace():
                 node.dendrolize(self.HCmode)
 
         # Insert the node
-        if prntName is None:
-            self.T.findRoot().addChild(X)
-        else:
-            self.T[prntName].addChild(X)
+        prntNode = self.T.findRoot() if prntName is None else self.T[prntName]
+        prntNode.addChild(X)
+        prntNode.setReported(False)
 
         # Update the parameters of all series/datasets
         self._updateParameters()
 
         return True
 
-    def delTreeNode(self, node):
+    def delTreeNode(self, nodeName):
         """Removes a node (and the entire subtree) from the tree."""
         try:
-            self.T[node].cut()
+            self.T[nodeName].cut()
         except:
             print("Can not remove the node.")
             return False
@@ -411,11 +510,7 @@ class Workspace():
         return True
 
     def renameTreeNode(self, oldName, newName):
-        # Rename all children, if it's a spin system node
-        # if isinstance(self.T[oldName], chemNodeQD):
-        #     for chld in self.T[oldName].children():
-        #         suffix = chld.name[chld.name.rfind('-'):]
-        #         self.renameTreeNode(chld.name, newName + suffix)
+        """Rename a tree node known by oldName to newName."""
 
         # List all top levels of al parameter keys that will neeed to be updated
         parsKeysTopOld = [desc.name for desc in self.T[oldName].descendants(include_self=True)]
@@ -471,10 +566,12 @@ class Workspace():
                         dat.xclRootNames.add(newTopKey)
                     except KeyError: pass
 
-        return True
-
     def toggleRepRoot(self, key):
-        """Toggles the reportability of a certain root node and updates the parameters accordingly."""
+        """Toggle the reportability (whether the intensity is estimated or not)
+        of a certain root node and update the parameters accordingly.
+
+        """
+
         self.T[key].toggleReported()
         self._updateParameters()
 
@@ -496,7 +593,9 @@ class Workspace():
         return SSS
 
     def _search(self, costFuncOpti, bounds, crntVal=None, nval=None):
-        """Evaluates the cost function on a range of values between the bounds and selects the minimum one. costFuncOpti must be a function of a single variable."""
+        """Evaluate the cost function on a range of values between the bounds and
+            select the minimum. costFuncOpti must be a function of a single variable.
+        """
         if nval is None:
             nval = config.OPTIM_nvalLinearSearch
 
@@ -512,13 +611,27 @@ class Workspace():
 
     #@profile
     def _optimize(self, costFuncOpti, bounds, initVals, nhop=None, respectBounds=True, verbose=True):
-        """Core optimization routine; used by all Series and Datums in this Workspace"""
+        """Core optimization routine; used by all Series and Datums.
+
+        Args:
+            costFuncOpti : callable
+                The cost fucntion to be optimized.
+            bounds : list of 2-tuples
+                Minimum and maximum values for each optimized parameter.
+            initVals : np.array
+                Initial values of the optimized parameters.
+            nhop : int
+                Number of basinhopping steps.
+            respectBounds : bool
+                If True, will reject the solution if it is equal to the boundary
+                (max or min) value for a specific parameter.
+        """
         eps_range = np.mean([np.abs(bnd[1]-bnd[0]) for bnd in bounds])     # Find the range of optimiztion (needed to set the step size for Jacobian)
         if len(initVals) > 2 or (nhop is not None and nhop > 0):
             res = optimize.basinhopping(costFuncOpti, initVals, \
                   niter = nhop if nhop is not None else config.OPTIM_maxBasinhoppingSteps, \
                   niter_success = nhop if nhop is not None else config.OPTIM_niterSuccess, T = 10, disp = verbose, \
-                  minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )     #    , take_step=MyTakeStep())
+                  minimizer_kwargs=dict(method=config.OPTIM_method, bounds=bounds, tol=1e-12) )
         else:
             # Perform the linear search on the inital values
             if config.OPTIM_nvalLinearSearch > 0:
@@ -749,7 +862,6 @@ class Workspace():
         result = {'HCmode' : self.HCmode,
                 'T' : T,
                 'parsSpecDict' : self.parsSpecDict,
-                'lshapeOrder' : self.lshapeOrder,
                 'series' : [],
                 'extra' : self.extra}
         for ser in self.series:
@@ -791,10 +903,7 @@ class Workspace():
 
     def unpack(self, packed):
         """Unpackes a saved workspace from the dictionary."""
-        try: lshapeOrder = packed['lshapeOrder']    # Needed for older packed Workspaces that did not include lineshape correction parameters
-        except KeyError: lshapeOrder = None
-
-        self.reset(packed['HCmode'], lshapeOrder)
+        self.reset(packed['HCmode'])
         try: self.extra.update(packed['extra'])
         except KeyError: pass
         T = packed['T']
@@ -835,7 +944,7 @@ class Workspace():
             for stp in ser['steps']:
                 newStep = Step()
                 newStep.frqBlkIds, newStep.parsKeys = stp.frqBlkIds, stp.parsKeys
-                for attr in ['autoKeys', 'fitCustomLshape', 'script', 'nrep', 'fitEach']:
+                for attr in ['autoKeys', 'script', 'nrep', 'fitEach']:
                     try: setattr(newStep, attr, getattr(stp, attr) )
                     except AttributeError: pass
                 newSeries.steps.append(newStep)
@@ -852,25 +961,79 @@ class Workspace():
                 if 'jointPrior' in dat.keys():
                     newDatum.setJointPrior(dat['jointPrior'])
 
-        if lshapeOrder is None: self.set_lshapeOrder(2)
-
         # Add missing parameters (needed for back-compatibility)
         for parsH in [dat.crntParsH for ser in self.series for dat in ser.data]:
             if 'gamma' not in parsH['.'].keys():
                 parsH['.']['gamma'] = [0.0]
 
 class Series():
-    """Class for the data series (e.g. in reaction monitoring)."""
+
+    """Class for the data series (useful for e.g. reaction monitoring).
+
+    Attributes:
+        name : str
+            Name of the Series
+        parent : Workspace
+            The containing Workspace
+        data : list of Datum instances
+            List of datasets assigned to this Series
+        steps : list of Step instances
+            All processing steps performed in this Series
+        freqBlocks : list of freqSpec
+            List of specification for the frequency blocks used in optimization.
+            The 0th block is automatically defined to correspond to the entire
+            frequency range of the spectra.
+        c0, f0 : float
+            The field strength of the spectrometer in MHz and the spectral offset
+            in Hz, respectively. Given a chemical shift in ppm, its corresponding
+            frequency in Hz is computeed as: [Hz] = c0*[ppm]-f0.
+        t : nt_x_1 np.array
+            Array of time samples of the FID signals.
+        f : nf_x_1 np.array
+            Chemical shift array (in ppm) used to plot the spectra.
+        apod : float
+            Rate of the exponential line-broadedng applied to all Datums in the
+            Series, *exp(-apod*t).
+        zff : int
+            Zero-filling factor; the resulting spectrum will have the length of
+            the next power of 2 of nt*(2^zff).
+        crntMetaF : dict
+            A flat (F) dictionary of meta parameters assigned to the Series. Keys
+            are 2-tuples indicating meta parameters.
+        smplDistF : dict
+            A dictionary of parameters' samples obtained by MCMC. Keys correspond
+            to parsKeys tuples; values are of smplSpec type.
+        _meta : callable
+            A function that can be run during the evaluation of the model fit in
+            the Series (before evaluating actual model parameters). The inputs
+            to this function should be arranged as:
+            meta(evalParsH, evalMetaF, parsDict).
+            Normally, it would take the values of meta parameters in the evalMetaF
+            dictionary and update the evalParsH dictionary and/or the dictionary
+            of parameter priors, parsDict.
+            This fucntoin can be set/removed using the setMetaFunction and
+            remMetaFunction methods.
+        _joint : callable
+            A function defining a joint prior distribution of the parameters. Takes
+            a hierarchical dictionary of parameter values, evalParsH, and returns
+            the vlaue of log-prior (float).
+            Can be set/removed using the setJointPrior and remJointPrior methods.
+        extra : dict
+            Any additional data specific to a particular application.
+
+    """
+
 
     def __init__(self, parent, name = None, c0=None, f0=None, t=None, zff=0, apod=0, priors=None, extra=None, **kwargs):
-        self.parent = parent     # The workspace that contains the tree
+        self.parent = parent     # The workspace that contains the Series
         self.name = name if name is not None else 'Series ' + str(len(self.parent.series)+1)
         self.c0 = c0
         self.f0 = f0
         self.t = t.reshape(-1,1) if t is not None else np.array([])
         self.f = np.array([])
         self.data = []               # A list of Datum structures
-        self.steps = [Step(repRootNames=self.repRootNames)]               # Fitting steps; each entry is a set of parsKeys tuples and set of frqBlkIds
+        self.steps = [Step(autoKeys=[('.', 'sigma2', 0)]+\
+                      [(name, 'ampl', 0) for name in self.repRootNames])]
         self.freqBlocks = []         # a list of optimization frequency ranges
         self.apod = apod
         self.zff = zff               # zero-filling factor (exponent of 2)
@@ -906,6 +1069,13 @@ class Series():
         return self.log(depth)
 
     def selfID(self):
+        """Identifier of the Seriies in the containing Workspace.
+            Returns a 2-tuple with the first element corresponding to the index of
+            the Series in the list of series in the Workspace; the second element
+            is set to None.
+
+        """
+
         return (self.parent.series.index(self), None)
 
     def getCrntVal(self, key):
@@ -926,7 +1096,7 @@ class Series():
 
     def getDfltParsH(self):
         """Returns a complete hierarchical dictionary of default parameters."""
-        result = defaultTreePars(self.T, lshapeOrder=self.lshapeOrder)
+        result = defaultTreePars(self.T)
 
         # Update the default parameters using priors defined for the Series, if there are any
         for node_name in result.keys():
@@ -936,9 +1106,15 @@ class Series():
                     result[key[0]][key[1]][key[2]] = self.getPrior(key).dflt()
         return result
 
-    def setPrior(self, key, customPriors=None, reset=True, **kwargs):
+    def setPrior(self, key, priorSpec=None, customPriors=None, reset=True, **kwargs):
         """Updates the prior key with parameters passed in kwargs (other parameters are left unchanged). Sets a new prior if no prior has been defined for this Series."""
         par = self.getPrior(key, customPriors)
+
+        # Copy from a supplied parsSpec
+        if priorSpec is not None:
+            par = par._replace(**priorSpec._asdict())
+
+        # Update from keywords
         par = par._replace(**kwargs)
 
         if customPriors is not None:
@@ -1027,6 +1203,14 @@ class Series():
                     DDD.xclRootNames.add(name)
                 DDD.resetSignals()
 
+    def setXclRootName(self, name, flag=True):
+        """Sets the reported root name to excluded."""
+        if not name in self.repRootNames:
+            return None
+
+        for DDD in self.data:
+            DDD.setXclRootName(name, flag)
+
     def addDatum(self, yT, **kwargs):
         """Adds a Datum to the Series."""
         # Create new Datum structure and add it to the Series
@@ -1061,7 +1245,8 @@ class Series():
             # Update the parameter distributions
             for key, par in serFrom.parsSpecDict.items():
                 try:
-                    self.setPrior(key, min=par.min, max=par.max, label=par.label, distr=par.distr, p1=par.p1, p2=par.p2, dval=par.dval)
+                    self.setPrior(key, min=par.min, max=par.max, label=par.label,\
+                                 distr=par.distr, p1=par.p1, p2=par.p2, dval=par.dval)
                 except (KeyError, IndexError): pass
 
             # Reset apodization and zero-filling
@@ -1133,7 +1318,16 @@ class Series():
         return DDD
 
     def resetFreqs(self, zff=None, apod=None):
-        """Resets the frequency scale for the entire Series and computed spectra."""
+        """Reset the frequency scale for the entire Series and computed spectra.
+
+        Args:
+            apod : float
+                Rate of the exponential line-broadedng applied to all Datums in the
+                Series, *exp(-apod*t).
+            zff : int
+                Zero-filling factor; the resulting spectrum will have the length of
+                the next power of 2 of nt*(2^zff).
+        """
 
         # Reset the zero-filling factor if it has been supplied
         if zff is None:
@@ -1202,6 +1396,11 @@ class Series():
         else:
             return False
 
+    def showFreqBlocks(self):
+        """Print the list of all defined frequency blocks."""
+        for i, blk in enumerate(self.freqBlocks):
+            print('indx={:d}, range of chemical shifts: {} ppm'.format(i, blk))
+
     def reduce_range(self, lims):
         """Reduces the frequency range of the signals to new limits lims (in ppm)."""
 
@@ -1268,7 +1467,7 @@ class Series():
             parsKeysDatum = set([key[-3:] for key in parsKeys if key[0]==i or len(key)==3]) if parsKeys is not None else None    # Select only keys of non-linear parameters. This will exclude all meta-parameters' keys
             autoKeysDatum = set([key[-3:] for key in autoKeys if key[0]==i or len(key)==3]) if autoKeys is not None else None
             if (not evaluateAll) and (parsKeysDatum == set([])): continue          # Skip some datasets that we don't need to evaluate (there are no keys relating to the i-th dataset)
-            _res, meta = DDD.evaluate(evalParsH[i], parsKeysDatum, autoKeysDatum, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
+            _res, meta = DDD.evaluate(evalParsH[i], None, parsKeysDatum, autoKeysDatum, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
             result += _res
             m_ampl[..., i] = meta['ampl'][0].ravel()
             S_ampl[...,i] = meta['ampl'][1]
@@ -1280,7 +1479,7 @@ class Series():
 
         return result, {'ampl':(m_ampl, S_ampl), 'theta':theta, 'sigma2':(a_sigma2, b_sigma2)}
 
-    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nhop=None, respectBounds=True, verbose=True):
+    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nhop=None, verbose=True):
         """Optimization over the tree parameters selected in the parsKeys (list of tuples of the form: (datum_id, node_name, parameter_name, parameter_id), e.g. (2, 'Sucrose-F', 'chshQD', 5) )."""
 
         # Prepare keys and starting parameters. Expand parameter keys (if 3-tuples were provided, they will be substituted with 4-tuples for all datasets) and make sure there are no repeats
@@ -1307,7 +1506,7 @@ class Series():
                 # Evaluate the function skipping the datasets that are not present in parsKeys
                 return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
 
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
 
             if res is not None:
                 # Update the structure of all parameters
@@ -1326,6 +1525,7 @@ class Series():
                 print('Found values:')
                 for key in parsKeys:
                     print("     {} = {:.5g}".format(str(key), self.getCrntVal(key)))
+                print('\n')
 
         return result, meta
 
@@ -1510,7 +1710,53 @@ class Series():
         return x_arr, llkl_arr, lpri_arr, lpst_arr, crntVal
 
 class Datum():
-    """A single data instance. Contains signals of a single NMR experiment."""
+
+    """A single data instance. Contains signals of a single NMR experiment.
+
+    Attributes:
+        name : str
+            Name of the data (spectrum).
+        parent : Series
+            Containing Series instance
+        _f : np.array
+            An array of spectral points defining the chemical shift range in ppm.
+            Can be non-uniform and/or subsampled, If None, the default frequency
+            array from the Series will be used.
+        _flagAdapFreq : bool
+            A flag indicating wether the frequency (chemical shift) scale uses an
+            adaptive sampling (e.g. more dense around peaks in the spectrum).
+            If True, _f will be set to the array of chemical shift.
+        yT : nt_x_1 np.array
+            The main data in the time domain, FID.
+        arrVal : float
+            Value of an arrayed parameter that varies across the Series, e.g.
+            reaction time, concetration, etc.
+        parsSpecDict : dict
+            dictionary of specifications of priors for the model parameters. If
+            not empty, its entries will replace the corresponding parameters defined
+            in the Series, Workspace, and the Tree levels.
+        crnParsH : dict of dict of list of float
+            A dictionary of current values of all model parameters arranged
+            hierarchically, i.e.
+            {'node name' : {'parameter name' : [list of values]}}
+        smplDistF : dict
+            A dictionary of parameters' samples obtained by MCMC. Keys correspond
+            to parsKeys tuples; values are of smplSpec type.
+        xclRootNames : set of str
+            Names of chemTree nodes excluded form analysis for this Datum (e.g.
+            if a certain component is absent in the sample, its intensity will
+            be set to 0 and it will not be fitted).
+        _joint : callable
+            A function defining a joint prior distribution of the parameters. Takes
+            a hierarchical dictionary of parameter values, evalParsH, and returns
+            the vlaue of log-prior (float).
+            Can be set/removed using the setJointPrior and remJointPrior methods.
+        _qof : float
+            Quality of fit
+            TODO: not defined
+        extra : dict
+            Any additional data specific to a particular application.
+    """
 
     def __init__(self, yT, parent, name='', arrVal=None, crntParsH=None, flagAdapFreq=None, priors=None, xclRootNames=None, extra=None, **kwargs):
         self.name = name
@@ -1526,7 +1772,7 @@ class Datum():
         self.xclRootNames = set(xclRootNames) if xclRootNames is not None else set([])       # Excluded RootNames
         self._joint = None            # A joint prior of all parameters
         self._flagAdapFreq = flagAdapFreq if flagAdapFreq is not None else (len(self.yT) > 2**16)
-        self._gof = None              # Computed goodness of fit
+        self._qof = None              # Computed goodness of fit
         self.extra = {}
         self.fullReset(crntParsH, priors, flagAdapFreq, extra)
 
@@ -1557,14 +1803,29 @@ class Datum():
         return self.name
 
     def selfID(self):
-        """Returns indices of the Series in the Workspace and the Datum in the Series"""
+        """Identifier of the Datun in the containing Workspace.
+
+            Returns:
+
+            A 2-tuple with the first element corresponding to the index of
+            the parent Series in the list of series in the Workspace; the second
+            element is the index of the Datum in the Series.
+
+        """
+
         return (self.parent.parent.series.index(self.parent), self.parent.data.index(self))
+
+    def remove(self):
+        """Removes the Datum from the Series"""
+        self.parent.data.remove(self)
 
     def isAdapFreq(self):
         return self._flagAdapFreq
 
     def protocol(self):
-        """Determines the protocol of the experiment (PROTON/PRESAT). Works for Spinsolve, currently."""
+        """Determines the protocol of the experiment (PROTON/PRESAT).
+           Works for Spinsolve, currently.
+        """
         try:
             p = self.extra['Protocol']
         except KeyError:
@@ -1577,6 +1838,11 @@ class Datum():
         else: return None
 
     def resetSignals(self, flagAdapFreq=None):
+        """Reset the signals computed for the given Datum (spectrum, modelled
+            data, baselines)
+
+        """
+
         self._f = None         # Subsampled frequency array from the Series level that overwrites it for the specific Datum
         self.wT = np.exp(-self.apod*np.linspace(0.0, (len(self.yT)-1)*(self.t[1]-self.t[0]), len(self.yT)).reshape(-1, 1) ) if self.apod > 0 else 1.0            # Apodization window
         self.yF = np.fft.fftshift(np.fft.fft(self.yT * self.wT, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
@@ -1585,7 +1851,7 @@ class Datum():
         self.zF_corr, self.bF_corr = None, None           # Corrections for the model matrix and the baseline
         self.sF, self.sT = None, None        # A lineshape kernel
         self.Gz = None
-        self._gof = None
+        self._qof = None
 
         # Reset the adaptive frequencies flag, if supplied
         if flagAdapFreq is not None:
@@ -1614,7 +1880,7 @@ class Datum():
             self.yF = self.yF[indx, :].reshape(-1,1)
 
     def resetCrntPars(self, crntParsH=None, priors=None):
-        """Resets ALL current parameters."""
+        """Resets ALL current parameters and their priors."""
         # Reset the dictionary of priors
         self.parsSpecDict.clear()
         if priors is not None:
@@ -1630,7 +1896,7 @@ class Datum():
         self.smplDistF.clear()          # A flat dictionary of sampled (or marginalized) parameters
         self.mdldPeaks.clear()
         self.pckdPeaks.clear()
-        self._gof = None
+        self._qof = None
 
     def fullReset(self, crntParsH=None, priors=None, flagAdapFreq=None, extra=None):
         self.resetSignals(flagAdapFreq)
@@ -1643,7 +1909,8 @@ class Datum():
         if extra is not None: self.extra.update(extra)
 
     def alignToSolventPeak(self, chshTo=4.75):
-        """Shifts the entire spectrum to align the highest peak (assumed to be the solvent peak) with a specified chemical shift."""
+        """Shifts the entire spectrum to align the highest peak (assumed to be
+        the solvent peak) with a specified chemical shift."""
         chshFrom = self.f[np.argmax(np.abs(self.yF))]
         df = (chshTo - chshFrom)*self.c0
         self.yT *= np.exp(2*np.pi*1j*df*self.t)
@@ -1655,7 +1922,8 @@ class Datum():
         self.resetSignals()
 
     def fittableParsKeys(self, frqBlkIds=None, inRange=None, customPriors=None, node_name=None, considerRange=False):
-        """Returns all _individually_ fittable parameters for a (sub)tree starting from a specific node."""
+        """Returns all _individually_ fittable parameters for a (sub)tree starting
+           from a specific node."""
         # TODO: Need to check jcplQD
         if frqBlkIds is None:
             frqBlkIds = self.steps[-1].frqBlkIds
@@ -1714,7 +1982,9 @@ class Datum():
         return set(good_keys), set(bad_keys)
 
     def isAutofittable(self, key, customPriors=None):
-        """Checks if a parameter can be fitted algebraically/marginalized based on the definition of its prior distribution."""
+        """Checks if a parameter can be fitted algebraically/marginalized based
+            on the definition of its prior distribution.
+        """
         prior = self.getPrior(key, customPriors)
         if (key[1]=='sigma2' and prior.distr=='Inverse-Gamma') \
             or (key[1]=='theta' and prior.distr=='Uniform' and prior.min==-np.pi and prior.max==np.pi) \
@@ -1724,7 +1994,7 @@ class Datum():
         else: return False
 
     def isFittable(self, key, frqBlkIds=None, inRange=None, customPriors=None):
-        """Checks if the parameter key can be fitted with the current settings of distributions/ranges."""
+        """Checks if the parameter can be fitted with the current settings of distributions/ranges."""
         # TODO: can be made much faster by not checking all nodes
         return key in self.fittableParsKeys(frqBlkIds, inRange, customPriors)
 
@@ -1817,7 +2087,12 @@ class Datum():
         self.resetSignals()
 
     def getTree(self, node_name=None, reset_dval=False):
-        """Return a copy of the tree rooted in the node with name node. All default distributions and parameter values are replaced with the current values in this Datum."""
+        """Return a copy of the tree rooted in the node with name node.
+
+        All default distributions and parameter values are replaced with the
+        current values set in this Datum.
+
+        """
 
         # Get the copy of the tree
         T = self.parent.parent.getTree(node_name)
@@ -1842,7 +2117,7 @@ class Datum():
 
     def setCrntVal(self, key, val=None):
         """Updates the current value of the parameter key."""
-        self._gof = None           # Need to update the goodness of fit
+        self._qof = None           # Need to update the goodness of fit
 
         if val is None:
             val = self.getPrior(key).dflt()
@@ -1855,7 +2130,8 @@ class Datum():
         self.smplDistF.clear()
 
     def getCrntVals(self, node_name=None, keys=None):
-        """Returns a flat dictionary of all parameters that affect nodes in the tree below and including the given node."""
+        """Returns a flat dictionary of all parameters that affect nodes in the
+            tree below and including the given node."""
         if keys is None:
             keys = self.allParsKeys(node_name) + [('.', 'theta', 0), ('.', 'tau', 0), ('.', 'sigma2', 0), ('.', 'gamma', 0)]
         parsF = {key:self.getCrntVal(key) for key in keys }
@@ -1897,7 +2173,7 @@ class Datum():
 
     def getDfltParsH(self):
         """Returns a complete hierarchical dictionary of default parameters."""
-        result = defaultTreePars(self.T, lshapeOrder=self.lshapeOrder)
+        result = defaultTreePars(self.T)
         for node_name in result.keys():
             for par_name, par_array in result[node_name].items():
                 for i in range(len(par_array)):
@@ -1906,7 +2182,12 @@ class Datum():
         return result
 
     def getPrior(self, key, customPriors=None):
-        """Returns the specification of a parameter in the current tree or tau. Start by looking for the specification in the current datum structure, then proceed to the series level andthe tree if the parameter is not found."""
+        """Returns the prior distribution of a parameter.
+
+            Start by looking for the specification in the current datum structure,
+            then proceed to the series level and the tree, if the parameter is not
+            found.
+        """
         # TODO: Make it nicer...
         # Try looking for the prior in the dictionary of custom priors first
         if customPriors is not None:
@@ -1932,9 +2213,21 @@ class Datum():
                     except KeyError:
                         print("Something is wrong with {}".format(key))
 
-    def setPrior(self, key, customPriors=None, reset=True, fromCurrent=False, chshRange=0.015, **kwargs):
-        """Updates the prior key with parameters passed in kwargs (other parameters are left unchanged). Sets a new prior if no prior has been defined for this Datum."""
+    def setPrior(self, key, priorSpec=None, customPriors=None, reset=True, fromCurrent=False, chshRange=0.015, **kwargs):
+        """Updates the prior distribution of a parameter.
+
+            The options for the new distribution can be passed in kwargs (other
+            parameters are kept unchanged). Sets a new prior if no prior has been
+            defined for this Datum.
+        """
+
         par = self.getPrior(key, customPriors)
+
+        # Copy from a supplied parsSpec
+        if priorSpec is not None:
+            par = par._replace(**priorSpec._asdict())
+
+        # Copy from current values
         if fromCurrent:
             # Set min/max/dval as the current value
             val = self.getCrntVal(key)
@@ -1964,15 +2257,27 @@ class Datum():
         """Removes the jointPrior from the Datum."""
         self._joint = None
 
-    # @profile
     def _f_shifted(self):
-        """Returns the shifted array of frequencies."""
+        """Return the array of chemical shifts shifted according to global chsh."""
 
         dref_chsh = self.getGlobalChshVal() if config.DISPL_ShiftToReference else 0.0   # Reference chemical shift
 
         return self.f - np.array(dref_chsh)           # Complete array of frequencies
 
     def _get_signals_in_time(self, evalParsH, wnd=None):
+        """ Return a matrix of model signals evaluated in the time domain (FID).
+
+        Args:
+            evalParsH : dict of dict of list of float
+                A dictionary of parameter values used to evaluate the model with
+                all parameters arranged hierarchically, i.e.
+                {'node name' : {'parameter name' : [list of values]}}
+                Normally, can be set to crntParsH.
+            wnd : np.array
+                Time domain window (e.g. for apodization).
+
+        """
+
         # 1. Compute model signals in time domain
         zT, _ = getFID(self.T, self.t, self.c0, self.f0, evalParsH, xclRootNames=self.xclRootNames)            # 1. Compute the model signals
 
@@ -1987,11 +2292,49 @@ class Datum():
         return zTw[0:,:], yTw[0:, :]
 
     # @profile
-    def _get_signals_in_freq(self, evalParsH, frqBlkIds=None, freqMask=None, wnd=None, numberField=None, allowShift=False, shiftingRange=0.1):
+    def _get_signals_in_freq(self, evalParsH, frqBlkIds=None, freqMask=None, wnd=None,
+                             numberField=None, allowShift=False, shiftingRange=0.1):
         """Return a matrix of modelled signals and the y vector in frequency domain.
 
-        shiftingRange - maximum allowed deviation of chemical shift in ppm
-        (on each side) before the spectrum is recomputed.
+        Args:
+            evalParsH : dict of dict of list of float
+                A dictionary of parameter values used to evaluate the model with
+                all parameters arranged hierarchically, i.e.
+                {'node name' : {'parameter name' : [list of values]}}
+                Normally, can be set to crntParsH.
+            frqBlkIds : list of int
+                Indexes of frequency blocks defined in the Series that will be
+                used to evaluate the model.
+            numberField : str, either 'Re', 'ReIm', or 'Cx'
+                Defines wether to output the result as real- ('Re') or complex-
+                valued ('Cx') array. If 'ReIm' - the real and imaginary parts of
+                the spectrum will be concatenated together resulting in a 2x longer array.
+            allowShift : bool
+                A way to speed up the computations. If True, instead of completely
+                recomputing the spectrum each time, will check wether the chemical
+                shifts used during the previous computation are close enough to
+                the newly requested parameters. If theyr are (as controlled by the
+                shiftingRange option), will simply shift the previously computed
+                spectrum without running the QM simulations again.
+            shiftingRange : float
+                Maximum allowed deviation of chemical shift in ppm (on each side)
+                before the spectrum is recomputed with the full QM model.
+
+        Returns:
+            zFinRange : nf_x_m np.array of float
+                Individual (m) model signals arranged as columns evaluated only
+                in the requested freqBlocks.
+            bslnPoly : nf_x_nb np.array of float
+                Individual (nb) polynomial baseline functions arranged as columns.
+            yFinRange : nf_x_1 np.array of float
+                The acquired data restricted to the specific frequency range
+                defined by the seleted freqBlocks.
+            indxInRangeStacked : np.array of int
+                All returned signals are evaluated only on the spectral points
+                within the requested frequency blocks. Signals from different blocks
+                are stacked together vertically, and indxInRangeStacked indicates
+                the indicies of the original (full) frequency array corresponding
+                to each point in the returned signals.
         """
 
         if frqBlkIds is None:
@@ -2077,9 +2420,56 @@ class Datum():
         return zFinRange, bslnPoly, yFinRange, indxInRangeStacked
 
     # @profile
-    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, freqMask=None, funcType=None, wnd=None, customPriors=None, returnSignals=False, robust=None, numberField=None, allowShift=False, shiftingRange=0.1):
-        """Computes the value of the likelihood function. If evaluatePriors == True, will also add values of prior distributions for amplitudes, theta, and sigma2, if those parameters can not be integrated out."""
-        #funcType = 'TLS'
+    def _fnc_lklhd(self, evalParsH, frqBlkIds=None, autoKeys=None, freqMask=None,
+                   funcType=None, wnd=None, customPriors=None, returnSignals=False,
+                   robust=None, numberField=None, allowShift=False, shiftingRange=0.1):
+        """Compute the value of the likelihood function.
+
+        Args:
+            evalParsH : dict of dict of list of float
+                A dictionary of parameter values used to evaluate the model with
+                all parameters arranged hierarchically, i.e.
+                {'node name' : {'parameter name' : [list of values]}}
+                Normally, can be set to crntParsH.
+            frqBlkIds : list of int
+                Indexes of frequency blocks defined in the Series that will be
+                used to evaluate the model.
+            autoKeys : list of tuples
+                List of parsKeys tuples ('Node name', 'Parameter name', Indx)
+                indicating model parameters that will be estimated using a closed
+                form expression (if possible). Only applicable for the amplitudes,
+                ('.', 'sigma2', 0), and ('.', 'theta', 0).
+            customPriors : dict
+                A dictionary of priors to override the definitions in the Datum
+                (only used for MCMC sampling).
+            returnSignals : bool
+                If True, will save (or update) the resulting model signals, yF, zF.
+            robust : bool
+                If True, will use robust variance estimator for model intensities
+                during the MCMC sampling (explicitly including the effect of the
+                residual).
+            numberField : str, either 'Re', 'ReIm', or 'Cx'
+                Defines wether to output the result as real- ('Re') or complex-
+                valued ('Cx') array. If 'ReIm' - the real and imaginary parts of
+                the spectrum will be concatenated together resulting in a 2x longer array.
+            allowShift : bool
+                A way to speed up the computations. If True, instead of completely
+                recomputing the spectrum each time, will check wether the chemical
+                shifts used during the previous computation are close enough to
+                the newly requested parameters. If theyr are (as controlled by the
+                shiftingRange option), will simply shift the previously computed
+                spectrum without running the QM simulations again.
+            shiftingRange : float
+                Maximum allowed deviation of chemical shift in ppm (on each side)
+                before the spectrum is recomputed with the full QM model.
+
+        Returns:
+            result : float
+                Value of (log of) the likelihood function.
+            meta : dict
+                Dictionary of additional parameters estimated in closed form (e.g.
+                variance of noise, zero-order phasing, model intensities).
+        """
 
         # 1. Update the settings
         if autoKeys is None:
@@ -2174,7 +2564,6 @@ class Datum():
             Gz = 1.0*np.abs(Z)
 
         Gz[:, na:] = 0
-        # print(np.sum(np.abs(Z), axis=0))
         result, ampl, sigma2, meta = log_likelihood(Z, y, ampl0=ampl, sigma2_0=sigma2, \
             Gz=Gz, Gy=None, gamma0=gamma, m0=m0, iS0=iS0, a_sigma2_0=a_sigma2, b_sigma2_0=b_sigma2, \
             funcType=funcType, robust=robust, nonnegative=True, na=na)
@@ -2215,7 +2604,7 @@ class Datum():
                 self.zF = np.fft.fftshift(np.fft.fft(Z, len(self.f), axis=0), axes=0) / np.sqrt(len(self.f))
             else:
                 self.zF = np.zeros((len(self.f),na), dtype=complex)
-                self.zF[indxInRangeStacked,:] = zFinRange ### / Znrm[:, 0:na]
+                self.zF[indxInRangeStacked,:] = zFinRange
 
             # Save the characteristics of the marginalized distributions
             for i in range(na):
@@ -2234,19 +2623,28 @@ class Datum():
             self.bF[indxInRangeStacked] = np.dot(bFinRange, m_ampl[-(nz-na):])
 
         meta['sigma2'] = (2.0, sigma2)
-        meta['theta'] = theta       # distr = {"ampl":(m_ampl, S_ampl), "theta":theta, "sigma2":(a_sigma2, b_sigma2)}
+        meta['theta'] = theta
         meta['ampl'] = (np.abs(m_ampl[:na]), S_ampl[:na, :na].real)
 
         return result, meta         # Output the log value and parameters of the marginalized distributions
 
     def _fnc_prior(self, evalParsH, parsKeys, customPriors=None):
-        """Computes the prior functions. Priors will be computed only for parameters in the list parsKeys (if parsKeys is None -- all parameters will be included). Assumes that parameters that can be marginalized are not included in parsKeys."""
+        """Computes the values of prior distributions.
+
+        Priors will be computed only for parameters in the list parsKeys
+        (if parsKeys is None -- all parameters will be included). Assumes that
+        parameters that can be marginalized are not included in parsKeys.
+
+        """
+
         if len(parsKeys) == 0:
             return 0
         else:
             # if parsKeys is None:    # All parameters
             #     parsKeys = flatten(self.crntParsH).keys()
-            return sum([self.getPrior(key, customPriors).evalPrior(arg=evalParsH[key[0]][key[1]][key[2]]) for key in set(parsKeys) if key[1] not in ['ampl', 'theta', 'sigma2']])
+            return sum([self.getPrior(key, customPriors).\
+                        evalPrior(arg=evalParsH[key[0]][key[1]][key[2]]) \
+                        for key in set(parsKeys) if key[1] not in ['ampl', 'theta', 'sigma2']])
 
     def _fnc_joint(self, evalParsH):
         """Evaluates the joint prior."""
@@ -2257,7 +2655,9 @@ class Datum():
         else: return 0.0
 
     def measure_noise(self, lims, lmda=6.0):
-        """Measures the standard deviation of noise in the spectrum within the limits lims in ppm."""
+        """Measures the standard deviation of noise in the spectrum within the
+            limits lims in ppm.
+        """
 
         indxFreq = np.arange(np.searchsorted(self.f.ravel(), min(lims)), \
                              np.searchsorted(self.f.ravel(), max(lims)))     # Indices of frequency points in the range
@@ -2271,7 +2671,8 @@ class Datum():
         return sigma2_est # yF, yFbsln
 
     def estimate_snr(self, lims_noise, lims_signal=None, lmda=6.0):
-        """Estimates SNR for each component defined as a ratio between the highest point in the modelled spectrum to the 95% level of noise floor (2*sigma_est)."""
+        """Estimates SNR for each component defined as a ratio between the highest
+        point in the modelled spectrum to the 95% level of noise floor (2*sigma_est)."""
         # 1. Estimate the noise level
         sigma2_est = self.measure_noise(lims=lims_noise, lmda=lmda)
 
@@ -2296,13 +2697,65 @@ class Datum():
 
         return snr
 
-    def evaluate(self, evalParsH=None, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, customPriors=None, robust=None, returnSignals=False, allowShift=False, shiftingRange=0.1):
-        """Evaluates the objective function (logLikelihood + sum of logPriors).
-           Inputs:
-           evalParsH - hierarchical dictionary of parameters (node name -> parameter name -> list of parameters); use crntParsH by default
-           parsKeys - list of parameter tuples (node name, parameter name, parameter index)
-           frqBlkIds - list of indices of frequency blocks over which to evaluate the function; evaluate in time domain by default, []
-           evaluatePriors - if True, will add values of priors to the likelihood function to compute the posterior. Only those priors specified by parsKeys will be evaluated. """
+    def evaluate(self, evalParsH=None, evalParsF=None, parsKeys=None, autoKeys=None, frqBlkIds=None,
+                 freqMask=None, funcType=None, evaluatePriors=False, customPriors=None,
+                 robust=None, returnSignals=False, allowShift=False, shiftingRange=0.1):
+
+        """Evaluate the objective function (logLikelihood + sum of logPriors).
+
+        Args:
+            evalParsH : dict of dict of list of float
+                A dictionary of parameter values used to evaluate the model with
+                all parameters arranged hierarchically, i.e.
+                {'node name' : {'parameter name' : [list of values]}}.
+                Uses crntParsH by default.
+            evalParsF : dict
+                A 'flat' dictionary of parameters with keys corresponding to parsKeys
+                tuples and values -- float values of the parameters that will be
+                used to update the evalParsH dictionary.
+            parsKeys : list of tuples
+                List of parsKeys whose priors will be evaluated and added to the
+                result if evaluatePriors==True.
+            autoKeys : list of tuples
+                List of parsKeys tuples ('Node name', 'Parameter name', Indx)
+                indicating model parameters that will be estimated using a closed
+                form expression (if possible). Only applicable for the amplitudes,
+                ('.', 'sigma2', 0), and ('.', 'theta', 0).
+            frqBlkIds : list of int
+                Indexes of frequency blocks defined in the Series that will be
+                used to evaluate the model.
+            customPriors : dict
+                A dictionary of priors to override the definitions in the Datum
+                (only used for MCMC sampling).
+            returnSignals : bool
+                If True, will save (or update) the resulting model signals, yF, zF.
+            robust : bool
+                If True, will use robust variance estimator for model intensities
+                during the MCMC sampling (explicitly including the effect of the
+                residual).
+            numberField : str, either 'Re', 'ReIm', or 'Cx'
+                Defines wether to output the result as real- ('Re') or complex-
+                valued ('Cx') array. If 'ReIm' - the real and imaginary parts of
+                the spectrum will be concatenated together resulting in a 2x longer array.
+            allowShift : bool
+                A way to speed up the computations. If True, instead of completely
+                recomputing the spectrum each time, will check wether the chemical
+                shifts used during the previous computation are close enough to
+                the newly requested parameters. If theyr are (as controlled by the
+                shiftingRange option), will simply shift the previously computed
+                spectrum without running the QM simulations again.
+            shiftingRange : float
+                Maximum allowed deviation of chemical shift in ppm (on each side)
+                before the spectrum is recomputed with the full QM model.
+
+        Returns:
+            result : float
+                Value of (log of) the posterior distribution.
+            meta : dict
+                Dictionary of additional parameters estimated in closed form (e.g.
+                variance of noise, zero-order phasing, model intensities).
+
+        """
 
         if parsKeys is None or autoKeys is None:
             parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds, customPriors, verbose=False)
@@ -2310,7 +2763,16 @@ class Datum():
         if evalParsH is None:
             evalParsH = self.crntParsH
 
-        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, freqMask, funcType, customPriors=customPriors, returnSignals=returnSignals, robust=robust, allowShift=allowShift, shiftingRange=shiftingRange)
+        # Include parameter values from the flat dictionary
+        if evalParsF is not None:
+            evalParsH = copy.deepcopy(evalParsH)
+            for k, v in evalParsF.items():
+                evalParsH[k[0]][k[1]][k[2]] = v
+
+
+        result, meta = self._fnc_lklhd(evalParsH, frqBlkIds, autoKeys, freqMask, \
+                       funcType, customPriors=customPriors, returnSignals=returnSignals, \
+                       robust=robust, allowShift=allowShift, shiftingRange=shiftingRange)
 
         if evaluatePriors:
             result += self._fnc_prior(evalParsH, parsKeys, customPriors=customPriors)
@@ -2318,8 +2780,41 @@ class Datum():
 
         return result, meta
 
-    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nhop=None, respectBounds=True, verbose=True):
-        """Optimization over the tree parameters selected in the parsKeys (list of tuples)."""
+    def optimize(self, parsKeys, autoKeys=None, frqBlkIds=None, freqMask=None,
+                funcType=None, evaluatePriors=False, robust=None, nhop=None, verbose=True):
+
+        """Fit the model to the data by adjusting its parameters.
+
+        Args:
+            parsKeys : list of tuples
+                List of parameters in parsKeys format, ('Node name', 'Parameter
+                name', Indx) that will be fitted.
+            autoKeys : list of tuples
+                List of parsKeys tuples ('Node name', 'Parameter name', Indx)
+                indicating model parameters that will be estimated using a closed
+                form expression (if possible). Only applicable for the amplitudes,
+                ('.', 'sigma2', 0), and ('.', 'theta', 0).
+            frqBlkIds : list of int
+                Indexes of frequency blocks defined in the Series that will be
+                used to evaluate the model.
+            evaluatePriors : bool
+                If True, will evaluate priors for the parameters in parsKeys; if
+                False, only the likelihood function will be used in optimization.
+            robust : bool
+                If True, will use robust variance estimator for model intensities
+                during the MCMC sampling (explicitly including the effect of the
+                residual).
+            nhop : int
+                Number of basinhopping steps of the optimization algorithm.
+
+        Returns:
+            result : float
+                Value of (log of) the posterior distribution.
+            meta : dict
+                Dictionary of additional parameters estimated in closed form (e.g.
+                variance of noise, zero-order phasing, model intensities).
+
+        """
 
         parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds, verbose=verbose)
         allowShift, shiftingRange = False, 0.0
@@ -2334,18 +2829,23 @@ class Datum():
             allowShift = any([key[1] in ['chsh', 'alph'] for key in parsKeys])
             shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])            # Maximum range width of any chemical shift parameter
 
-            costFuncOpti = lambda x : -self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=False, allowShift=allowShift, shiftingRange=shiftingRange)[0]
+            costFuncOpti = lambda x : -self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, \
+                                        parsKeys, autoKeys, frqBlkIds, freqMask, funcType, \
+                                        evaluatePriors, robust=False, allowShift=allowShift, \
+                                        shiftingRange=shiftingRange)[0]
 
             # Call the optimization routine
-            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, respectBounds=respectBounds, verbose=verbose)
+            res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
 
             if res is not None:
                 # Update the stored parameters
-                updateFromFlat(self.crntParsH, parsKeys, res.x)    # Updated structure of all parameters
+                for k, v in zip(parsKeys, res.x):
+                    self.crntParsH[k[0]][k[1]][k[2]] = v
+
                 self.smplDistF.clear()
 
         # Re-evaluate the posterior
-        result, meta = self.evaluate(None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
+        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -2353,12 +2853,142 @@ class Datum():
                 print('Found values:')
                 for key in parsKeys:
                     print("     {} = {:.5g}".format(str(key), self.getCrntVal(key)))
+                print('\n')
 
         return result, meta
 
-    def goodness_of_fit(self, frqBlkIds=None):
-        """Evaluates how well the model is fitted to the data on the scale from 0.0 (bad) to 1.0 (good)."""
-        if self._gof is None:
+    def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None,
+               funcType=None, evaluatePriors=False, robust=None, nwalkers=None, nsteps=None):
+
+        """Sample the posterior distribution using the MCMC algorithm.
+
+        Args:
+            parsKeys : list of tuples
+                List of parameters in parsKeys format, ('Node name', 'Parameter
+                name', Indx) to sample.
+            autoKeys : list of tuples
+                List of parsKeys tuples ('Node name', 'Parameter name', Indx)
+                indicating model parameters that will be estimated using a closed
+                form expression (if possible). Only applicable for the amplitudes,
+                ('.', 'sigma2', 0), and ('.', 'theta', 0).
+            frqBlkIds : list of int
+                Indexes of frequency blocks defined in the Series that will be
+                used to evaluate the model.
+            evaluatePriors : bool
+                If True, will evaluate priors for the parameters in parsKeys; if
+                False, only the likelihood function will be used in optimization.
+            robust : bool
+                If True, will use robust variance estimator for model intensities
+                during the MCMC sampling (explicitly including the effect of the
+                residual).
+            nwalkers : int
+                Number of MCMC walkers.
+            nsteps : int
+                Number of sampling steps in the MCMC algorithm.
+
+        Returns:
+            result : dict
+                A dictionary of MCMC samples for each requested parameter.
+        """
+
+        parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds)
+        result = {}
+        self.smplDistF.clear()             # Clear the characteristics of marginal distributions
+        reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
+        # If no parameters are set for sampling, just evaluate the marginal posterior
+        if len(parsKeys) == 0:
+            # # Define the spectrum shifting range for faster computations
+            # allowShift = any([key[1] in ['chsh', 'alph'] for key in parsKeys])
+            # shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])
+
+            # Nothing to sample; just evaluate the function
+            value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, robust=robust, returnSignals=True)
+
+            m_ampl = np.array(meta['ampl'][0]).reshape(-1, 1)
+            S_ampl = meta['ampl'][1]
+            nrep = len(m_ampl)*250     # Number of repeats for each case to sample the amplitudes from the Gaussian distributions
+            indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled
+            smpl = np.linalg.cholesky(S_ampl[np.ix_(indx, indx)]).dot(np.random.randn(len(indx), nrep)) + m_ampl[indx].reshape(-1,1)                  # Multivariate Gaussian random samples
+            for i, id in enumerate(indx):
+                key = (reportedNames[id], 'ampl', 0)
+                result[key] = smpl[i,:]
+                self.smplDistF[key] = smplSpec_from_data(result[key])
+            sigma2 = np.array([[x] for x in meta['sigma2']])
+            result[('.', 'sigma2', 0)] = sigma2[1] / (sigma2[0]-1)     # Mean estimator for sigma
+            result[('.', 'sigma2', 'distr')] = sigma2
+            result[('.', 'theta', 0)] = np.array([meta['theta']])
+
+            print("Done. No non-marginalized parameters were requested.")
+            return result
+
+        # Define the objective function using a copy of the parameters dictionary
+        evalParsH = copy.deepcopy(self.crntParsH)
+        # TODO! Make tight bounds, e.g. only xx% of the full range centered at the initial values
+        bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
+        initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
+        costFuncSmpl = lambda x : self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, None, \
+                                                parsKeys, autoKeys, frqBlkIds, freqMask, \
+                                                funcType, evaluatePriors, robust=robust)
+
+        sampler = self._sample(costFuncSmpl, bounds, initVals, nwalkers, nsteps)
+
+        # Form a table of results for the output
+        # sampler.blobs has size nsteps x nwalkers
+        # sampler.chain in nwalkers x nsteps x ndim
+        # Want an output in the form nsamples x ndim
+
+        flatchain = sampler.flatchain
+        for i, key in enumerate(parsKeys):
+            result[key] = flatchain[:, i]
+            self.smplDistF[key] = smplSpec_from_data(result[key])
+
+        m_ampl = np.array([blb[0]['ampl'][0].ravel() for blb in sampler.blobs.ravel()]).T     # Means of the amplitudes
+        S_ampl = np.array([blb[0]['ampl'][1] for blb in sampler.blobs.ravel()]).T             # Covariance matrices of the amplitudes
+        # Generate random samples of amplitudes
+        print(m_ampl.shape, S_ampl.shape)
+        nrep = 3     # Number of repeats for each case of parsKeys to sample the amplitudes from the Gaussian distributions
+        indx = [i for i, name in enumerate(reportedNames) \
+                if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' \
+                and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled explicitely
+        if len(indx) > 0:
+            smpl = np.hstack([np.linalg.cholesky(np.squeeze(S_ampl[np.ix_(indx, indx, [i])], axis=2)).\
+                              dot(np.random.randn(len(indx), nrep)) \
+                             + m_ampl[indx,i].reshape(-1,1) for i in range(S_ampl.shape[-1])])              # Multivariate Gaussian random samples
+            for i, id in enumerate(indx):
+                key = (reportedNames[id], 'ampl', 0)
+                if key not in parsKeys:
+                    result[key] = smpl[i,:]
+                    self.smplDistF[key] = smplSpec_from_data(result[key])
+
+        # Sigma2
+        sigma2 = np.array([blb[0]['sigma2'] for blb in sampler.blobs.ravel()]).T
+        result[('.', 'sigma2', 0)] = sigma2[1,:] / (sigma2[0,:]-1)     # Sample sigma
+        result[('.', 'sigma2', 'distr')] = sigma2
+
+        # Theta
+        key = ('.', 'theta', 0)
+        result[key] = np.array([blb[0]['theta'] for blb in sampler.blobs.ravel()]).ravel()
+        self.smplDistF[key] = smplSpec_from_data(result[key])
+
+        return result
+
+    def run_steps(self, step_ids=None):
+        """Execute a sequence of steps defined for the parent Series."""
+        if step_ids is None:
+            step_ids = list(range(len(self.steps)))
+
+        for i in step_ids:
+            self.steps[i].run(self)
+
+    def quality_of_fit(self, frqBlkIds=None):
+        """Evaluate how well the model is fitted to the data.
+        TODO : not finished yet
+
+        Returns :
+            float on the scale from 0.0 (bad) to 1.0 (good).
+
+        """
+        if self._qof is None:
             # print('Calculating GOF')
             self.evaluate(autoKeys=[], returnSignals=True)
             f, yFph, xF, _, bF = self.signals_for_plot(frqBlkIds=frqBlkIds, onlyInRange=True)
@@ -2375,16 +3005,23 @@ class Datum():
             # print('GOF scores = ', score1, score2, score3)
 
             if score1 < 0.05 and score3 < 20.0:
-                self._gof = 1.0
+                self._qof = 1.0
             elif 0.05 <= score1 and score1 < 0.2:
-                self._gof = 0.5
+                self._qof = 0.5
             else:
-                self._gof = 0.0
+                self._qof = 0.0
 
-        return self._gof
+        return self._qof
 
     def auto_phase(self, fit_Ph1=True):
-        """Run the autophasing algorithm."""
+
+        """Run the standard autophasing algorithm.
+
+        Args:
+            fit_Ph1 : bool
+                If True, will optimize both, zero- and first-order phasing terms;
+                if False, will only use the zero-order phasing
+        """
         # Get the spectrum (or compute it if the signal is too long and adaptive FFT has been used)
         dt = self.t[1]-self.t[0]
         if self._f is None or len(self.yF) < 2**14:
@@ -2405,14 +3042,6 @@ class Datum():
         p0, p1 = automatic_ps(yF.ravel(), 'acme', p0=-p0deg, p1=-p1deg, fit_Ph1=fit_Ph1)     # 'peak_minima'
         p0deg, p1deg = -p0, -p1
 
-        # # Check if the phase needs to be flipped
-        # yFph = nmrglue.proc_base.ps(yF.reshape(-1,1), p0=p0deg, p1=p1deg)    # Phased data
-        # print('Phasing')
-        # print(yFph.real)
-        # if np.median(yFph.real) - np.min(yFph.real) > np.max(yFph.real) - np.median(yFph.real):
-        #     p0deg = p0deg+180
-        #     print('Here')
-
         # Convert the found values
         theta, tau = deg2tau(dt, nf, p0deg, p1deg)
         theta = (theta + np.pi/2) % np.pi - np.pi/2    # make sure the phase stays in the (-90.0, 90.0) interval
@@ -2420,10 +3049,31 @@ class Datum():
         self.setCrntVal(key = ('.', 'theta', 0), val = theta)
         self.setCrntVal(key = ('.', 'tau', 0), val = tau)
 
-    def adjust_phase(self, evalParsH=None, frqBlkIds=None, freqMask=None, mode='PhX', mw=512, cfun='LS', nhop=0, verbose=True):
-        """Phase correction by adjusting the residual.
-        Inputs:
-        mode - choose which phase parameters to adjust ('PhX', 'Ph0', 'Ph1')
+    def adjust_phase(self, evalParsH=None, frqBlkIds=None, freqMask=None, mode='PhX',
+                     mw=512, cfun='LS', nhop=0, verbose=True):
+        """Residual-based phase nad baseline adjustment.
+
+        See "Improving the Accuracy of Model-based Quantitative NMR"
+        by Y.Matviychuk et.al. for more detail.
+
+        Args:
+            evalParsH : dict of dict of list of float
+                A dictionary of parameter values used to evaluate the model with
+                all parameters arranged hierarchically, i.e.
+                {'node name' : {'parameter name' : [list of values]}}.
+                Uses crntParsH by default.
+            frqBlkIds : list of int
+                Indexes of frequency blocks defined in the Series that will be
+                used to evaluate the model.
+            mode : str 'PhX', 'Ph0', or 'Ph1'
+                Selector of which phase parameters to adjust: only zero-order ('Ph0'),
+                only first-order ('Ph1'), or both ('PhX').
+            mw : int
+                Size of the median filter used to estimatethe the baseline.
+            cfun : str, 'LS' or 'TV'
+                Defines the type of the cost function: least-squares ('LS') or
+                total variation ('TV')
+
         """
 
         if verbose:
@@ -2485,10 +3135,33 @@ class Datum():
 
         #
         if verbose:
-            print('Found values: ph0 = {:.4f}, ph1 = {:.4f}'.format(ph0, ph1))
+            print('Found values: ph0 = {:.4f}, ph1 = {:.4f}\n'.format(ph0, ph1))
 
-    def adjust_residual(self, evalParsH=None, frqBlkIds=None, freqMask=None, mw=2048, correct_comps=True, force_eval=False, verbose=True):
-        """Correction of the model signals and the baseline to make the residual noise-like."""
+    def adjust_residual(self, evalParsH=None, frqBlkIds=None, freqMask=None, mw=2048,
+                        correct_comps=True, force_eval=False, verbose=True):
+        """Correct of the model signals and the baseline to make the residual noise-like.
+
+        See "Improving the Accuracy of Model-based Quantitative NMR"
+        by Y.Matviychuk et.al. for more detail.
+
+        Args:
+            evalParsH : dict of dict of list of float
+                A dictionary of parameter values used to evaluate the model with
+                all parameters arranged hierarchically, i.e.
+                {'node name' : {'parameter name' : [list of values]}}.
+                Uses crntParsH by default.
+            frqBlkIds : list of int
+                Indexes of frequency blocks defined in the Series that will be
+                used to evaluate the model.
+            mw : int
+                Size of the median filter used to estimatethe the baseline.
+            correct_comps : bool
+                If True, adjusts the individual model components and their intensities
+                by redistributing the residual among them.
+            force_eval : bool
+                If True, will reevaluate the model before running the adjustments.
+
+        """
 
         if verbose:
             print('Adjusting the baseline and residual.')
@@ -2527,6 +3200,7 @@ class Datum():
         self.bF_corr[indxInRangeStacked] = bFph
 
         # Adjust components if needed by redistributing the residual among them
+        # TODO : This can be improved
         if correct_comps:
             self.zF_corr = np.zeros(self.zF.shape)           # Initialize additive correction for the models
 
@@ -2561,7 +3235,14 @@ class Datum():
 
     def integrate(self, lims, source='measured', evalParsH=None, frqBlkIds=None, freqMask=None):
         """Integrates the model signal within the limits lims.
-           source = 'measured', 'modelled' selects the spectrum to integrate, either the measured data or the fitted model. """
+
+        Args:
+            lims : tuple of float
+                Min and max chemical shifts defining the integration range.
+            source : str; 'measured' or 'modelled'
+                Selects the spectrum to integrate, either the measured data or
+                the fitted model.
+        """
 
         # TODO: Allow for adaptive frequency scale
         if self.isAdapFreq():
@@ -2616,7 +3297,7 @@ class Datum():
         if self.isAdapFreq():
             raise RuntimeError('Custom lineshapes are not supported with adaptive frequency scale.')
 
-        self._gof = None
+        self._qof = None
         nt, nf = len(self.t), len(self.f)
         nw = config.MODEL_ShapeKernelSize         # Length of the adaptive lineshape window (in frequency domain)
         nw2 = int(nw/2)
@@ -2692,91 +3373,12 @@ class Datum():
         """Resets the custom lineshape to its default values (None)."""
         self.sT = None
         self.sF = None
-        self._gof = None
-
-    def sample(self, parsKeys=None, autoKeys=None, frqBlkIds=None, freqMask=None, funcType=None, evaluatePriors=False, robust=None, nwalkers=None, nsteps=None):
-        """Samples the posterior distribution using the MCMC algorithm."""
-        parsKeys, autoKeys = self._prepareKeys(parsKeys, autoKeys, frqBlkIds)
-        result = {}
-        self.smplDistF.clear()             # Clear the characteristics of marginal distributions
-        reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
-        # If no parameters are set for sampling, just evaluate the marginal posterior
-        if len(parsKeys) == 0:
-            # # Define the spectrum shifting range for faster computations
-            # allowShift = any([key[1] in ['chsh', 'alph'] for key in parsKeys])
-            # shiftingRange = max([max(bnd)-min(bnd) for key, bnd in zip(parsKeys, bounds) if key[1] == 'chsh'] + [0.0])
-
-            # Nothing to sample; just evaluate the function
-            value, meta = self.evaluate(autoKeys=autoKeys, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=funcType, evaluatePriors=evaluatePriors, robust=robust, returnSignals=True)
-
-            m_ampl = np.array(meta['ampl'][0]).reshape(-1, 1)
-            S_ampl = meta['ampl'][1]
-            nrep = len(m_ampl)*250     # Number of repeats for each case to sample the amplitudes from the Gaussian distributions
-            indx = [i for i, name in enumerate(reportedNames) if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled
-            smpl = np.linalg.cholesky(S_ampl[np.ix_(indx, indx)]).dot(np.random.randn(len(indx), nrep)) + m_ampl[indx].reshape(-1,1)                  # Multivariate Gaussian random samples
-            for i, id in enumerate(indx):
-                key = (reportedNames[id], 'ampl', 0)
-                result[key] = smpl[i,:]
-                self.smplDistF[key] = smplSpec_from_data(result[key])
-            sigma2 = np.array([[x] for x in meta['sigma2']])
-            result[('.', 'sigma2', 0)] = sigma2[1] / (sigma2[0]-1)     # Mean estimator for sigma
-            result[('.', 'sigma2', 'distr')] = sigma2
-            result[('.', 'theta', 0)] = np.array([meta['theta']])
-
-            print("Done. No non-marginalized parameters were requested.")
-            return result
-
-        # Define the objective function using a copy of the parameters dictionary
-        evalParsH = copy.deepcopy(self.crntParsH)
-        # TODO! Make tight bounds, e.g. only xx% of the full range centered at the initial values
-        bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
-        initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-        costFuncSmpl = lambda x : self.evaluate(updateFromFlat(evalParsH, parsKeys, x), parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust)
-
-        sampler = self._sample(costFuncSmpl, bounds, initVals, nwalkers, nsteps)
-
-        # Form a table of results for the output
-        # sampler.blobs has size nsteps x nwalkers
-        # sampler.chain in nwalkers x nsteps x ndim
-        # Want an output in the form nsamples x ndim
-
-        flatchain = sampler.flatchain
-        for i, key in enumerate(parsKeys):
-            result[key] = flatchain[:, i]
-            self.smplDistF[key] = smplSpec_from_data(result[key])
-
-        m_ampl = np.array([blb[0]['ampl'][0].ravel() for blb in sampler.blobs.ravel()]).T     # Means of the amplitudes
-        S_ampl = np.array([blb[0]['ampl'][1] for blb in sampler.blobs.ravel()]).T             # Covariance matrices of the amplitudes
-        # Generate random samples of amplitudes
-        print(m_ampl.shape, S_ampl.shape)
-        nrep = 3     # Number of repeats for each case of parsKeys to sample the amplitudes from the Gaussian distributions
-        indx = [i for i, name in enumerate(reportedNames) \
-                if self.getPrior(key=(name, 'ampl', 0)).distr == 'Gaussian' \
-                and (name, 'ampl', 0) not in parsKeys]       # Indices of amplitudes that were not sampled explicitely
-        if len(indx) > 0:
-            smpl = np.hstack([np.linalg.cholesky(np.squeeze(S_ampl[np.ix_(indx, indx, [i])], axis=2)).\
-                              dot(np.random.randn(len(indx), nrep)) \
-                             + m_ampl[indx,i].reshape(-1,1) for i in range(S_ampl.shape[-1])])              # Multivariate Gaussian random samples
-            for i, id in enumerate(indx):
-                key = (reportedNames[id], 'ampl', 0)
-                if key not in parsKeys:
-                    result[key] = smpl[i,:]
-                    self.smplDistF[key] = smplSpec_from_data(result[key])
-
-        # Sigma2
-        sigma2 = np.array([blb[0]['sigma2'] for blb in sampler.blobs.ravel()]).T
-        result[('.', 'sigma2', 0)] = sigma2[1,:] / (sigma2[0,:]-1)     # Sample sigma
-        result[('.', 'sigma2', 'distr')] = sigma2
-
-        # Theta
-        key = ('.', 'theta', 0)
-        result[key] = np.array([blb[0]['theta'] for blb in sampler.blobs.ravel()]).ravel()
-        self.smplDistF[key] = smplSpec_from_data(result[key])
-
-        return result
+        self._qof = None
 
     def sweep(self, key, lims=None, npts=50, reoptimize=False, frqBlkIds=None, freqMask=None, evaluatePriors=False):
-        # Evaluates the posterior and computes the amplitudes while sweeping the parameter parKey in the range lims
+        """Evaluate the posterior and computes the amplitudes while sweeping the
+            parameter parKey in the range lims."""
+
         par = self.getPrior(key)     # Settings for the prior distribution of this parameter key
         if lims is None: lims = (par.min, par.max)
         x_arr = np.linspace(min(lims), max(lims), npts)
@@ -2795,7 +3397,7 @@ class Datum():
         return x_arr, llkl_arr, lpri_arr, lpst_arr, crntVal
 
     def _prepareKeys(self, parsKeys, autoKeys=None, frqBlkIds=None, customPriors=None, verbose=True, print_parameters=False):
-        """Make sure that all parameter keys are relevant for the current Datum (e.g. no 4-tuple keys)."""
+        """Make sure that all parameter keys are valid and relevant to the current Datum (e.g. no 4-tuple keys)."""
 
         # --------------------- Set the autoKeys ----------------------
         if autoKeys is None:
@@ -2921,16 +3523,19 @@ class Datum():
     def residual_spectrum(self):
         """Computes the residual spectrum after model fitting."""
         # Phase the data
-        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
+        ph = np.exp(-1j*2*np.pi * self.crntParsH["."]["tau"][0] * (self.f*self.c0-self.f0) \
+                    - 1j*self.crntParsH["."]["theta"][0] ).reshape(-1,1)
         yFph = self.yF * ph
 
         return yFph - self.modelled_signal(bl_corr=True)[1]
 
-    def remove(self):
-        """Removes itself from the Series"""
-        self.parent.data.remove(self)
+    def report_results(self):
+        """Return a dictionary of intensities for all reported nodes."""
 
-    def report(self, full=True):
+        return {name : self.getCrntVal(key=(name, 'ampl', 0)) \
+                for name in self.repRootNames if not self.isXclRootName(name)}
+
+    def print_report(self, full=True):
         """Prints out the current values and results."""
         s = self.selfID()    # Self ID of the Datum
         if full:
@@ -2981,7 +3586,13 @@ class Datum():
             ax[0].set_ylabel(str(keys[1]))
 
     def plot(self, ax_main, ax_residual=None, showRanges='all', showComponents=False, showLegend=True, returnSignals=False, real=True):
-        """Plots the dataset using a matplotlib Figure."""
+        """Plots the dataset in a matplotlib Figure.
+        Args:
+            ax_main : matplotlib.Axes
+                The axis instance to plot the main spectrum
+            ax_residual: matplotlib.Axes
+                The axis instance to plot the residual
+        """
 
         f, yFph, xF, zF, bF = self.signals_for_plot()
 
@@ -3091,7 +3702,15 @@ class Datum():
         return f, yFph, xF, zF, bF
 
     def stems_for_plot(self):
-        """Computes all stem lines to be displayed on a plot. The result is a list of dictionaries with number of elements == number of reported nodes. In each dictionary: key - (name, chshQD, i), val - a tuple, (chshQD, list of stems chsh for the specific chshQD, list of corresponding stems intensities)."""
+        """Compute all stem lines to be displayed on a plot.
+
+        Returns:
+            A list of dictionaries with number of elements equal the  number of
+            reported nodes. In each dictionary: key - (name, chshQD, i),
+            val - a tuple, (chshQD, list of stems chsh for the specific chshQD,
+            list of corresponding stems intensities).
+
+        """
 
         allStems = []     # Dictionary that stores references to all stem lines
         mdldPeaks = collectPeaks(self.T, self.c0, self.crntParsH)
@@ -3111,7 +3730,10 @@ class Datum():
         return allStems
 
     def evalForPlot(self, key, frqBlkIds=None, lims=None, npts=75):
-        """Returns an array of argument values and the values of log likelihood, prior, and posterior."""
+        """Return an array of argument values and the values of log likelihood,
+        prior, and posterior.
+
+        """
         result = {}
         reportedNames = [name for name in self.repRootNames if name not in self.xclRootNames]
         na = len(reportedNames)
@@ -3179,66 +3801,41 @@ class Datum():
                 'nF_adap' : len(self.f),
                 'nF_opti' : sum( [len( self.freqBlocks[i].indxFreq(self._f_shifted()) ) for i in self.steps[-1].frqBlkIds] )}   # Find the number of points in the active optimization ranges
 
-#### Utility functions #####
 
-def deg2tau(dt, nf, p0deg, p1deg):
-    """Converts the phasing parameters from degrees to their tau and theta representations."""
-    fmin, fmax = flims(dt, nf)
-    df = (fmax-fmin)/(nf-1)     # The same as f[1]-f[0]
 
-    theta = np.asscalar( p0deg - p1deg*fmin/df/nf )*np.pi/180.0
-    tau = np.asscalar( p1deg / df / 360. / nf )
+####                  --------- Utility functions ---------                #####
 
-    return theta, tau
+# Loading and saving
 
-def tau2deg(dt, nf, theta, tau):
-    """Converts from theta/tau representation to phase angles in degrees."""
-    _, fmax = flims(dt, nf)
+def load_workspace(filename):
+    """Loads a Worksapce saved in file fname."""
+    with open(filename, 'rb') as fp:
+        dataPack, GUIsettings = dill.load(fp)
+    wsp = Workspace()       # Define a new Workspace object
+    wsp.unpack(dataPack)    # Unpack the loaded data into it
 
-    p0deg = theta * 180.0 / np.pi
-    p1deg = tau*fmax*360.
+    # set the global config settings
+    if GUIsettings is not None:
+        try:
+            stngConfig = GUIsettings.pop('_config')
+            config.from_dict(config, stngConfig)
+        except KeyError:
+            print('Using default global settings.')
 
-    return p0deg, p1deg
+    return wsp, GUIsettings
 
-def gmm_pdf(x, m, S, w=None):
-    """Returns an analytical fucntion for a mixture of Gaussians (nd<=2)
-    m - matrix of means, ndim_x_ncmp
-    S - covariance matrices, ndim_x_ndim_x_ncmp
-    w - vector of weights (optional), 1_x_ncmp,
-    lims - limits for plotting
-    npts - number of points to evaluatethe function at
-    """
-
-    try:
-        ndim, ncmp = m.shape     # Number of dimensions and number of components
-    except ValueError:
-        # If m and S are flattened arrays
-        ndim, ncmp = 1, m.size
-        m, S = m.reshape(1, -1), S.reshape(1, 1, -1)
-
-    if ndim > 2:
-        raise Exception('Only 1- or 2-dimensional arrays are curently supported.')
-
-    if w is None:
-        w = 1/ncmp * np.ones((ncmp,1))
-
-    # Compute the values of the distribution on the grid points
-    try:
-        F = np.zeros(x.shape)
-    except AttributeError:
-        F = 0.0
-
-    for i in range(ncmp):
-        mi = m[...,i]
-        Si = S[...,i]
-        diff = x-mi.reshape(-1,*[1]*ndim)
-        F += w[i] * 1/np.sqrt(np.linalg.det(np.pi*Si)) * np.exp(-(np.inner(diff.T, np.linalg.inv(Si)).T * diff).sum(0))
-
-    return F
-
-def gmm_hdr(m, S, w=None):
-    # Computes the highest density regions for the Gaussian mixture model given a density function func and the precision level alpha
-    pass
+def save_workspace(filename, wsp, GUIsettings=None):
+    """Saves the workspace wsp into file filename."""
+    if GUIsettings is None:
+        GUIsettings = {'ax0Limits': {'ylim': (0.0, 1000.0),
+                                     'xlim': (10.0, 0.0)},
+                       'autoPhase': False, 'startFromPars': 'current',
+                       '_view': {'hiddenTreeViewNodes': [], 'stepsEditText': 'AAAAAA'},
+                       'autoPick': False, 'ax1Limits': None, 'ax2Limits': None}
+    GUIsettings.update( {'_config': config.as_dict()} )
+    dataPack = wsp.pack()
+    with open(filename, 'wb') as fp:
+        dill.dump([dataPack, GUIsettings], fp)
 
 def addDatumFromFile(path, dest):
     """Add new Datum entries specified by the path to the series object.
@@ -3298,6 +3895,45 @@ def addDatumFromFile(path, dest):
                     name = name+str(i+1) if yT.shape[1] > 1 else name, extra=dic)
 
     return dat
+
+
+# MCMC samples
+
+def gmm_pdf(x, m, S, w=None):
+    """Returns an analytical fucntion for a mixture of Gaussians (nd<=2)
+    m - matrix of means, ndim_x_ncmp
+    S - covariance matrices, ndim_x_ndim_x_ncmp
+    w - vector of weights (optional), 1_x_ncmp,
+    lims - limits for plotting
+    npts - number of points to evaluatethe function at
+    """
+
+    try:
+        ndim, ncmp = m.shape     # Number of dimensions and number of components
+    except ValueError:
+        # If m and S are flattened arrays
+        ndim, ncmp = 1, m.size
+        m, S = m.reshape(1, -1), S.reshape(1, 1, -1)
+
+    if ndim > 2:
+        raise Exception('Only 1- or 2-dimensional arrays are curently supported.')
+
+    if w is None:
+        w = 1/ncmp * np.ones((ncmp,1))
+
+    # Compute the values of the distribution on the grid points
+    try:
+        F = np.zeros(x.shape)
+    except AttributeError:
+        F = 0.0
+
+    for i in range(ncmp):
+        mi = m[...,i]
+        Si = S[...,i]
+        diff = x-mi.reshape(-1,*[1]*ndim)
+        F += w[i] * 1/np.sqrt(np.linalg.det(np.pi*Si)) * np.exp(-(np.inner(diff.T, np.linalg.inv(Si)).T * diff).sum(0))
+
+    return F
 
 def plotGaussianMixture(m, S, w=None, lims=None, npts=100):
     """Plots a pdf for a mixture of nc Gaussian nd-dimensional components (nd<=2)
@@ -3391,81 +4027,8 @@ def reportMCMC(samples):
     print('\n')
     print(tabulate.tabulate(tab, headers=head))
 
-def load_workspace(filename):
-    """Loads a Worksapce saved in file fname."""
-    with open(filename, 'rb') as fp:
-        dataPack, GUIsettings = dill.load(fp)
-    wsp = Workspace()       # Define a new Workspace object
-    wsp.unpack(dataPack)    # Unpack the loaded data into it
-
-    # set the global config settings
-    if GUIsettings is not None:
-        try:
-            stngConfig = GUIsettings.pop('_config')
-            config.from_dict(config, stngConfig)
-        except KeyError:
-            print('Using default global settings.')
-
-    return wsp, GUIsettings
-
-def save_workspace(filename, wsp, GUIsettings=None):
-    """Saves the workspace wsp into file filename."""
-    if GUIsettings is None:
-        GUIsettings = {'ax0Limits': {'ylim': (0.0, 1000.0),
-                                     'xlim': (10.0, 0.0)},
-                       'autoPhase': False, 'startFromPars': 'current',
-                       '_view': {'hiddenTreeViewNodes': [], 'stepsEditText': 'AAAAAA'},
-                       'autoPick': False, 'ax1Limits': None, 'ax2Limits': None}
-    GUIsettings.update( {'_config': config.as_dict()} )
-    dataPack = wsp.pack()
-    with open(filename, 'wb') as fp:
-        dill.dump([dataPack, GUIsettings], fp)
-
-def saveFID(xT, c0, f0, dt, tau=0., fname='fid'):
-    """Saves FID signal y in the Spinsolve format in a newly created folder."""
-    # Create a new directory of it does not exist
-    if not os.path.exists(fname):
-        os.makedirs(fname)
-
-    # Reshape and reorganize the data as T-T-T-...-T-R-I-R-I-...-R-I
-    n1, n2, n3, n4 = xT.size, 1, 1, 1   # Dimensions of the data array
-    xT = np.hstack([xT.real.reshape(-1,1), -xT.imag.reshape(-1,1)]).ravel()
-    data = np.concatenate( [np.linspace(0., (n1-1)*dt, n1), xT.ravel()] ).astype('single')
-
-    # Save the binary data
-    with open(os.path.join(fname, 'data.1d'), 'wb') as fid:
-        fid.write(np.array([1347571539, 1145132097, 1446063665, 504, n1, n2, n3, n4], dtype='int32').tobytes())
-        fid.write(data.tobytes())
-
-    # Save the parameter file
-    with open(os.path.join(fname, 'acqu.par'), 'w') as fid:
-        fid.write('Solvent                   = ""\n')
-        fid.write('Sample                    = ""\n')
-        fid.write('startTime                 = {}\n'.format(time.ctime()))
-        fid.write('acqDelay                  = {:0.16f}\n'.format(tau*1e+06))     # Ringdown delay in ms
-        fid.write('b1Freq                    = {:0.16f}\n'.format(c0))            # B1 frequency in MHz
-        fid.write('bandwidth                 = {:0.16f}\n'.format((1/dt)/1000))       # Sweep bandwidth in kHz
-        fid.write('dwellTime                 = {:0.16f}\n'.format(1000*dt))       # Dwell time in ms
-        fid.write('experiment                = "1D"\n')
-        fid.write('expName                   = "1D"\n')
-        fid.write('nrPnts                    = {:d}\n'.format(n1))
-        fid.write('nrScans                   = 1\n')
-        fid.write('repTime                   = 0\n')                              # Repetiotion time in ms
-        fid.write('rxChannel                 = "1H"\n')
-        fid.write('rxGain                    = 0\n')                              # Reciever gain in dB
-        fid.write('lowestFrequency           = {:0.16f}\n'.format(-(1/dt)/2+f0))  # Lowest frequency in Hz
-        fid.write('totalAcquisitionTime      = 42\n')                             # Total acquisition time in sec
-        fid.write('graphTitle                = "1D-1H-"StandardScan""\n')
-        fid.write('userData                  = ""\n')
-        fid.write('90Amplitude               = 0\n')                              # Amplitude of the 90-degree pulse in dB
-        fid.write('pulseLength               = 0\n')                              # Pulse length in ms
-        fid.write('Protocol                  = "1D PROTON"\n')
-        fid.write('Options                   = "Scan(StandardScan)"\n')
-        fid.write('Spectrometer              = "Python"\n')
-        fid.write('Software                  = "Python"')
-
 def flat_window(ntot, npad=0, w_type='gaussian'):
-    """Returns a flat top window with padding on each side. Each end of the window is set equal to 0 if npad > 0."""
+    """Returns a flat-top window with padding on each side. Each end of the window is set equal to 0 if npad > 0."""
     if 2*npad > ntot:
         raise RuntimeError('The length of padding should be no more than a hilf-size of the window.')
 
@@ -3524,7 +4087,10 @@ def cut_roi(xT, lims, c0, f0, dt, subsample=True):
     return yT, f0_new, dt_new
 
 def splitFreq(inRange):
-    """Given a list of freqSpec tuples, divides the frequency range -inf to +inf into lists of disjoint intervals: inRange and outRange by merging overlapping optimization ranges."""
+    """Given a list of freqSpec tuples, divides the frequency range -inf to +inf
+        into lists of disjoint intervals: inRange and outRange by merging
+        overlapping optimization ranges.
+    """
     if inRange:
         inRange = merge_intervals(inRange)      # Merged and sorted list of freqRanges
         outRange = []
@@ -3619,105 +4185,6 @@ def make_causal(xF):
     xFc = np.fft.fftshift(np.fft.fft(xTc, axis=0), axes=0)
     return xTc, xFc
 
-#@profile
-def leastSquares(Z, y, m0=None, S0=None, Gy=None, lockedPhase=True, indxPositive=None, robust=True):
-    """Solves a phased-constrained complex-valued least-squares problem, y=Zx for x; nb - number of baseline terms (columns in the end of Z). theta=None - the phase will be determined from the data. Gy - covariance matrix of noise (or the diagonal vecotr of that matrix)"""
-    # nz = Z.shape[1]      # Number of dimensions
-    # if lockedPhase and indxPositive is None:
-    #     indxPositive = list(range(nz))
-    # ampl = np.zeros((nz,1))
-    #
-    # # 2. Set up the (Gaussian) priors
-    # if m0 is None: m0 = np.zeros((k, 1))
-    # if S0 is None: S0 = 1e+42 * np.identity(k)
-    #
-    # # Find which dimensions have priors with infinite or zero variance and invert the covariance matrix
-    # indx_inf = np.where(np.diag(S0) == np.inf)[0]        # Indices of components with infinite-variance (non-informative) intensities
-    # indx_fixed = np.where(np.diag(S0) == 0)[0]           # Indices of components with fixed (zero-variance) intensities
-    # indx_variable = np.where(np.diag(S0) != 0)[0]        # Indices of components with variable intensities
-    # indx_zero = []                                       # Indices of components with zero intensities
-    # iS0 = np.zeros((nz, nz))
-    # iS0[indx_variable[:,None], indx_variable] = np.linalg.inv(S0[indx_variable[:, None], indx_variable])           # Invert the part that that doesn't have zeros on the diagonal as usual
-    # iS0[indx_fixed, indx_fixed] = 1e+42   # np.inf                                                             # Substitute the rest of diagonal values with a very large number
-    #
-    # # 3.
-    # if Gy is None:
-    #     # No weighting matrix (assume identity)
-    #     ZG = Z.conj().T
-    #     yG = y.conj().T
-    # elif Gy.ndim==1 or (Gy.ndim==2 and (Gy.shape[0]==1 or Gy.shape[1]==1)):
-    #     # Weighting matrix G is diagonal and is defined by the vector
-    #     iGy = 1 / Gy.reshape(1, -1)
-    #     ZG = Z.conj().T * iGy
-    #     yG = y.conj().T * iGy
-    # else:
-    #     # G is a full matrix
-    #     iGy = np.linalg.inv(Gy)
-    #     ZG = Z.conj().T.dot(iGy)
-    #     yG = y.conj().T.dot(iGy)
-    # ZZ = ZG.dot(Z)
-    # Zy = ZG.dot(y)
-    # if np.linalg.matrix_rank(ZZ) < nz:
-    #     ZZ += 0.000001*np.identity(nz)
-    #
-    # if lockedPhase:                 # Locked phase - real amplitudes
-    #     while True:
-    #         iSc = (iS0 + ZZ).real
-    #         Sc = np.linalg.inv(iSc)
-    #         # Estimate theta to maximize the posterior
-    #         theta = np.asscalar( 0.5*np.angle(np.dot(Zy.T, np.dot(Sc, Zy))) )
-    #         # TODO!!! This should also depend on priors over amplitudes (i.e. S0 and m0)
-    #         mc = Sc.dot( (Zy*np.exp(-1j*theta) + np.dot(iS0,m0)).real )
-    #
-    #         # Find which components (if any) have negative intensities and set them to 0.0
-    #         mc[indxPositive] = np.maximum(mc[indxPositive], 0.0) if mc[indxPositive].sum() > 0 else np.minimum(mc[indxPositive], 0.0)     # Discard negative values in mc but keep the sign for baseline components
-    #         indx_zero = [ indxPositive[i] for i in np.where(mc[indxPositive] == 0.0)[0] ]     # Indices of elements currently set to zeros
-    #         if len(indx_zero) == 0:
-    #             # If all components have the same sign
-    #             if mc[indxPositive].sum() < 0:      # Make sure that all amplitudes are positive
-    #                 mc = - mc
-    #                 theta = theta + np.pi
-    #             mc[indx_fixed] = m0[indx_fixed]     # Replace intensities with fixed vcalues if neecessary (where variance is 0)
-    #             break
-    #         else:
-    #             # Exclude the components with negative intensities from computation and update their priors accordingly
-    #             indx_fixed = np.append(indx_fixed, indx_zero)
-    #             indx_variable = np.setdiff1d(indx_variable, indx_zero)
-    #             indxPositive = np.setdiff1d(indxPositive, indx_zero)
-    #             m0[indx_zero] = 0.0
-    #             iS0[indx_zero, indx_zero] = 1e+42
-    #     theta = (theta + np.pi) % (2 * np.pi) - np.pi
-    #     mc = mc* np.exp(1j*theta)
-    # else:
-    #     # LS problem with unconstrained phase (if complex)
-    #     theta = None
-    #     iSc = iS0 + ZZ
-    #     Sc = np.linalg.inv(iSc)
-    #     mc = np.dot(Sc, (Zy+np.dot(iS0, m0)))
-    #     mc[indx_fixed] = m0[indx_fixed]     # Replace values if neecessary (where variance is 0)
-    #
-    # # Find robust variance estimators
-    # if robust:
-    #     r = y - Z.dot(mc)    # the residual
-    #     r2 = np.abs(r.reshape(1,-1))**2
-    #     #print( "sum r2 = {}".format(np.asscalar(r2.sum(axis=1))/r2.size) )
-    #     ZrZ = (ZG * r2).dot(ZG.conj().T)
-    #     if np.linalg.matrix_rank(ZrZ) < nz:
-    #         ZrZ = ZrZ + 0.000001*np.identity(nz)
-    #     Sr = Sc.dot( (iS0 + ZrZ).real ).dot(Sc)
-    # else: Sr = None
-    #
-    # Q = yG.dot(y) + np.dot(np.dot(m0[indx_variable].conj().T, iS0[indx_variable[:,None], indx_variable]), m0[indx_variable]) - np.dot(np.dot(mc[indx_variable].conj().T, iSc[indx_variable[:,None], indx_variable]), mc[indx_variable])
-    # Q = max(np.asscalar(Q.real), 0.0)
-    # return mc, Sc, Sr, Q
-    pass
-
-def setattrs(_self, **kwargs):
-    """Sets multiple attributes for a class instance"""
-    """Use this function like this: setattrs(obj, a = 1, b = 2,  #... )"""
-    for k,v in kwargs.items():
-        setattr(_self, k, v)
-
 def flatten(h, new_key=[]):
     """Flattens a hierarchical dictionary of parameters (h) into an ordered dictionary of single parameter values."""
     items = []
@@ -3729,12 +4196,6 @@ def flatten(h, new_key=[]):
                 items.append((tuple(new_key + [k] + [i]), vv))
     items.sort()
     return OrderedDict(items)
-
-def updateFromFlat(hierDict, flatKeys, flatVals):
-    """Updates a hierarchical parameter dictionary with values in its flattened representation."""
-    for k, v in zip(flatKeys, flatVals):
-        hierDict[k[0]][k[1]][k[2]] = v
-    return hierDict
 
 def next_pow_of_2(x):
     # Returns the smallest power of 2 greater than x
@@ -3814,10 +4275,39 @@ def wden(x_in, wname = 'sym8', tptr='sqtwolog', sorh='hard', scal='mln', wsize=1
 
     return x_out
 
-# Phasing cost
+# Phasing and baseline correction
+def flims(dt, nf):
+    """Computes the values (in Hz) of the first and last sample in the spectrum
+    with nf samples corresponding to a signal with sampling time dt.
+    See https://docs.scipy.org/doc/numpy/reference/generated/numpy.fft.fftfreq.html"""
+    if nf%2 == 0:
+        return (-nf/(2*dt*nf), (nf/2-1)/(dt*nf))
+    else:
+        return (-(nf-1)/(2*dt*nf), (nf-1)/(2*nf*dt))
+
+def deg2tau(dt, nf, p0deg, p1deg):
+    """Converts the phasing parameters from degrees to their tau and theta representations."""
+    fmin, fmax = flims(dt, nf)
+    df = (fmax-fmin)/(nf-1)     # The same as f[1]-f[0]
+
+    theta = np.asscalar( p0deg - p1deg*fmin/df/nf )*np.pi/180.0
+    tau = np.asscalar( p1deg / df / 360. / nf )
+
+    return theta, tau
+
+def tau2deg(dt, nf, theta, tau):
+    """Converts from theta/tau representation to phase angles in degrees."""
+    _, fmax = flims(dt, nf)
+
+    p0deg = theta * 180.0 / np.pi
+    p1deg = tau*fmax*360.
+
+    return p0deg, p1deg
+
 def automatic_ps(data, fn, p0=0.0, p1=0.0, fit_Ph1=True):
     """
     Automatic linear phase correction
+    COPIED FROM nmrglue
 
     Parameters
     ----------
@@ -3858,12 +4348,39 @@ def automatic_ps(data, fn, p0=0.0, p1=0.0, fit_Ph1=True):
     return p0, p1
 
 def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
-    """Calculate the cost function for phasing the data.
-    yF - measured (unphased) spectrum
-    xF - fitted model
-    ph0, ph1 - zero- and first-order phasing terms
-    mw - size of the median filter
-    f - frequency scale in the fractions of angular frequency (i.e. f = [-1/2...(n-2)/2n] for even number of samples n and f = [-(n-1)/2n...(n-1)/2n] for odd n). If yF and xF contain non-contiguous frequency ranges, f should be specified explicitely.
+    """Calculate the cost function for phase abd baseline adjustment.
+
+    See "Improving the Accuracy of Model-based Quantitative NMR"
+    by Y.Matviychuk et.al. for more detail.
+
+    Args:
+        yF : np.array
+            Measured (unphased) spectrum
+        xF : np.array
+            Fitted model
+        ph0, ph1 : float
+            Zero- and first-order phasing terms
+        mw : int
+            Size of the median filter used to estimate the baseline.
+        f : np.array
+            Frequency scale in the fractions of angular frequency
+            (i.e. f = [-1/2...(n-2)/2n] for even number of samples n and
+            f = [-(n-1)/2n...(n-1)/2n] for odd n). If yF and xF contain non-contiguous
+            frequency ranges, f should be specified explicitely.
+        cfun : str, 'LS' or 'TV'
+            Defines the type of the cost function: least-squares ('LS') or
+            total variation ('TV')
+
+    Returns:
+        val : float
+            Value of the cost function.
+        yFph : np.array
+            Phase-adjusted data.
+        res : np.array
+            Residual spectrum.
+        bln : np.array
+            Estimated baseline after phase-adjustment.
+
     """
 
     # Define the frequency scale if it's not given
@@ -3888,28 +4405,17 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
     elif cfun == 'TV':
         val = np.linalg.norm(bln[1:] - bln[:-1], 1)
 
-    return val, yFph, res, bln
     #return np.linalg.norm(res - np.mean(res), 2), yFph, res, bln
+    return val, yFph, res, bln
 
 def baseline(yF, wd=20):
-    """Baseline correction; return the real part of the spectrum and its baseline."""
+    """Estimate the baseline with the standard baseline correction algorithm."""
 
     # Apply standard baseline correction to the spectrum
     yFbl = nmrglue.process.proc_bl.baseline_corrector(yF.real.ravel(), wd=wd).reshape(-1,1)
     bF = (yF.reshape(-1,1) - yFbl).real
 
     return bF
-
-def flims(dt, nf):
-    """Computes the values (in Hz) of the first and last sample in the spectrum with nf samples corresponding to a signal with sampling time dt. See https://docs.scipy.org/doc/numpy/reference/generated/numpy.fft.fftfreq.html"""
-    if nf%2 == 0:
-        return (-nf/(2*dt*nf), (nf/2-1)/(dt*nf))
-    else:
-        return (-(nf-1)/(2*dt*nf), (nf-1)/(2*nf*dt))
-
-def split_steps(dat, step):
-    """Splits the list of fited parameters and returns a list of corresponding steps."""
-    return [Step(frqBlkIds = step.frqBlkIds, parsKeys = [key], autoKeys=step.autoKeys, fitCustomLshape = step.fitCustomLshape) for key in step.parsKeys]
 
 # ------------------------------ License files ---------------------------------
 

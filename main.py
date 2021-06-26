@@ -2,20 +2,21 @@ import sys
 import numpy as np
 import dill
 from MainLogic import *
-from MainLogic import Series, Datum, Workspace
+from MainLogic import Step, Series, Datum, Workspace
+from chemTree import viewNode
 from dataio import *
 import config
 
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent, QItemSelectionModel
-from PyQt5.QtGui import QBrush, QDoubleValidator, QIcon, QPalette, QPen, QTextCursor
+from PyQt5.QtGui import QBrush, QIcon, QPen
 from PyQt5.QtWidgets import QAction, QActionGroup, QApplication, QCheckBox,\
     QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,\
-    QInputDialog, QItemDelegate, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
-    QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QMainWindow, \
+    QItemDelegate, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
+    QLineEdit, QListWidget, QMenu, QMessageBox, QMainWindow, \
     QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, \
     QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget,\
-    QTableWidget, QToolButton, QTreeView, QToolBar, QToolTip, QWidget
+    QToolButton, QTreeView, QToolBar, QWidget
 import pyqtgraph as pg
 import matplotlib.pyplot as plt
 from matplotlib import rc, rcParams
@@ -71,7 +72,7 @@ class EmittingStream(QObject):
 
 class CfunPopup(QWidget):
     """Popup window that shows the objective function"""
-    def __init__(self, cfun):
+    def __init__(self, cfun, lims):
         QWidget.__init__(self)
         self.cfun = cfun
 
@@ -98,7 +99,7 @@ class CfunPopup(QWidget):
         # create and set the central widget
         self.setLayout(self.mainLayout)
 
-        res = np.array([self.cfun(x) for x in np.linspace(-1, 1, 30)])
+        res = np.array([(x, cfun(x)) for x in np.linspace(lims[0], lims[1], 30)])
 
         self.ax[0].clear()    # discards the old graph
         self.ax[0].plot(res[:,0], res[:,1], '-')        # plot data
@@ -1003,68 +1004,8 @@ class MainSpectrumWidget(pg.GraphicsLayoutWidget):
 
         self.setState()
 
-class QCheckableComboBox(QComboBox):
-    """Checkable ComboBox"""
-
-    selectionChanged = pyqtSignal()
-
-    def __init__(self, items = [], checkedItems = None, parent=None):
-        super().__init__(parent)
-        self.view().pressed.connect(self.onItemPressed)
-        self._changed = False
-        self.setupItems(items, checkedItems)
-        self.view().setMinimumWidth(100)
-
-    def setupItems(self, items = [], checkedItems = None):
-        """Populates the combobox with items and sets their state"""
-        self.clear()
-        for indx, item in enumerate(items):
-            self.addItem(item)
-            if checkedItems is not None:
-                if indx in checkedItems:
-                    self.setItemChecked(indx, True)
-            else:
-                self.setItemChecked(indx, False)
-
-    def addItem(self, item, checked = False):
-        super().addItem(item)
-        newItem = self.model().item(self.model().rowCount()-1, self.modelColumn())
-        if checked:
-            newItem.setCheckState(Qt.Checked)
-        else:
-            newItem.setCheckState(Qt.Unchecked)
-
-    def onItemPressed(self, index):
-        item = self.model().itemFromIndex(index)
-        if item.checkState() == Qt.Checked:
-            item.setCheckState(Qt.Unchecked)
-        else:
-            item.setCheckState(Qt.Checked)
-        self._changed = True
-        self.selectionChanged.emit() # emit a signal to save the change in the treeWidget
-
-    def hidePopup(self):
-        if not self._changed:
-            super().hidePopup()
-        self._changed = False
-
-    def itemChecked(self, index):
-        item = self.model().item(index, self.modelColumn())
-        return item.checkState() == Qt.Checked
-
-    def checkedItems(self):
-        """Returns a list of checked items' indices or [] if all items are unchecked."""
-        return [i for i in range(self.model().rowCount()) if self.itemChecked(i)]
-
-    def setItemChecked(self, index, checked=True):
-        item = self.model().item(index, self.modelColumn())
-        if checked:
-            item.setCheckState(Qt.Checked)
-        else:
-            item.setCheckState(Qt.Unchecked)
-
 class FreqTableModel(QtCore.QAbstractTableModel):
-    """A treeView class for the main navigation view."""
+    """Main model for frequency blocks."""
 
     freqBlockChanged = pyqtSignal(int)    # Returns the index of the changed freqBlock
 
@@ -1208,7 +1149,7 @@ class FreqTableModel(QtCore.QAbstractTableModel):
         self.endRemoveRows()
 
 class FreqTableView(QTableView):
-    """Model/View based class to display frequency ranges for optimization."""
+    """View to display frequency blocks for optimization."""
 
     def __init__(self, parent=None):
         super().__init__(parent)    # Initialize a QTreeWidget
@@ -1231,7 +1172,7 @@ class FreqTableView(QTableView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
 class NavigationTreeModel(QtCore.QAbstractItemModel):
-    """A treeView class for the main navigation view."""
+    """A model class for the main navigation view."""
 
     def __init__(self, wsp, parent = None):
         super().__init__()     # QtCore.QAbstractItemModel.__init__(self)
@@ -1307,7 +1248,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
         elif role == Qt.DecorationRole:
             if isinstance(node, Datum):
                 displayIcon = QIcon('icons\icon_gof_none.png')
-                # gof = node.goodness_of_fit()
+                # gof = node.quality_of_fit()
                 # if gof is None:
                 #     displayIcon = QIcon('icons\icon_gof_none.png')
                 # elif gof > 0.9:
@@ -1422,7 +1363,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
                 item.copySettings(self._copySettingsFrom)
 
 class NavigationTreeView(QTreeView):
-    """Model/View based class to display loaded datasets."""
+    """A view class to display the loaded datasets."""
 
     requestPasteCrnt = pyqtSignal(list)
     requestPasteDflt = pyqtSignal(list)
@@ -1494,31 +1435,6 @@ class NavigationTreeView(QTreeView):
         # print('Selecting ', key)
         index = self.model().indexByKey(key)
         self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows)
-
-class NavigationTreeDelegate(QItemDelegate):
-
-    def __init__(self, parent=None, *args):
-        super().__init__(parent, *args)
-
-    def paint(self, painter, option, index):
-        painter.save()
-
-        # set background color
-        painter.setPen(QPen(Qt.NoPen))
-        if option.state & QStyle.State_Selected:
-            painter.setBrush(QBrush(Qt.red))
-        else:
-            painter.setBrush(QBrush(Qt.white))
-        painter.drawRect(option.rect)
-
-        # set text color
-        painter.setPen(QPen(Qt.black))
-        value = index.data(Qt.DisplayRole)
-        if value:
-            text = value
-            painter.drawText(option.rect, Qt.AlignLeft, text)
-
-        painter.restore()
 
 def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
     """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
@@ -1633,11 +1549,8 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self._parsSigma2 = viewNode(('.', 'sigma2', 0), alias=None, nodeType='param')       # alias='Variance of noise, s2'
         self._parsPH0 = viewNode(('.', 'theta', 0), alias=None, nodeType='param')         # alias='Zero-order phase (PH0)'
         self._parsPH1 = viewNode(('.', 'tau', 0), alias=None, nodeType='param')       # alias='Acquisition delay (PH1)'
-        # self._ratioTLS = viewNode(('.', 'gamma', 0), alias='TLS ratio', nodeType='param')
-        # self._lshape = viewNode('_lshape', alias='Lineshape correction', nodeType='lshape')           # self._lshape = viewNode('lshapeX', alias='Fit custom shape', nodeType='bool')
 
         self.resetChemTree(flag=False)
-        self.resetLshapeTree(flag=False)
 
     def resetChemTree(self, T=None, flag=True):
         """Updates the chemical tree."""
@@ -1649,21 +1562,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         # The tree of parameters to be displayed
         self.TP = getDisplayTree(self.datum.T) if self.datum.T is not None else viewNode('')
         self._unfittableParsKeys = None       # A list (or set) of keys that can not be fitted
-
-        if flag: self.endResetModel()
-
-    def resetLshapeTree(self, flag=True):
-        """Updates the tree of lineshape correction parameters."""
-        if flag: self.beginResetModel()
-
-        # Uncomment to show 2nd and 3rd order coreection parameters
-        # # Reset the lineshape correction subtree
-        # self._lshape.clearChildren()
-        # self._lshape.addChild(viewNode('lshapeX', alias='Fit custom shape', nodeType='bool'))       # Custom lineshape
-        # supscr = ['nd', 'rd'] + ['th']*(self.datum.lshapeOrder-2)
-        # for i in range(self.datum.lshapeOrder):
-        #     self._lshape.addChild(viewNode(('.','lshapeR',i), alias='{}{} order Re'.format(i+2, supscr[i]), nodeType='param'))
-        #     self._lshape.addChild(viewNode(('.','lshapeI',i), alias='{}{} order Im'.format(i+2, supscr[i]), nodeType='param'))
 
         if flag: self.endResetModel()
 
@@ -1701,7 +1599,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         self.beginResetModel()
         self.datum = datum
         self.resetChemTree(flag=False)
-        self.resetLshapeTree(flag=False)
         self.endResetModel()
 
     def notifyDataChanged(self, key=None):
@@ -1837,8 +1734,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 else:
                     return Qt.Unchecked
 
-            elif node.name == 'lshapeX':
-                return self.datum.steps[step_indx].fitCustomLshape
 
             else: return None
 
@@ -1920,8 +1815,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     elif node.name[1][:4] == "chsh":
                         displayIcon = QIcon("icons\icon_delta.png")
                 elif node.nodeType == 'lshape':
-                    displayIcon = QIcon('icons\icon_lshape.png')
-                elif node.name == 'lshapeX':
                     displayIcon = QIcon('icons\icon_lshape.png')
                 else:
                     displayIcon = QIcon("icons\icon_chemMixture.png")
@@ -2082,14 +1975,6 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                             for step in self.datum.steps:
                                 step.parsKeys.add(node.name)
 
-            elif node.nodeType == 'bool':
-                if node.name == 'lshapeX':
-                    self.datum.steps[step_indx].fitCustomLshape = not self.datum.steps[step_indx].fitCustomLshape
-
-                    # Repeat for the rest of the steps
-                    if shiftPressed:
-                        for step in self.datum.steps:
-                            step.fitCustomLshape = not self.datum.steps[step_indx].fitCustomLshape
 
             if shiftPressed:
                 self.dataChanged.emit(self.index(row,0), self.index(row, self.columnCount()))                # Update the entire current row
@@ -2219,19 +2104,20 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
 
     def increaseOrder(self):
         """Increases the order of the lineshape correction polynomial."""
-        lshapeOrder = self.datum.lshapeOrder           # Current order of the lineshape
-        self.beginInsertRows(self.index(4, 0), 2*lshapeOrder, 2*lshapeOrder+1) # Parent node, first and last position
-        self.datum.set_lshapeOrder(lshapeOrder+1)
-        self.resetLshapeTree(flag=False)
+        oldOrder = config.MODEL_LineShapeOrder  # Current order of the lineshape
+        self.beginInsertRows(self.index(4, 0), 2*oldOrder, 2*oldOrder+1) # Parent node, first and last position
+        config.MODEL_LineShapeOrder = oldOrder+1
+        self.datum.set_lshapeOrder()
         self.endInsertRows()
 
     def decreaseOrder(self):
         """Increases the order of the lineshape correction polynomial."""
-        lshapeOrder = self.datum.lshapeOrder           # Current order of the lineshape
-        self.beginRemoveRows(self.index(4, 0), 2*lshapeOrder-1, 2*lshapeOrder) # Parent node, first and last position
-        self.datum.set_lshapeOrder(lshapeOrder-1)
-        self.resetLshapeTree(flag=False)
-        self.endRemoveRows()
+        oldOrder = config.MODEL_LineShapeOrder  # Current order of the lineshape
+        if oldOrder > 0:
+            self.beginRemoveRows(self.index(4, 0), 2*oldOrder-1, 2*oldOrder) # Parent node, first and last position
+            config.MODEL_LineShapeOrder = oldOrder-1
+            self.datum.set_lshapeOrder()
+            self.endRemoveRows()
 
     def clmn2step(self, clmn):
         """A utility function to convert a column index to the corresponding step index."""
@@ -2415,14 +2301,15 @@ class ChemTreeView(QTreeView):
         self.header().setSectionsClickable(True)
         self.header().sectionPressed.connect(self.model().setActiveStep)
         self.header().sectionMoved.connect(self.onHeaderSectionMoved)
+        self.header().setMinimumSectionSize(18)
+        self.header().setDefaultSectionSize(20)
 
-        # self.header().setDefaultSectionSize(20)
         self.setColumnWidth(0, 150)
         self.setColumnWidth(1, 50)
         self.setColumnWidth(2, 50)
         self.setColumnWidth(3, 50)
         self.setColumnWidth(4, 50)
-        self.header().setResizeMode(0, QtGui.QHeaderView.ResizeToContents)
+        # self.header().setSectionResizeMode(QtGui.QHeaderView.ResizeToContents)
 
         self.setColumnHidden(1, True)
         self.setColumnHidden(2, True)
@@ -2642,12 +2529,12 @@ class ChemTreeView(QTreeView):
             dialog = self.ParsSpecDialog(key, param, crntVal, parent=self)
             result = dialog.exec_()
             if result == QDialog.Accepted:    # If OK was clicked
-                newParSpec, resetSeries = dialog.getSelection()
+                newParSpecDict, resetSeries = dialog.getSelection()
                 crnt = self.model().datum
                 if isinstance(crnt, Datum) and resetSeries:
                     crnt = crnt.parent
                 else: pass # It is either a Datum and no series flag was set or it is a Series
-                crnt.setPrior(key, **newParSpec, reset=True)
+                crnt.setPrior(key, **newParSpecDict, reset=True)
 
     def saveSubtree(self, index):
         """Saves the subtree starting with the node index."""
@@ -2665,7 +2552,6 @@ class ChemTreeView(QTreeView):
     def showCfunPopup(self, key):
         """Plots the cost function with respect to the particular variable specified by a tuple key."""
         DDD = self.model().datum
-        evalPars = copy.deepcopy(DDD.crntParsH)
         actvStep = DDD.steps[-1]
 
         if key[1] == 'chsh':
@@ -2674,11 +2560,13 @@ class ChemTreeView(QTreeView):
             allowShift, shiftingRange = True, 0.0
         else: allowShift, shiftingRange = False, 0.0
 
-        # allowShift, shiftingRange = False, 0.0
+        spec = DDD.getPrior(key)
+        cfun = lambda x : DDD.evaluate(evalParsF={key:x}, \
+                                       autoKeys=actvStep.autoKeys, frqBlkIds=actvStep.frqBlkIds, \
+                                       allowShift=allowShift, shiftingRange=shiftingRange)[0]
+        lims = (spec.min, spec.max)
 
-        costFuncOpti = lambda x : (DDD.getPrior(key).abs(x), DDD.evaluate(evalParsH=updateFromFlat(evalPars, [key], [DDD.getPrior(key).abs(x)]), autoKeys=actvStep.autoKeys, \
-                                                                          frqBlkIds=actvStep.frqBlkIds, allowShift=allowShift, shiftingRange=shiftingRange)[0])
-        self.popupWindow = CfunPopup(costFuncOpti)
+        self.popupWindow = CfunPopup(cfun, lims)
         self.popupWindow.show()
 
     def toggleDflts(self, checked):
@@ -3054,66 +2942,6 @@ class PreprocessingWidget(QWidget):
 
             self.parsChanged.emit( {key : val} )
 
-class ParameterDisplayWidget(QWidget):
-    """A widget to display, modify, and sample parameters"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-        # ----------------- set up the histogram figure
-        self.histFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
-        self.histCanvas = FigureCanvas(self.histFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
-        self.axDistr = self.histFigure.add_subplot(111)    # create axes
-        self.axDistr2 = self.axDistr.twinx()    # Separate vertical axis for a histogram plot
-
-        # ----------------- create a table for sampling
-        self.parsListWidget = QListWidget()
-        #self.parsListWidget.itemClicked.connect(self.onSelectParList)
-
-        # ------------ Set up a Block of Widgets for the results ---------------
-        self.editMin = QLineEdit()
-        #self.editMin.editingFinished.connect(self.saveParsForm)
-        self.editMax = QLineEdit()
-        #self.editMax.editingFinished.connect(self.saveParsForm)
-        self.editCrntVal = QLineEdit()
-        #self.editCrntVal.editingFinished.connect(self.saveParsForm)
-        self.cmboxPrior = QComboBox()
-        self.cmboxPrior.addItems(['Uniform', 'Gaussian', 'Log-Normal'])
-        #self.cmboxPrior.activated.connect(self.onPriorNameChanged)
-        self.editPriorMode = QLineEdit()
-        #self.editPriorMode.editingFinished.connect(self.saveParsForm)
-        self.editPriorStdv = QLineEdit()
-        #self.editPriorStdv.editingFinished.connect(self.saveParsForm)
-        self.chkboxUseCrnt = QCheckBox('Use crnt.')
-        #self.chkboxUseCrnt.stateChanged.connect(self.saveParsForm)
-        self.resForm1Layout = QFormLayout()
-        self.resForm1Layout.addRow("Lower bnd.", self.editMin)
-        self.resForm1Layout.addRow("Upper bnd.", self.editMax)
-        self.resForm1Layout.addRow("Current val.", self.editCrntVal)
-        self.resForm1Layout.addRow(" ", None)
-        self.resForm1Layout.addRow("Prior dist.", self.cmboxPrior)
-        self.resForm1Layout.addRow("Mode", self.editPriorMode)
-        self.resForm1Layout.addRow(" ", self.chkboxUseCrnt)
-        self.resForm1Layout.addRow("Deviation", self.editPriorStdv)
-
-        self.bttnSample = QPushButton('Sample')
-        self.bttnSample.clicked.connect(lambda : self.sampleStep(self.treeWidget.indxActvStep))
-        layout = QGridLayout()
-        layout.addWidget(self.parsListWidget, 0, 0, 2, 1)
-        layout.addLayout(self.resForm1Layout, 0, 1)
-        layout.addWidget(self.bttnSample, 1, 1)
-        layout.addWidget(self.histCanvas, 0, 2, 2, 1)
-        layout.setColumnStretch(0, 1)
-        layout.setColumnStretch(1, 1)
-        layout.setColumnStretch(2, 2)
-
-        self.setLayout(layout)
-
-        self.reset()
-
-    def reset(self):
-        pass
-
 class FittingThread(QThread):
     """A worker thread used to fit models to data in several steps."""
 
@@ -3270,8 +3098,8 @@ class MainNMRWindowBase(QMainWindow):
         MEDIUM_SIZE = 12
         BIGGER_SIZE = 14
 
-        rc('font', size=SMALL_SIZE)          # controls default text sizes
-        rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+        # rc('font', size=SMALL_SIZE)          # controls default text sizes
+        # rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
         #rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
         #rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
         #rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
@@ -3507,7 +3335,7 @@ class MainNMRWindowBase(QMainWindow):
         self.treeModel.resetChemTree(T)
 
     def onSaveWspAction(self):
-        """Saves the workspace including the stepClass class and the steps array."""
+        """Saves the workspace class and the steps array."""
         filename = QFileDialog.getSaveFileName(parent=self, caption='Select output file', directory='.', filter='NMR worksapce (*.wsp)')[0]
         if filename:
             if filename[-4:] != '.wsp': filename += '.wsp'
@@ -3528,7 +3356,7 @@ class MainNMRWindowBase(QMainWindow):
                 dill.dump([dataPack, stngPack], fp)
 
     def onLoadWspAction(self):
-        """Loads the workspace including the stepClass class and the steps array."""
+        """Loads the workspace class and the steps array."""
         filename = QFileDialog.getOpenFileName(self, 'Open workspace', '.', filter = "NMR worksapce (*.wsp)")[0]
         if filename:
             with open(filename, 'rb') as fp:
@@ -3539,7 +3367,7 @@ class MainNMRWindowBase(QMainWindow):
             self.onResetWspAction(newWorkspace=dataUnPack[0], newSettings=dataUnPack[1])
 
     def onResetWspAction(self, newWorkspace=None, newSettings=None, HCmode='1H'):
-        """Clears the workspace including the stepClass, signals and the tree."""
+        """Clears the workspace, signals and the tree."""
         self.naviTreeModel.beginResetModel()
 
         # Update the global settings
@@ -3689,6 +3517,12 @@ class MainNMRWindowBase(QMainWindow):
 
     def continueThread(self):
         """Continues fitting the thread if there are any files left."""
+
+        def split_steps(dat, step):
+            """Splits the list of fited parameters and returns a list of corresponding steps."""
+            return [Step(frqBlkIds = step.frqBlkIds, parsKeys = [key], autoKeys=step.autoKeys)\
+                    for key in step.parsKeys]
+
         if len(self._fittingQueue) > 0:
             fileToFit, actnToRun = self._fittingQueue.pop(0)
 
@@ -3884,103 +3718,6 @@ class MainNMRWindowBase(QMainWindow):
 
         self._crnt.saveResults(filename)
 
-# ------------------------ Parameter list --------------------------------------
-    def updateParsList(self, indxStep = None):
-        """Updates and displays the list of optimizaed parameters on the current step."""
-        self.parsListWidget.clear()
-        items = [node.name for node in stepClass.T.repRoots()]
-        if indxStep is not None:
-            items.extend([str(v) for v in self.steps[indxStep].parsKeys])
-        self.parsListWidget.addItems(items)
-
-    def onSelectParList(self, item):
-        """Handles the selection event of a parameter in the list."""
-        indxRow = self.parsListWidget.row(item)
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
-            slctParSpec = stepClass.getPrior(stepClass, key)
-            self.editMin.setText("{:.4g}".format(slctParSpec.min))
-            self.editMax.setText("{:.4g}".format(slctParSpec.max))
-            self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
-            self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
-            if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
-                self.editPriorMode.setEnabled(True)
-                self.editPriorStdv.setEnabled(True)
-                self.chkboxUseCrnt.setEnabled(True)
-                if slctParSpec.prior['mode'] is None:
-                    self.chkboxUseCrnt.setCheckState(Qt.Checked)
-                    self.editPriorMode.setText(self.editCrntVal.text())
-                    self.editPriorMode.setReadOnly(True)
-                else:
-                    self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
-                    self.editPriorMode.setReadOnly(False)
-                    self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
-                self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
-            else:   # Uniform prior
-                    self.editPriorMode.setDisabled(True)
-                    self.editPriorStdv.setDisabled(True)
-                    self.chkboxUseCrnt.setDisabled(True)
-        self.plotDistr(key)    # plot the prior distribution
-
-    def onPriorNameChanged(self, itemIndx):
-        """Handles the event of changing the name of the prior distribution in the combobox."""
-        priorName = self.cmboxPrior.currentText()
-        if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
-            self.editPriorMode.setEnabled(True)
-            self.editPriorStdv.setEnabled(True)
-            self.chkboxUseCrnt.setEnabled(True)
-            if self.chkboxUseCrnt.isChecked:
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-            else:
-                self.editPriorMode.setReadOnly(False)
-                self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
-            self.editPriorStdv.setText("{:.4g}".format(0.5))
-        else:   # Uniform prior
-                self.editPriorMode.setDisabled(True)
-                self.editPriorStdv.setDisabled(True)
-                self.chkboxUseCrnt.setDisabled(True)
-        self.saveParsForm()
-
-    def saveParsForm(self):
-        """Saves the parsSpec entered in the resForm1."""
-        indxRow = self.parsListWidget.currentRow()
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
-            priorName = self.cmboxPrior.currentText()
-            if priorName == 'Uniform':
-                prior = {'name':priorName, 'mode':None, 'stdv':None}
-            elif self.chkboxUseCrnt.isChecked():
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-                prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
-            else:
-                self.editPriorMode.setReadOnly(False)
-                prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
-
-            # Save the parSpec
-            stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
-            # Update the current parameter values
-            self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
-            """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
-            # Display new min/max values in the tree
-            self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
-            self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
-            self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
-            self.treeWidget.blockSignals(False)
-            # Update the rest of parameters based on their values in the tree table
-            for indx, stp in enumerate(self.steps):
-                clmn = indx+3
-                stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
-        # plot the prior distribution
-        self.plotDistr(key)
-
 # --------------------- Adding and removing frequency blocks -------------------
     def addFreqBlock(self, xmin, xmax):
         """Adds new optimization range to the current Series and updates the plot."""
@@ -4116,10 +3853,10 @@ class MainView_nmrQuant(MainNMRWindowBase):
         self.printoutEdit.resize(50, 50)
 
         # ----------------- set up the pie chart figure
-        self.pieFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
-        self.pieCanvas = FigureCanvas(self.pieFigure)# this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
-        self.pieCanvas.setMaximumHeight(275)
-        self.ax_pie = self.pieFigure.add_subplot(111)    # create axes
+        self.barFigure = Figure(facecolor='w', edgecolor='k')     # a figure instance to plot on
+        self.barCanvas = FigureCanvas(self.barFigure)             # this is the Canvas Widget that displays the `figure`; it takes the `figure` instance as a parameter to __init__
+        self.barCanvas.setMaximumHeight(275)
+        self.ax_bar = self.barFigure.add_subplot(111)    # create axes
 
         # ------------------ 2. Set up the chemical tree ----------------------
         self.treeView = ChemTreeView()
@@ -4164,8 +3901,6 @@ class MainView_nmrQuant(MainNMRWindowBase):
         self.naviSelection = QItemSelectionModel(self.naviTreeModel)
         self.naviTreeView.setModel(self.naviTreeModel)
         self.naviTreeView.setSelectionModel(self.naviSelection)
-        # self.naviTreeDelegate = NavigationTreeDelegate()
-        # self.naviTreeView.setItemDelegate(self.naviTreeDelegate)
         self.naviSelection.currentChanged.connect(self.onCurrentSelectedChanged)
         self.naviTreeView.requestPasteCrnt.connect(self.treeView.pasteCrntPars)     # Paste copied parameter values to all selected Datums in the naviTreeView
         self.naviTreeView.requestPasteDflt.connect(self.treeView.pasteDfltPars)
@@ -4177,7 +3912,7 @@ class MainView_nmrQuant(MainNMRWindowBase):
         layNavi = QVBoxLayout()
         tabNavi.setLayout(layNavi)
         layNavi.addWidget(self.naviTreeView)
-        layNavi.addWidget(self.pieCanvas)
+        layNavi.addWidget(self.barCanvas)
         layNavi.setContentsMargins(1,1,1,1)
 
         # ----------------------------------------------------------------------
@@ -4498,142 +4233,12 @@ class MainView_nmrQuant(MainNMRWindowBase):
 
         self.setCurrent(newCrnt = index.internalPointer() if index.isValid() else None)
 
-# ------------------------ Parameter list --------------------------------------
-    def updateParsList(self, indxStep = None):
-        """Updates and displays the list of optimizaed parameters on the current step."""
-        self.parsListWidget.clear()
-        items = [node.name for node in stepClass.T.repRoots()]
-        if indxStep is not None:
-            items.extend([str(v) for v in self.steps[indxStep].parsKeys])
-        self.parsListWidget.addItems(items)
-
-    def onSelectParList(self, item):
-        """Handles the selection event of a parameter in the list."""
-        indxRow = self.parsListWidget.row(item)
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[-1].parsKeys[indxRow - numRepRoots]    # Parameter name
-            slctParSpec = stepClass.getPrior(stepClass, key)
-            self.editMin.setText("{:.4g}".format(slctParSpec.min))
-            self.editMax.setText("{:.4g}".format(slctParSpec.max))
-            self.editCrntVal.setText("{:.4g}".format(slctParSpec.abs(self.steps[-1].getCrntVal(key))) )
-            self.cmboxPrior.setCurrentIndex(self.cmboxPrior.findText(slctParSpec.prior['name']))
-            if slctParSpec.prior['name'] in ['Gaussian', 'Log-Normal']:
-                self.editPriorMode.setEnabled(True)
-                self.editPriorStdv.setEnabled(True)
-                self.chkboxUseCrnt.setEnabled(True)
-                if slctParSpec.prior['mode'] is None:
-                    self.chkboxUseCrnt.setCheckState(Qt.Checked)
-                    self.editPriorMode.setText(self.editCrntVal.text())
-                    self.editPriorMode.setReadOnly(True)
-                else:
-                    self.chkboxUseCrnt.setCheckState(Qt.Unchecked)
-                    self.editPriorMode.setReadOnly(False)
-                    self.editPriorMode.setText("{:.4g}".format(rel2abs(slctParSpec, slctParSpec.prior['mode'])))
-                self.editPriorStdv.setText("{:.4g}".format(slctParSpec.prior['stdv']))
-            else:   # Uniform prior
-                    self.editPriorMode.setDisabled(True)
-                    self.editPriorStdv.setDisabled(True)
-                    self.chkboxUseCrnt.setDisabled(True)
-        self.plotDistr(key)    # plot the prior distribution
-
-    def onPriorNameChanged(self, itemIndx):
-        """Handles the event of changing the name of the prior distribution in the combobox."""
-        priorName = self.cmboxPrior.currentText()
-        if priorName in ['Gaussian', 'Log-Normal']:      # or if itemIndx in [1, 2]
-            self.editPriorMode.setEnabled(True)
-            self.editPriorStdv.setEnabled(True)
-            self.chkboxUseCrnt.setEnabled(True)
-            if self.chkboxUseCrnt.isChecked:
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-            else:
-                self.editPriorMode.setReadOnly(False)
-                self.editPriorMode.setText("{:.4g}".format( (float(self.editMin.text()) + float(self.editMax.text()))/2 ))
-            self.editPriorStdv.setText("{:.4g}".format(0.5))
-        else:   # Uniform prior
-                self.editPriorMode.setDisabled(True)
-                self.editPriorStdv.setDisabled(True)
-                self.chkboxUseCrnt.setDisabled(True)
-        self.saveParsForm()
-
-    def saveParsForm(self):
-        """Saves the parsSpec entered in the resForm1."""
-        indxRow = self.parsListWidget.currentRow()
-        numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-        if indxRow < numRepRoots:
-            key = self.parsListWidget.currentItem().text()
-        else:
-            key = self.steps[0].parsKeys[indxRow - numRepRoots]    # Parameter name
-            priorName = self.cmboxPrior.currentText()
-            if priorName == 'Uniform':
-                prior = {'name':priorName, 'mode':None, 'stdv':None}
-            elif self.chkboxUseCrnt.isChecked():
-                self.editPriorMode.setText(self.editCrntVal.text())
-                self.editPriorMode.setReadOnly(True)
-                prior = {'name':priorName, 'mode':None, 'stdv':float(self.editPriorStdv.text())}
-            else:
-                self.editPriorMode.setReadOnly(False)
-                prior = {'name':priorName, 'mode':abs2rel(parsSpec(float(self.editMin.text()), float(self.editMax.text())), float(self.editPriorMode.text())), 'stdv':float(self.editPriorStdv.text())}
-
-            # Save the parSpec
-            stepClass.setPrior(stepClass, key, min=float(self.editMin.text()), max=float(self.editMax.text()), distr=priorName)
-            # Update the current parameter values
-            self.steps[0].setCrntVal(key, float(self.editCrntVal.text()))
-            """self.refreshStep(len(self.steps)-1)     # Updqate the last step in the tree table
-            # Display new min/max values in the tree
-            self.treeWidget.blockSignals(True)     # don't call the onTreeItemChanged function
-            self.treeItems[key].setText(1, "{:.4g}".format(slctParSpec.min))
-            self.treeItems[key].setText(2, "{:.4g}".format(slctParSpec.max))
-            self.treeWidget.blockSignals(False)
-            # Update the rest of parameters based on their values in the tree table
-            for indx, stp in enumerate(self.steps):
-                clmn = indx+3
-                stp.setCrntVal(key, float(self.treeItems[key].text(clmn)))"""
-        # plot the prior distribution
-        self.plotDistr(key)
-
-    def plotDistr(self, key=None):
-        """Plots a prior probability distribution for the parameter key on the middle plot."""
-        # Determine which parameter is selected in the list and plot its samples
-        if key is None:
-            numRepRoots = len([node for node in stepClass.T.repRoots()])    # Number of reported nodes
-            if self.parsListWidget.currentRow() < numRepRoots:
-                key = self.parsListWidget.currentItem().text()
-            else:
-                key = self.steps[-1].parsKeys[self.parsListWidget.currentRow() - numRepRoots]    # Parameter name
-        # Plot the piror distribution and samples
-        self.axDistr.clear()
-        self.axDistr2.clear()
-        if type(key) is tuple:
-            # Handle adjustible parameters
-            slctParSpec = self.steps[-1].getPrior(key)
-            # Plot the samples
-            if self.steps[-1].sHat is not None:
-                indx = self.steps[-1].sHat['smplKeys'].index(key)       # Index of the sampled parameter in the array of samples
-                smpl_abs = self.steps[-1].sHat['smplVals'][indx, :]
-                self.axDistr2.hist(smpl_abs, bins=50, range=(slctParSpec.min, slctParSpec.max), color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
-            # Plot the prior
-            vals = [slctParSpec.evalPrior(x) for x in np.linspace(-1,1,25)]
-            self.axDistr.plot(np.linspace(slctParSpec.min, slctParSpec.max, 25), vals, color=(0.96, 0.53, 0.20))
-            self.axDistr.set_xlim((slctParSpec.min, slctParSpec.max))
-            self.axDistr.axvline(x=slctParSpec.abs(self.steps[-1].getCrntVal(key)), ymin=0, ymax=0.05, color='r')
-        else:
-            # Handle the amplitudes
-            if self.steps[-1].sHat is not None:
-                indx = self.steps[-1].sHat['labels'].index(key)       # Index of the sampled parameter in the array of samples
-                smpl_abs = np.abs(self.steps[-1].sHat['smplAmpl'][indx,:])
-                self.axDistr2.hist(smpl_abs, bins=50, color='y', edgecolor=(0.96, 0.53, 0.20), alpha=0.5)
-        self.histCanvas.draw()
-
 # ------------------------ Functions for plotting ------------------------------
     def plotCurrent(self, autoRange=True):
         """Plots signals corresponding to the currently opened file and current parameters."""
         if isinstance(self._crnt, Series):
             self.mainFigureWidget.reset()
-            self.plotPieChart(reset=True)
+            self.plotBarChart(reset=True)
 
         elif isinstance(self._crnt, Datum):
             f, yFph, xF, zF, bF = self._crnt.signals_for_plot()
@@ -4654,7 +4259,7 @@ class MainView_nmrQuant(MainNMRWindowBase):
                 self.mainFigureWidget.autoRange()
 
             # Output the found results
-            self.plotPieChart()
+            self.plotBarChart()
 
             # Update the phasing widget
             self.mainPhasingWidget.setData(f, yFph, xF,
@@ -4662,7 +4267,7 @@ class MainView_nmrQuant(MainNMRWindowBase):
 
         else:
             self.mainFigureWidget.reset()
-            self.plotPieChart(reset=True)
+            self.plotBarChart(reset=True)
 
     def toggleStems(self):
         """Plots stem lines to indicate modeled peaks."""
@@ -4694,11 +4299,11 @@ class MainView_nmrQuant(MainNMRWindowBase):
             if key_crnt is not None and key_crnt[1] in ['chshQD', 'alphQD']:
                 self.mainFigureWidget.highlightStems((key_crnt[0], 'chshQD', key_crnt[2]), True)
 
-    def plotPieChart(self, reset=False):
-        """Plots a pie chart that represents the found component concentrations."""
+    def plotBarChart(self, reset=False):
+        """Plots a bar chart that represents the found component concentrations."""
 
         def hover(evt):
-            if evt.inaxes == self.ax_pie:
+            if evt.inaxes == self.ax_bar:
                 # Find which bar contains the event
                 for indx, patch in enumerate(bars.patches):
                     if patch.contains(evt)[0]:
@@ -4709,11 +4314,11 @@ class MainView_nmrQuant(MainNMRWindowBase):
 
             self.statusBar.clearMessage()
 
-        self.ax_pie.clear()
+        self.ax_bar.clear()
 
         # Remove the reference to the hovering event
         try:
-            self.pieCanvas.mpl_disconnect(self._cid_hover)
+            self.barCanvas.mpl_disconnect(self._cid_hover)
         except AttributeError: pass
 
         if not reset:
@@ -4723,20 +4328,15 @@ class MainView_nmrQuant(MainNMRWindowBase):
             if sum(cnct) != 0:
                 cnct = cnct / sum(cnct)
             labels = [d[1] for d in data]
-            bars = self.ax_pie.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
+            bars = self.ax_bar.bar(np.arange(len(labels)), 100*cnct, tick_label=labels, align='center',
                 color=[col for col, name in zip(config.colrseq[2:], self._crnt.repRootNames) if name not in ['Water', 'Chlorophorm'] and not self._crnt.isXclRootName(name)])
-            self.ax_pie.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
-            ttl = self.ax_pie.set_title('Relative concentrations, %', fontsize=12)
+            self.ax_bar.set_xticklabels(labels, rotation='vertical' if len(labels) > 3 else 'horizontal')
+            ttl = self.ax_bar.set_title('Relative concentrations, %', fontsize=12)
             ttl.set_position((0.5, 1.03))
-            # wedges, texts, autotexts = self.ax_pie.pie(cnct, labels=labels, explode=[0.05]*len(cnct), shadow=True, autopct='%0.2f', colors=config.colrseq)
-            # self.ax_pie.legend(wedges, labels,
-            #   loc="bottom",
-            #   bbox_to_anchor=(0, 0.1, 0.5, 1))
-            # self.ax_pie.axis('equal')
 
-            self._cid_hover = self.pieCanvas.mpl_connect("motion_notify_event", hover)
+            self._cid_hover = self.barCanvas.mpl_connect("motion_notify_event", hover)
 
-        self.pieCanvas.draw()
+        self.barCanvas.draw()
 
 # --------------------- Adding and removing frequency blocks -------------------
     def addFreqBlock(self, xmin, xmax):
