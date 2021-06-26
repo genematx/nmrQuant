@@ -14280,7 +14280,12 @@ a.anchor-link {
 <span class="o">%</span><span class="k">matplotlib</span> inline
 <span class="o">%</span><span class="k">matplotlib</span>  notebook
 <span class="o">%</span><span class="k">precision</span> 4
+
+<span class="c1"># Add the main software directory to the path</span>
 <span class="kn">import</span> <span class="nn">sys</span><span class="o">,</span> <span class="nn">os</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="s1">&#39;..&#39;</span><span class="p">))</span>  <span class="c1"># By default it is the parent directory</span>
+
+<span class="c1"># Import necessary modules</span>
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
 <span class="kn">from</span> <span class="nn">chemTree</span> <span class="kn">import</span> <span class="o">*</span>
@@ -14291,6 +14296,7 @@ a.anchor-link {
 <span class="kn">from</span> <span class="nn">dataio</span> <span class="kn">import</span> <span class="n">read_any_file</span>
 <span class="kn">from</span> <span class="nn">pprint</span> <span class="kn">import</span> <span class="n">pprint</span>
 
+<span class="c1"># Set up display parameters</span>
 <span class="n">rcParams</span><span class="p">[</span><span class="s1">&#39;figure.max_open_warning&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">50</span>
 <span class="n">rcParams</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;font.size&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">})</span>
 <span class="n">rcParams</span><span class="p">[</span><span class="s1">&#39;ps.fonttype&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">42</span>               <span class="c1"># Output TrueType font; Needed to be able to save figures in .eps format</span>
@@ -14569,7 +14575,7 @@ Optimization terminated successfully.
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell   ">
 <div class="jp-Cell-inputWrapper">
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[25]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[8]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Display the contents of the chemical library</span>
@@ -14596,129 +14602,129 @@ Optimization terminated successfully.
 
 
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
-<pre>{&#39;Built-in models&#39;: {&#39;Chloroform&#39;: &lt;chemTree.chemSpec object at 0x000001AA17C13608&gt;,
-                     &#39;Ethanol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1A968708&gt;,
-                     &#39;TMS&#39;: &lt;chemTree.chemSpec object at 0x000001AA1A968208&gt;,
-                     &#39;TMSP&#39;: &lt;chemTree.chemSpec object at 0x000001AA1A968388&gt;,
-                     &#39;Water&#39;: &lt;chemTree.chemSpec object at 0x000001AA1A968188&gt;},
- &#39;ESR&#39;: {&#39;Amino-2-propanol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1AEB3488&gt;,
-         &#39;Cannabidiol (CBD)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B0BB248&gt;,
-         &#39;Cannabidiolic acid (CBDa)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B0C3148&gt;,
-         &#39;Cannabinol (CBN)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B0C7148&gt;,
-         &#39;Methylsulfonylmethane&#39;: &lt;chemTree.chemSpec object at 0x000001AA1AEB3B88&gt;,
-         &#39;N-Isopropylbenzylamine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B0B2388&gt;,
-         &#39;Phenethylamine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B0B2E88&gt;,
-         &#39;Propylene glycol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B0B3888&gt;,
-         &#39;Tetrahydrocannabinoic acid (THCa)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B0CB608&gt;},
- &#39;Elmar_EvA&#39;: {&#39;EvA02&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61D408&gt;,
-               &#39;EvA34&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61DF48&gt;,
-               &#39;b,g-EvA34&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61D508&gt;,
-               &#39;b-EvA02&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61DE88&gt;,
-               &#39;b-EvA34&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61DDC8&gt;,
-               &#39;g-EvA34&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61D108&gt;},
- &#39;Glycerols&#39;: {&#39;Glycerol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1AFB2948&gt;,
-               &#39;Glycerol_Acetate-1&#39;: &lt;chemTree.chemSpec object at 0x000001AA1AFB0308&gt;,
-               &#39;Glycerol_Acetate-1,2&#39;: &lt;chemTree.chemSpec object at 0x000001AA1AFAF708&gt;,
-               &#39;Glycerol_Acetate-1,2,3&#39;: &lt;chemTree.chemSpec object at 0x000001AA1AFAEB08&gt;,
-               &#39;Glycerol_Acetate-1,3&#39;: &lt;chemTree.chemSpec object at 0x000001AA1AFAB688&gt;,
-               &#39;Glycerol_Acetate-2&#39;: &lt;chemTree.chemSpec object at 0x000001AA1AF68C48&gt;},
- &#39;Organic acids&#39;: {&#39;Acetic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1F0848&gt;,
-                   &#39;Adipic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1F0FC8&gt;,
-                   &#39;Adipic acid (P)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1F2C48&gt;,
-                   &#39;Alanine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1F4508&gt;,
-                   &#39;Aniline&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1F6208&gt;,
-                   &#39;Arginine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1F83C8&gt;,
-                   &#39;Ascorbic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1F9048&gt;,
-                   &#39;Asparagine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1F9A88&gt;,
-                   &#39;Caffeine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1FC508&gt;,
-                   &#39;Citric acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1FCFC8&gt;,
-                   &#39;Creatine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1FD6C8&gt;,
-                   &#39;Glycine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1FDD88&gt;,
-                   &#39;Lactic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1FE588&gt;,
-                   &#39;Maleic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B1FEB48&gt;,
-                   &#39;Malic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B200488&gt;,
-                   &#39;Proline&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B2039C8&gt;,
-                   &#39;Pyridoxine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B204188&gt;,
-                   &#39;Quinic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B206708&gt;,
-                   &#39;Sebacic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B2084C8&gt;,
-                   &#39;Sebacic acid (P)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B20B708&gt;,
-                   &#39;Sebacic acid (P2)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B20BE48&gt;,
-                   &#39;Shikimic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B20CF08&gt;,
-                   &#39;Succinic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B20E688&gt;,
-                   &#39;Succinic acid (P)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B20EE48&gt;,
-                   &#39;Tartaric acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B2104C8&gt;,
-                   &#39;Terephtalic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B210A88&gt;,
-                   &#39;Thiamine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B212788&gt;,
-                   &#39;Valine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B214448&gt;},
- &#39;Other&#39;: {&#39;1,4-Butanediol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B643D88&gt;,
-           &#39;1-Butanal&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B646648&gt;,
-           &#39;1-Butanol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61C048&gt;,
-           &#39;2,3-Butanediol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6478C8&gt;,
-           &#39;2-metyl butyl&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64C9C8&gt;,
-           &#39;Acetone&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6503C8&gt;,
-           &#39;Acetonitrile&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64AA08&gt;,
-           &#39;Amyl&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B653788&gt;,
-           &#39;Benzaldehyde&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B648948&gt;,
-           &#39;Butanediol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6168C8&gt;,
-           &#39;Butanediol (P)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B644D88&gt;,
-           &#39;CO2&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61C188&gt;,
-           &#39;Cannabidiol (CBD)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64D708&gt;,
-           &#39;Cannabidiolic acid (CBDa)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64BB88&gt;,
-           &#39;Cannabinol (CBN)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64AF08&gt;,
-           &#39;DIN&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64B788&gt;,
-           &#39;DMSO&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B643308&gt;,
-           &#39;Dioxane&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B4046C8&gt;,
-           &#39;Ethanol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B648E08&gt;,
-           &#39;Ethanol_noWater&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6534C8&gt;,
-           &#39;Ethyl&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61C5C8&gt;,
-           &#39;Ethyl acetate&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B643988&gt;,
-           &#39;FA&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6506C8&gt;,
-           &#39;FAN&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64C708&gt;,
-           &#39;HF2&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64F6C8&gt;,
-           &#39;HF3&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B643BC8&gt;,
-           &#39;HF4&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64A908&gt;,
-           &#39;HM1&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B648348&gt;,
-           &#39;HxCO3-&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B61CE08&gt;,
-           &#39;Isoamyl&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64C348&gt;,
-           &#39;Isobutyl&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B651B88&gt;,
-           &#39;Isopropanol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6445C8&gt;,
-           &#39;Isopropyl&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64A388&gt;,
-           &#39;Isopropyl PIPX&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B387388&gt;,
-           &#39;MBE&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B647748&gt;,
-           &#39;MBIC (4-Methyl-2-penthanol)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B4048C8&gt;,
-           &#39;MDEA&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B646B08&gt;,
-           &#39;MEG&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B646D48&gt;,
-           &#39;MGO Dihydrate&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B653DC8&gt;,
-           &#39;MGO Monohydrate&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B653C08&gt;,
-           &#39;MSN&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64D848&gt;,
-           &#39;Methanol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64F1C8&gt;,
-           &#39;Methyl acetate&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B651908&gt;,
-           &#39;Propane (Gas Phase)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6446C8&gt;,
-           &#39;Propanol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B650E48&gt;,
-           &#39;Singlet&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6513C8&gt;,
-           &#39;Tetrahydrocannabinoic acid (THCa)&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B648248&gt;,
-           &#39;cis-2-Butene-1,4-diol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B405108&gt;,
-           &#39;test&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B64FE88&gt;},
- &#39;PubChem SDF&#39;: {&#39;Ascorbic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B35AD88&gt;,
-                 &#39;Citric acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B35D548&gt;,
-                 &#39;Lactic acid&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B3727C8&gt;,
-                 &#39;Methamphetamine&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B387D08&gt;},
- &#39;Sugars&#39;: {&#39;Lactose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B5EF648&gt;,
-            &#39;Maltose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B5F6B88&gt;,
-            &#39;Mannitol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B5F99C8&gt;,
-            &#39;Sorbitol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B5FCE48&gt;,
-            &#39;Sucrose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B601908&gt;,
-            &#39;Sucrose-F&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B603FC8&gt;,
-            &#39;Sucrose-G&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B607388&gt;,
-            &#39;Xylitol&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B607E48&gt;,
-            &#39;alpha-Fructofuranose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B60AB48&gt;,
-            &#39;alpha-Fructopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B60C5C8&gt;,
-            &#39;alpha-Galactopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B60CFC8&gt;,
-            &#39;alpha-Glucopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B610A88&gt;,
-            &#39;beta-Fructofuranose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B613508&gt;,
-            &#39;beta-Fructopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B613E48&gt;,
-            &#39;beta-Galactopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B6169C8&gt;,
-            &#39;beta-Glucopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001AA1B619448&gt;}}
+<pre>{&#39;Built-in models&#39;: {&#39;Chloroform&#39;: &lt;chemTree.chemSpec object at 0x000001F2F6A4E9C8&gt;,
+                     &#39;Ethanol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F7B7C0C8&gt;,
+                     &#39;TMS&#39;: &lt;chemTree.chemSpec object at 0x000001F2F7B71B88&gt;,
+                     &#39;TMSP&#39;: &lt;chemTree.chemSpec object at 0x000001F2F7B71D08&gt;,
+                     &#39;Water&#39;: &lt;chemTree.chemSpec object at 0x000001F2F7B71B08&gt;},
+ &#39;ESR&#39;: {&#39;Amino-2-propanol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F82BFCC8&gt;,
+         &#39;Cannabidiol (CBD)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F82C9A88&gt;,
+         &#39;Cannabidiolic acid (CBDa)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F82D1988&gt;,
+         &#39;Cannabinol (CBN)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F82D5988&gt;,
+         &#39;Methylsulfonylmethane&#39;: &lt;chemTree.chemSpec object at 0x000001F2F80CA408&gt;,
+         &#39;N-Isopropylbenzylamine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F80CABC8&gt;,
+         &#39;Phenethylamine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F82C1708&gt;,
+         &#39;Propylene glycol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F82C3108&gt;,
+         &#39;Tetrahydrocannabinoic acid (THCa)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F82D9E48&gt;},
+ &#39;Elmar_EvA&#39;: {&#39;EvA02&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882C888&gt;,
+               &#39;EvA34&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882C7C8&gt;,
+               &#39;b,g-EvA34&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882C948&gt;,
+               &#39;b-EvA02&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882C708&gt;,
+               &#39;b-EvA34&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882C648&gt;,
+               &#39;g-EvA34&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882CFC8&gt;},
+ &#39;Glycerols&#39;: {&#39;Glycerol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F81C1C08&gt;,
+               &#39;Glycerol_Acetate-1&#39;: &lt;chemTree.chemSpec object at 0x000001F2F81BFE48&gt;,
+               &#39;Glycerol_Acetate-1,2&#39;: &lt;chemTree.chemSpec object at 0x000001F2F81BE708&gt;,
+               &#39;Glycerol_Acetate-1,2,3&#39;: &lt;chemTree.chemSpec object at 0x000001F2F81BCD48&gt;,
+               &#39;Glycerol_Acetate-1,3&#39;: &lt;chemTree.chemSpec object at 0x000001F2F81BBC48&gt;,
+               &#39;Glycerol_Acetate-2&#39;: &lt;chemTree.chemSpec object at 0x000001F2F81B7048&gt;},
+ &#39;Organic acids&#39;: {&#39;Acetic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F83FDF48&gt;,
+                   &#39;Adipic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F84008C8&gt;,
+                   &#39;Adipic acid (P)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F84024C8&gt;,
+                   &#39;Alanine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8402D48&gt;,
+                   &#39;Aniline&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8403A48&gt;,
+                   &#39;Arginine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8405C08&gt;,
+                   &#39;Ascorbic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8407708&gt;,
+                   &#39;Asparagine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8408308&gt;,
+                   &#39;Caffeine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8408D48&gt;,
+                   &#39;Citric acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F840B888&gt;,
+                   &#39;Creatine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F840BF08&gt;,
+                   &#39;Glycine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F840C608&gt;,
+                   &#39;Lactic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F840CDC8&gt;,
+                   &#39;Maleic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F840E3C8&gt;,
+                   &#39;Malic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F840ECC8&gt;,
+                   &#39;Proline&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8412248&gt;,
+                   &#39;Pyridoxine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8412B08&gt;,
+                   &#39;Quinic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8414F48&gt;,
+                   &#39;Sebacic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8415D08&gt;,
+                   &#39;Sebacic acid (P)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8417F48&gt;,
+                   &#39;Sebacic acid (P2)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F841A908&gt;,
+                   &#39;Shikimic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F841C788&gt;,
+                   &#39;Succinic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F841CEC8&gt;,
+                   &#39;Succinic acid (P)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F841E6C8&gt;,
+                   &#39;Tartaric acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F841ED08&gt;,
+                   &#39;Terephtalic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F841F308&gt;,
+                   &#39;Thiamine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F841FF08&gt;,
+                   &#39;Valine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8421C88&gt;},
+ &#39;Other&#39;: {&#39;1,4-Butanediol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8856A08&gt;,
+           &#39;1-Butanal&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8854D48&gt;,
+           &#39;1-Butanol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882CA48&gt;,
+           &#39;2,3-Butanediol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8856808&gt;,
+           &#39;2-metyl butyl&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885C6C8&gt;,
+           &#39;Acetone&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885FA88&gt;,
+           &#39;Acetonitrile&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885AEC8&gt;,
+           &#39;Amyl&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8863648&gt;,
+           &#39;Benzaldehyde&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885BD88&gt;,
+           &#39;Butanediol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8610BC8&gt;,
+           &#39;Butanediol (P)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8853AC8&gt;,
+           &#39;CO2&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882CD08&gt;,
+           &#39;Cannabidiol (CBD)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885E108&gt;,
+           &#39;Cannabidiolic acid (CBDa)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8858B88&gt;,
+           &#39;Cannabinol (CBN)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885A548&gt;,
+           &#39;DIN&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8858488&gt;,
+           &#39;DMSO&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8853E48&gt;,
+           &#39;Dioxane&#39;: &lt;chemTree.chemSpec object at 0x000001F2F860E148&gt;,
+           &#39;Ethanol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885B308&gt;,
+           &#39;Ethanol_noWater&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8863288&gt;,
+           &#39;Ethyl&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882CF48&gt;,
+           &#39;Ethyl acetate&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8853508&gt;,
+           &#39;FA&#39;: &lt;chemTree.chemSpec object at 0x000001F2F88607C8&gt;,
+           &#39;FAN&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885B048&gt;,
+           &#39;HF2&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885FC08&gt;,
+           &#39;HF3&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8853808&gt;,
+           &#39;HF4&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8857688&gt;,
+           &#39;HM1&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885BEC8&gt;,
+           &#39;HxCO3-&#39;: &lt;chemTree.chemSpec object at 0x000001F2F882CB08&gt;,
+           &#39;Isoamyl&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885C388&gt;,
+           &#39;Isobutyl&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8862348&gt;,
+           &#39;Isopropanol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8857148&gt;,
+           &#39;Isopropyl&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885AE08&gt;,
+           &#39;Isopropyl PIPX&#39;: &lt;chemTree.chemSpec object at 0x000001F2F860E048&gt;,
+           &#39;MBE&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8856108&gt;,
+           &#39;MBIC (4-Methyl-2-penthanol)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8595BC8&gt;,
+           &#39;MDEA&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8854948&gt;,
+           &#39;MEG&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8854748&gt;,
+           &#39;MGO Dihydrate&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8863508&gt;,
+           &#39;MGO Monohydrate&#39;: &lt;chemTree.chemSpec object at 0x000001F2F88626C8&gt;,
+           &#39;MSN&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885EAC8&gt;,
+           &#39;Methanol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885FB48&gt;,
+           &#39;Methyl acetate&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8862C08&gt;,
+           &#39;Propane (Gas Phase)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8857E88&gt;,
+           &#39;Propanol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8860F08&gt;,
+           &#39;Singlet&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8862FC8&gt;,
+           &#39;Tetrahydrocannabinoic acid (THCa)&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885B748&gt;,
+           &#39;cis-2-Butene-1,4-diol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8610B08&gt;,
+           &#39;test&#39;: &lt;chemTree.chemSpec object at 0x000001F2F885FF08&gt;},
+ &#39;PubChem SDF&#39;: {&#39;Ascorbic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F7320DC8&gt;,
+                 &#39;Citric acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8591E08&gt;,
+                 &#39;Lactic acid&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8582EC8&gt;,
+                 &#39;Methamphetamine&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8582448&gt;},
+ &#39;Sugars&#39;: {&#39;Lactose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F87FDE88&gt;,
+            &#39;Maltose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8806408&gt;,
+            &#39;Mannitol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F880A248&gt;,
+            &#39;Sorbitol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F880C6C8&gt;,
+            &#39;Sucrose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8810A48&gt;,
+            &#39;Sucrose-F&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8813848&gt;,
+            &#39;Sucrose-G&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8814BC8&gt;,
+            &#39;Xylitol&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8817948&gt;,
+            &#39;alpha-Fructofuranose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F88193C8&gt;,
+            &#39;alpha-Fructopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8819E08&gt;,
+            &#39;alpha-Galactopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F881C888&gt;,
+            &#39;alpha-Glucopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8820308&gt;,
+            &#39;beta-Fructofuranose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8820D48&gt;,
+            &#39;beta-Fructopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F88247C8&gt;,
+            &#39;beta-Galactopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8824F48&gt;,
+            &#39;beta-Glucopyranose&#39;: &lt;chemTree.chemSpec object at 0x000001F2F8826C88&gt;}}
 </pre>
 </div>
 </div>
@@ -15308,7 +15314,7 @@ Found values:
 Fitting 2 parameters; 6 parameters inferred in closed form...
 basinhopping step 0: f 36600.1
 basinhopping step 1: f 36600.1 trial_f 39116.6 accepted 0  lowest_f 36600.1
-basinhopping step 2: f 36600.1 trial_f 39116.6 accepted 0  lowest_f 36600.1
+basinhopping step 2: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
 basinhopping step 3: f 36600.1 trial_f 39116.6 accepted 0  lowest_f 36600.1
 Optimization finished. Posterior=-3.66e+04
 Found values:
@@ -15391,49 +15397,7 @@ Found values:
 <pre>Fitting one parameter; 2 parameters inferred in closed form...
 Optimization finished. Posterior=-3.66e+04
 Found values:
-     (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.3566
-
-
-Fitting one parameter; 2 parameters inferred in closed form...
-Optimization finished. Posterior=-3.66e+04
-Found values:
-     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014946
-
-
-Fitting 2 parameters; 2 parameters inferred in closed form...
-basinhopping step 0: f 36600.1
-basinhopping step 1: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
-found new global minimum on step 1 with function value 36600.1
-basinhopping step 2: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
-basinhopping step 3: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
-Optimization finished. Posterior=-3.66e+04
-Found values:
-     (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.4283
-     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014984
-
-
-Fitting one parameter; 2 parameters inferred in closed form...
-Optimization finished. Posterior=-3.66e+04
-Found values:
-     (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.3592
-
-
-Fitting one parameter; 2 parameters inferred in closed form...
-Optimization finished. Posterior=-3.66e+04
-Found values:
-     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014947
-
-
-Fitting 2 parameters; 2 parameters inferred in closed form...
-basinhopping step 0: f 36600.1
-basinhopping step 1: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
-found new global minimum on step 1 with function value 36600.1
-basinhopping step 2: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
-basinhopping step 3: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
-Optimization finished. Posterior=-3.66e+04
-Found values:
-     (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.4283
-     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014984
+     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014969
 
 
 Fitting one parameter; 2 parameters inferred in closed form...
@@ -15442,10 +15406,27 @@ Found values:
      (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.3578
 
 
+Fitting 2 parameters; 2 parameters inferred in closed form...
+basinhopping step 0: f 36600.1
+basinhopping step 1: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
+basinhopping step 2: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
+basinhopping step 3: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
+Optimization finished. Posterior=-3.66e+04
+Found values:
+     (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.4283
+     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014984
+
+
 Fitting one parameter; 2 parameters inferred in closed form...
 Optimization finished. Posterior=-3.66e+04
 Found values:
-     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014947
+     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014969
+
+
+Fitting one parameter; 2 parameters inferred in closed form...
+Optimization finished. Posterior=-3.66e+04
+Found values:
+     (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.3626
 
 
 Fitting 2 parameters; 2 parameters inferred in closed form...
@@ -15455,10 +15436,44 @@ found new global minimum on step 1 with function value 36600.1
 basinhopping step 2: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
 found new global minimum on step 2 with function value 36600.1
 basinhopping step 3: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
+found new global minimum on step 3 with function value 36600.1
 Optimization finished. Posterior=-3.66e+04
 Found values:
      (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.4283
      (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014984
+
+
+Fitting one parameter; 2 parameters inferred in closed form...
+Optimization finished. Posterior=-3.66e+04
+Found values:
+     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014969
+
+
+Fitting one parameter; 2 parameters inferred in closed form...
+Optimization finished. Posterior=-3.66e+04
+Found values:
+     (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.3633
+
+
+Fitting 2 parameters; 2 parameters inferred in closed form...
+basinhopping step 0: f 36600.1
+basinhopping step 1: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
+found new global minimum on step 1 with function value 36600.1
+basinhopping step 2: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
+found new global minimum on step 2 with function value 36600.1
+basinhopping step 3: f 36600.1 trial_f 36600.1 accepted 1  lowest_f 36600.1
+found new global minimum on step 3 with function value 36600.1
+Optimization finished. Posterior=-3.66e+04
+Found values:
+     (&#39;Mixture&#39;, &#39;alph&#39;, 0) = 4.4283
+     (&#39;Mixture&#39;, &#39;chsh&#39;, 0) = 0.014984
+
+
+Fitting one parameter; 2 parameters inferred in closed form...
+Optimization failed. All found values are close to bounds.
+Optimization finished. Posterior=-1842
+Found values:
+     (&#39;TMSP&#39;, &#39;alphQD&#39;, 0) = 0
 
 
 Fitting one parameter; 2 parameters inferred in closed form...
@@ -15467,15 +15482,9 @@ Found values:
      (&#39;TMSP&#39;, &#39;chshQD&#39;, 0) = -0.047318
 
 
-Fitting one parameter; 2 parameters inferred in closed form...
-Optimization finished. Posterior=-1130
-Found values:
-     (&#39;TMSP&#39;, &#39;alphQD&#39;, 0) = -2.4657
-
-
 Fitting 2 parameters; 2 parameters inferred in closed form...
 basinhopping step 0: f 1110.83
-basinhopping step 1: f 1110.83 trial_f 1110.83 accepted 1  lowest_f 1110.83
+basinhopping step 1: f 1110.83 trial_f 1841.83 accepted 0  lowest_f 1110.83
 Optimization finished. Posterior=-1111
 Found values:
      (&#39;TMSP&#39;, &#39;alphQD&#39;, 0) = -2.4717
@@ -15485,47 +15494,44 @@ Found values:
 Running a custom script with Dataset S20.10 in Series 1...
 
 Fitting 2 parameters; 1 parameters inferred in closed form...
+basinhopping step 0: f 7502.27
+basinhopping step 1: f 7502.27 trial_f 7507.71 accepted 0  lowest_f 7502.27
 warning: basinhopping: local minimization failure
-basinhopping step 0: f 7502.1
-warning: basinhopping: local minimization failure
-basinhopping step 1: f 7502.1 trial_f 7507.78 accepted 0  lowest_f 7502.1
-warning: basinhopping: local minimization failure
-basinhopping step 2: f 7507.78 trial_f 7507.78 accepted 1  lowest_f 7502.1
-warning: basinhopping: local minimization failure
-basinhopping step 3: f 7507.58 trial_f 7507.58 accepted 1  lowest_f 7502.1
+basinhopping step 2: f 7516.69 trial_f 7516.69 accepted 1  lowest_f 7502.27
+basinhopping step 3: f 7510.34 trial_f 7510.34 accepted 1  lowest_f 7502.27
 Optimization finished. Posterior=-7502
 Found values:
-     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 2) = 3.1601
-     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 3) = 3.8549
+     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 2) = 3.1614
+     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 3) = 3.8571
 
 
 Fitting 2 parameters; 1 parameters inferred in closed form...
 warning: basinhopping: local minimization failure
-basinhopping step 0: f 7502.1
+basinhopping step 0: f 7502.27
 warning: basinhopping: local minimization failure
-basinhopping step 1: f 7508.47 trial_f 7508.47 accepted 1  lowest_f 7502.1
+basinhopping step 1: f 7507.67 trial_f 7507.67 accepted 1  lowest_f 7502.27
+basinhopping step 2: f 7507.51 trial_f 7507.51 accepted 1  lowest_f 7502.27
 warning: basinhopping: local minimization failure
-basinhopping step 2: f 7507.78 trial_f 7507.78 accepted 1  lowest_f 7502.1
-warning: basinhopping: local minimization failure
-basinhopping step 3: f 7507.78 trial_f 7507.78 accepted 1  lowest_f 7502.1
+basinhopping step 3: f 7507.51 trial_f 7513.24 accepted 0  lowest_f 7502.27
 Optimization finished. Posterior=-7502
 Found values:
-     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 2) = 3.1601
-     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 3) = 3.8549
+     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 2) = 3.1614
+     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 3) = 3.8571
 
 
 Fitting 2 parameters; 1 parameters inferred in closed form...
 warning: basinhopping: local minimization failure
-basinhopping step 0: f 7502.1
+basinhopping step 0: f 7502.27
 warning: basinhopping: local minimization failure
-basinhopping step 1: f 7507.58 trial_f 7507.58 accepted 1  lowest_f 7502.1
+basinhopping step 1: f 7507.67 trial_f 7507.67 accepted 1  lowest_f 7502.27
 warning: basinhopping: local minimization failure
-basinhopping step 2: f 7507.58 trial_f 7519.25 accepted 0  lowest_f 7502.1
-basinhopping step 3: f 7507.59 trial_f 7507.59 accepted 1  lowest_f 7502.1
+basinhopping step 2: f 7507.67 trial_f 7507.67 accepted 1  lowest_f 7502.27
+warning: basinhopping: local minimization failure
+basinhopping step 3: f 7507.58 trial_f 7507.58 accepted 1  lowest_f 7502.27
 Optimization finished. Posterior=-7502
 Found values:
-     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 2) = 3.1601
-     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 3) = 3.8549
+     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 2) = 3.1614
+     (&#39;Thiamine&#39;, &#39;chshQD&#39;, 3) = 3.8571
 
 
 </pre>
@@ -15619,7 +15625,7 @@ Found values:
 <div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[24]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Select the Datum</span>
+<div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Select a Datum</span>
 <span class="n">dat</span> <span class="o">=</span> <span class="n">wsp</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span><span class="mi">3</span><span class="p">]</span>
 
 <span class="c1"># Evaluate to get the values of amplitudes without recomputing them (set autoKeys=[])</span>
@@ -15655,9 +15661,9 @@ Found values:
 
 
 
-<div id="e6d5c129-7c66-4ff3-83e8-9b25d19c84c7" class="jp-RenderedJavaScript jp-OutputArea-output " data-mime-type="application/javascript">
+<div id="224bdbc8-6547-438e-8fbe-cbf05f2d4c8f" class="jp-RenderedJavaScript jp-OutputArea-output " data-mime-type="application/javascript">
 <script type="text/javascript">
-var element = document.getElementById('e6d5c129-7c66-4ff3-83e8-9b25d19c84c7');
+var element = document.getElementById('224bdbc8-6547-438e-8fbe-cbf05f2d4c8f');
 /* Put everything inside the global mpl namespace */
 window.mpl = {};
 
