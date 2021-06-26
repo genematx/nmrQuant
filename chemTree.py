@@ -23,6 +23,9 @@ import collections
 import warnings
 warnings.filterwarnings("ignore")
 
+# Find the main directory where the nmrQuant software is installed
+MAINDIR = os.path.dirname(os.path.abspath(__file__))
+
 #### Definitions of named tuples ####
 
 # Named tuple to store pairs of min and max values
@@ -2766,7 +2769,7 @@ def writeChemDB_JSON(chemDB, fname='chemDB_saved.json'):
         with open(fname, 'wb') as fp:
             dill.dump(chemDB, fp)
 
-def writeChemLib_XLSX(chemLib, fname='chemDB_saved.xlsx'):
+def writeChemLib_XLSX(chemLib, fname='chemDB_saved.xlsx', verbose=False):
     """Export chemLib into xlsx file using xlsxwriter."""
 
     workbook = xlsxwriter.Workbook(fname)
@@ -2886,7 +2889,8 @@ def writeChemLib_XLSX(chemLib, fname='chemDB_saved.xlsx'):
         chemNames = sorted(list(db.keys()))
         for name in chemNames:
             chemToSave = db[name]
-            print('Saving {}/{}'.format(db_name, name))
+            if verbose:
+                print('Saving {}/{}'.format(db_name, name))
             lastrow = write_chem(worksheet, chemToSave, firstrow)
             firstrow = lastrow+2
 
@@ -2896,7 +2900,7 @@ def writeChemLib_XLSX(chemLib, fname='chemDB_saved.xlsx'):
 
 def loadChemLibrary(chemLib=None, dirpath=None):
     """Loads the chemical library (a dictionary of chemDB dictionaries)."""
-    chemdb_path = os.path.join(os.getcwd(), 'chemdb')       # Path to chemdb folder
+    chemdb_path = os.path.join(MAINDIR, 'chemdb')       # Path to chemdb folder
     if dirpath is None:
         dirpath = chemdb_path
 

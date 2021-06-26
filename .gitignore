@@ -110,6 +110,7 @@ _development
 data/
 build/
 dist/
+docs/_figures
 icons/_dev/
 workspaces/
 notebooks/
