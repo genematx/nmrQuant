@@ -5,6 +5,7 @@ from MainLogic import *
 from MainLogic import Step, Series, Datum, Workspace
 from dataio import *
 import config
+from collections import defaultdict
 
 from optparse import OptionParser
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -1054,7 +1055,7 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
             if key[1] == 'ampl':
                 wsp.setGlobalPrior(key=key, dval=0.0)
 
-        print('Updated')
+        print('Workspace updated')
 
     # Set the frequency blocks
     if resetFreqBlks:
@@ -1538,7 +1539,10 @@ class MainViewWine(MainNMRWindowBase):
                             fileToFit.setCrntVal(key, dat.getCrntVal(key))
 
                         # Remove the steps that do not need to be refitted and update the fitting queue and progress bars
-                        new_fittingQueue = [x for x in self._fittingQueue if (x[0] == fileToFit and x[1] in fileToFit.parent.extra['fastStepIDs']) or x[0] != fileToFit]
+                        new_fittingQueue = [x for x in self._fittingQueue if \
+                                            (x[0] == fileToFit and \
+                                            x[1] in fileToFit.parent.extra['fastStepIDs']) \
+                                            or x[0] != fileToFit]
                         self.progressBarFiles.setMaximum( self.progressBarFiles.maximum() - (len(self._fittingQueue) - len(new_fittingQueue)) )
                         self._fittingQueue.clear()
                         self._fittingQueue.extend(new_fittingQueue)
