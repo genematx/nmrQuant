@@ -116,7 +116,6 @@ workspaces/
 notebooks/
 *.lic
 *.wsp
-*.ctr
 *.spec       # Files created by pyinstaller
 *.dill
 main.exe

@@ -1018,11 +1018,11 @@ def init_autoWine(wsp, resetSeries=True, resetTree=True, resetFreqBlks=True, res
     # Set the chemical tree
     if resetTree:
         # T = loadTree( os.path.join(SCRIPT_PATH, 'autoWineTree.ctr') )
-        T = loadTree( 'autoWineTree.ctr' )
+        T = loadTree( 'trees\\autoWineTree.ctr' )
         # if wsp.extra['autoBeer']:
-        T['Sugars'].addChild(loadTree('workspaces\\Trees\\60_Mal.ctr'))
-        T['Sugars'].addChild(loadTree('workspaces\\Trees\\60_Mtr.ctr'))
-        T['Sugars'].addChild(loadTree('workspaces\\Trees\\60_Lac.ctr'))
+        T['Sugars'].addChild(loadTree('trees\\60_Mal.ctr'))
+        T['Sugars'].addChild(loadTree('trees\\60_Mtr.ctr'))
+        T['Sugars'].addChild(loadTree('trees\\60_Lac.ctr'))
         wsp.setTree(T)
 
         # # Set distributions' parameters (to be done in the tree)
