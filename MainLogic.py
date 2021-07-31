@@ -1467,7 +1467,9 @@ class Series():
             parsKeysDatum = set([key[-3:] for key in parsKeys if key[0]==i or len(key)==3]) if parsKeys is not None else None    # Select only keys of non-linear parameters. This will exclude all meta-parameters' keys
             autoKeysDatum = set([key[-3:] for key in autoKeys if key[0]==i or len(key)==3]) if autoKeys is not None else None
             if (not evaluateAll) and (parsKeysDatum == set([])): continue          # Skip some datasets that we don't need to evaluate (there are no keys relating to the i-th dataset)
-            _res, meta = DDD.evaluate(evalParsH[i], None, parsKeysDatum, autoKeysDatum, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
+            _res, meta = DDD.evaluate(evalParsH[i], None, parsKeysDatum, autoKeysDatum, \
+                        frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, \
+                        robust=robust, returnSignals=returnSignals)
             result += _res
             m_ampl[..., i] = meta['ampl'][0].ravel()
             S_ampl[...,i] = meta['ampl'][1]
@@ -1504,7 +1506,9 @@ class Series():
                     elif len(k) == 2:
                         evalMetaF[k] = v
                 # Evaluate the function skipping the datasets that are not present in parsKeys
-                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
+                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, \
+                            frqBlkIds, freqMask, funcType, evaluatePriors, \
+                            customPriors, robust=False, evaluateAll=evaluateAll)[0]
 
             res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
 
@@ -1517,7 +1521,8 @@ class Series():
                         self.crntMetaF[k] = v
 
         # Re-evaluatethe posterior
-        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
+        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, \
+                        freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -2926,7 +2931,7 @@ class Datum():
         # TODO! Make tight bounds, e.g. only xx% of the full range centered at the initial values
         bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
         initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-        costFuncSmpl = lambda x : self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, None, \
+        costFuncSmpl = lambda x : self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, \
                                                 parsKeys, autoKeys, frqBlkIds, freqMask, \
                                                 funcType, evaluatePriors, robust=robust)
 
@@ -3387,7 +3392,9 @@ class Datum():
         evalParsH = copy.deepcopy(self.crntParsH)      # Make a copy of the parameter dictionary that will be used for evaluation
         for i, x in enumerate(x_arr):
             evalParsH[key[0]][key[1]][key[2]] = x
-            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=None, evaluatePriors=True, parsKeys=[key], autoKeys=None, robust=False)
+            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, \
+                                freqMask=freqMask, funcType=None, evaluatePriors=True, \
+                                parsKeys=[key], autoKeys=None, robust=False)
             lpri_arr[i] = par.evalPrior(arg=x)
 
         llkl_arr = lpst_arr - lpri_arr
@@ -3752,7 +3759,9 @@ class Datum():
         else: allowShift, shiftingRange = False, 0.0
         for i, x in enumerate(x_arr):
             evalParsH[key[0]][key[1]][key[2]] = x
-            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, funcType=None, evaluatePriors=True, parsKeys=[key], robust=False, allowShift=allowShift, shiftingRange=shiftingRange)
+            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, \
+                            funcType=None, evaluatePriors=True, parsKeys=[key], \
+                            robust=False, allowShift=allowShift, shiftingRange=shiftingRange)
             lpri_arr[i] = par.evalPrior(arg=x)
             m_ampl_arr[:, i] = np.array(meta['ampl'][0]).ravel()
             S_ampl_arr[..., i] = meta['ampl'][1]     # Add the third (singular) dimension corresponding to the number of samples
