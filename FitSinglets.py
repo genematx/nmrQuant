@@ -379,10 +379,10 @@ for x in range(0,len(fitpars)-2):
             else :
                 for val in range(len(chemLib[mod][peaktype].chshH)):
                     key = (peakname, 'chshQD', val)      # define parameters as belonging to peak1 chsh.
-                    dat.setCrntVal(key, val=chshval)
-        
+#                    dat.setCrntVal(key, val=chshval)
+                    chshval=dat.getCrntVal(key)
                     # Set up lists of parameters to optimize
-                    parsKeys = [(peakname, 'chshQD', 0), (peakname, 'alphQD', 0)]
+                    parsKeys = [(peakname, 'chshQD', val), (peakname, 'alphQD', val)]
                     # Check which frequency block to use
                     for y in range(len(ranges)):
                         lim=ranges[y].split(',')
@@ -394,20 +394,20 @@ for x in range(0,len(fitpars)-2):
                     dat.optimize(parsKeys=parsKeys, autoKeys='All', frqBlkIds=[id], nhop=3);
 
                 for val in range(len(chemLib[mod][peaktype].jcplH)):
-                    key = (peakname, 'jcplQD', val)      # define parameters as belonging to peak1 chsh.
-                    dat.setCrntVal(key, val=chshval)
+#                    key = (peakname, 'jcplQD', val)      # define parameters as belonging to peak1 chsh.
+#                    dat.setCrntVal(key, val=chshval)
         
                     # Set up lists of parameters to optimize
-                    parsKeys = [(peakname, 'chshQD', 0), (peakname, 'alphQD', 0)]
-                    # Check which frequency block to use
-                    for y in range(len(ranges)):
-                        lim=ranges[y].split(',')
-                        if chshval > float(lim[0]) and chshval < float(lim[1]):
-                            id = y + 1
-                            break
+                    parsKeys = [(peakname, 'jcplQD', val)]
+                    # Check which frequency block to use: How to do this for jcpl?
+#                    for y in range(len(ranges)):    
+#                        lim=ranges[y].split(',')
+#                        if chshval > float(lim[0]) and chshval < float(lim[1]):
+#                            id = y + 1
+#                            break
             
                     # Run the optimization algorithm with the selected autoKeys
-                    dat.optimize(parsKeys=parsKeys, autoKeys='All', frqBlkIds=[id], nhop=3);
+                    dat.optimize(parsKeys=parsKeys, autoKeys='All', frqBlkIds=[0], nhop=3);
     
 
         else:
@@ -421,17 +421,17 @@ saveFID(xT, dat.c0, dat.f0, dt, tau=0., fname=opts.outputfolder)
 saveResultsCSV(wsp, os.path.join(opts.outputfolder, 'results.csv'))
 
 
-# Plot the spectrum and the residual
-# Re-evaluate to get the values of amplitudes without recomputing them (set autoKeys=[])
-dat.evaluate(autoKeys=[], frqBlkIds=[0], returnSignals=True)
-
-import matplotlib.pyplot as plt
-from matplotlib import cm, rcParams
-fig, ax = plt.subplots(2, 1, figsize=(13, 8), sharex=True)
-dat.plot(ax_main=ax[0], ax_residual=ax[1], showRanges=None, showComponents=True)
-ax[0].set_xlim(9.0, -1.0)
-ax[0].set_ylim(-200, 4000)
-fig.show()
+## Plot the spectrum and the residual
+## Re-evaluate to get the values of amplitudes without recomputing them (set autoKeys=[])
+#dat.evaluate(autoKeys=[], frqBlkIds=[0], returnSignals=True)
+#
+#import matplotlib.pyplot as plt
+#from matplotlib import cm, rcParams
+#fig, ax = plt.subplots(2, 1, figsize=(13, 8), sharex=True)
+#dat.plot(ax_main=ax[0], ax_residual=ax[1], showRanges=None, showComponents=True)
+#ax[0].set_xlim(9.0, -1.0)
+#ax[0].set_ylim(-200, 4000)
+#fig.show()
 
 
 
