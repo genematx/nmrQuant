@@ -11,7 +11,7 @@ import sys
 import tabulate
 from math import ceil
 import pywt
-import xlsxwriter
+#import xlsxwriter
 from dataio import read_any_file
 
 # Functions for generating FIDs and optimization
@@ -22,8 +22,7 @@ import scipy.linalg
 import scipy.signal
 from collections import OrderedDict, MutableMapping
 import os, time
-import nmrglue
-from nmrglue.process.proc_autophase import _ps_acme_score, _ps_peak_minima_score
+from proc_bl import _ps_acme_score, _ps_peak_minima_score, ps
 
 ##### ------------ Main classes for the general program logic ------------ #####
 
