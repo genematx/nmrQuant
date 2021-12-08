@@ -1,6 +1,7 @@
 """
 A collection of NMR processing functions for filtering, smoothing, and
-correcting spectral baselines. Taken from nmrglue
+correcting spectral baselines. Taken from nmrglue. Mostly these are from the proc_bl.py package. 
+The functions _ps_acme_score and _ps_peak_minima_score are from nmrglue.process.proc_autophase
 """
 
 import numpy as np
@@ -394,4 +395,108 @@ def poly_fd(data):
     #    (its std < thres) or not (std > thres)
     # 8. Fit baseline only points to polynomial and substract off
     raise NotImplementedError
+
+def _ps_acme_score(ph, data):
+    """
+    Phase correction using ACME algorithm by Chen Li et al.
+    Journal of Magnetic Resonance 158 (2002) 164-168
+    Parameters
+    ----------
+    ph : tuple
+        Current p0 and p1 values
+    data : ndarray
+        Array of NMR data.
+    Returns
+    -------
+    score : float
+        Value of the objective function (phase score)
+    """
+    stepsize = 1
+
+    phc0, phc1 = ph
+
+    s0 = ps(data, p0=phc0, p1=phc1)
+    data = np.real(s0)
+
+    # Calculation of first derivatives
+    ds1 = np.abs((data[1:]-data[:-1]) / (stepsize*2))
+    p1 = ds1 / np.sum(ds1)
+
+    # Calculation of entropy
+    p1[p1 == 0] = 1
+
+    h1 = -p1 * np.log(p1)
+    h1s = np.sum(h1)
+
+    # Calculation of penalty
+    pfun = 0.0
+    as_ = data - np.abs(data)
+    sumas = np.sum(as_)
+
+    if sumas < 0:
+        pfun = pfun + np.sum((as_/2) ** 2)
+
+    p = 1000 * pfun
+
+    return (h1s + p) / data.shape[-1] / np.max(data)
+
+
+def _ps_peak_minima_score(ph, data, peak_width):
+    """
+    Phase correction using simple minima-minimisation around highest peak
+    This is a naive approach but is quick and often achieves reasonable
+    results.  The optimisation is performed by finding the highest peak in the
+    spectra (e.g. TMSP) and then attempting to reduce minima surrounding it.
+    Parameters
+    ----------
+    ph : tuple
+        Current p0 and p1 values
+    peak_width : int
+        Lookup width
+    data : ndarray
+        Array of NMR data.
+    Returns
+    -------
+    score : float
+        Value of the objective function (phase score)
+    """
+
+    phc0, phc1 = ph
+
+    s0 = ps(data, p0=phc0, p1=phc1)
+    data = np.real(s0)
+
+    i = np.argmax(data)
+    mina = np.min(data[i-peak_width:i])
+    minb = np.min(data[i:i+peak_width])
+
+    return np.abs(mina - minb)
+
+def ps(data, p0=0.0, p1=0.0, inv=False):
+    """
+    Linear phase correction
+    Parameters
+    ----------
+    data : ndarray
+        Array of NMR data.
+    p0 : float
+        Zero order phase in degrees.
+    p1 : float
+        First order phase in degrees.
+    inv : bool, optional
+        True for inverse phase correction
+    Returnscd distr
+    -------
+    ndata : ndarray
+        Phased NMR data.
+    """
+    p0 = p0 * np.pi / 180.  # convert to radians
+    p1 = p1 * np.pi / 180.
+    size = data.shape[-1]
+    apod = np.exp(1.0j * (p0 + (p1 * np.arange(size) / size))
+                  ).astype(data.dtype)
+    if inv:
+        apod = 1 / apod
+    return apod * data
+
 

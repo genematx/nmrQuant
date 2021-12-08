@@ -1,7 +1,7 @@
 import numpy as np
 import os
 import time
-from ssnake.specIO import loadFile, loadJEOLDelta
+#from ssnake.specIO import loadFile, loadJEOLDelta
 
 # Functions fro reading different file formats.
 # Each function has standardized inputs and outputs.

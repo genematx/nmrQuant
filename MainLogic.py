@@ -11,7 +11,7 @@ import sys
 import tabulate
 from math import ceil
 import pywt
-import xlsxwriter
+#import xlsxwriter
 from dataio import read_any_file
 
 # Functions for generating FIDs and optimization
@@ -22,9 +22,7 @@ import scipy.linalg
 import scipy.signal
 from collections import OrderedDict, MutableMapping
 import os, time
-import proc_bl
-#import nmrglue
-#from nmrglue.process.proc_autophase import _ps_acme_score, _ps_peak_minima_score
+from proc_bl import _ps_acme_score, _ps_peak_minima_score, ps
 
 ##### ------------ Main classes for the general program logic ------------ #####
 
@@ -1468,7 +1466,9 @@ class Series():
             parsKeysDatum = set([key[-3:] for key in parsKeys if key[0]==i or len(key)==3]) if parsKeys is not None else None    # Select only keys of non-linear parameters. This will exclude all meta-parameters' keys
             autoKeysDatum = set([key[-3:] for key in autoKeys if key[0]==i or len(key)==3]) if autoKeys is not None else None
             if (not evaluateAll) and (parsKeysDatum == set([])): continue          # Skip some datasets that we don't need to evaluate (there are no keys relating to the i-th dataset)
-            _res, meta = DDD.evaluate(evalParsH[i], None, parsKeysDatum, autoKeysDatum, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=robust, returnSignals=returnSignals)
+            _res, meta = DDD.evaluate(evalParsH[i], None, parsKeysDatum, autoKeysDatum, \
+                        frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, \
+                        robust=robust, returnSignals=returnSignals)
             result += _res
             m_ampl[..., i] = meta['ampl'][0].ravel()
             S_ampl[...,i] = meta['ampl'][1]
@@ -1505,7 +1505,9 @@ class Series():
                     elif len(k) == 2:
                         evalMetaF[k] = v
                 # Evaluate the function skipping the datasets that are not present in parsKeys
-                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, customPriors, robust=False, evaluateAll=evaluateAll)[0]
+                return -self.evaluate(evalParsH, evalMetaF, parsKeys, autoKeys, \
+                            frqBlkIds, freqMask, funcType, evaluatePriors, \
+                            customPriors, robust=False, evaluateAll=evaluateAll)[0]
 
             res = self._optimize(costFuncOpti, bounds, initVals, nhop=nhop, verbose=verbose)
 
@@ -1518,7 +1520,8 @@ class Series():
                         self.crntMetaF[k] = v
 
         # Re-evaluatethe posterior
-        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
+        result, meta = self.evaluate(None, None, parsKeys, autoKeys, frqBlkIds, \
+                        freqMask, funcType, evaluatePriors, robust=robust, returnSignals=True)
 
         if verbose:
             if len(parsKeys) > 0:
@@ -2927,7 +2930,7 @@ class Datum():
         # TODO! Make tight bounds, e.g. only xx% of the full range centered at the initial values
         bounds = tuple((self.getPrior(key).min, self.getPrior(key).max) for key in parsKeys)
         initVals = [evalParsH[k[0]][k[1]][k[2]] for k in parsKeys]
-        costFuncSmpl = lambda x : self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, None, \
+        costFuncSmpl = lambda x : self.evaluate(evalParsH, {k:v for k,v in zip(parsKeys, x)}, \
                                                 parsKeys, autoKeys, frqBlkIds, freqMask, \
                                                 funcType, evaluatePriors, robust=robust)
 
@@ -3388,7 +3391,9 @@ class Datum():
         evalParsH = copy.deepcopy(self.crntParsH)      # Make a copy of the parameter dictionary that will be used for evaluation
         for i, x in enumerate(x_arr):
             evalParsH[key[0]][key[1]][key[2]] = x
-            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, freqMask=freqMask, funcType=None, evaluatePriors=True, parsKeys=[key], autoKeys=None, robust=False)
+            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, \
+                                freqMask=freqMask, funcType=None, evaluatePriors=True, \
+                                parsKeys=[key], autoKeys=None, robust=False)
             lpri_arr[i] = par.evalPrior(arg=x)
 
         llkl_arr = lpst_arr - lpri_arr
@@ -3753,7 +3758,9 @@ class Datum():
         else: allowShift, shiftingRange = False, 0.0
         for i, x in enumerate(x_arr):
             evalParsH[key[0]][key[1]][key[2]] = x
-            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, funcType=None, evaluatePriors=True, parsKeys=[key], robust=False, allowShift=allowShift, shiftingRange=shiftingRange)
+            lpst_arr[i], meta = self.evaluate(evalParsH=evalParsH, frqBlkIds=frqBlkIds, \
+                            funcType=None, evaluatePriors=True, parsKeys=[key], \
+                            robust=False, allowShift=allowShift, shiftingRange=shiftingRange)
             lpri_arr[i] = par.evalPrior(arg=x)
             m_ampl_arr[:, i] = np.array(meta['ampl'][0]).ravel()
             S_ampl_arr[..., i] = meta['ampl'][1]     # Add the third (singular) dimension corresponding to the number of samples
@@ -4397,7 +4404,7 @@ def ph_cost(yF, xF, ph0=0.0, ph1=0.0, f=None, mw=2*512, cfun='LS'):
     rFdn = wden(yFph.real - xF.real, tptr='sqtwolog', scal='mln', wsize=25)         # Denoised residual
 
     # Remove the baseline with median filter
-    res = proc_bl.med(rFdn.ravel(), mw).reshape(-1,1)               # Deoised residual with baseline removed
+    res = nmrglue.process.proc_bl.med(rFdn.ravel(), mw).reshape(-1,1)               # Deoised residual with baseline removed
     bln = (rFdn - res).reshape(-1,1)
 
     # Compute the cost function
@@ -4413,115 +4420,10 @@ def baseline(yF, wd=20):
     """Estimate the baseline with the standard baseline correction algorithm."""
 
     # Apply standard baseline correction to the spectrum
-    yFbl = proc_bl.baseline_corrector(yF.real.ravel(), wd=wd).reshape(-1,1)
+    yFbl = nmrglue.process.proc_bl.baseline_corrector(yF.real.ravel(), wd=wd).reshape(-1,1)
     bF = (yF.reshape(-1,1) - yFbl).real
 
     return bF
-
-def _ps_acme_score(ph, data):
-    """
-    Phase correction using ACME algorithm by Chen Li et al.
-    Journal of Magnetic Resonance 158 (2002) 164-168
-    Parameters
-    ----------
-    ph : tuple
-        Current p0 and p1 values
-    data : ndarray
-        Array of NMR data.
-    Returns
-    -------
-    score : float
-        Value of the objective function (phase score)
-    """
-    stepsize = 1
-
-    phc0, phc1 = ph
-
-    s0 = ps(data, p0=phc0, p1=phc1)
-    data = np.real(s0)
-
-    # Calculation of first derivatives
-    ds1 = np.abs((data[1:]-data[:-1]) / (stepsize*2))
-    p1 = ds1 / np.sum(ds1)
-
-    # Calculation of entropy
-    p1[p1 == 0] = 1
-
-    h1 = -p1 * np.log(p1)
-    h1s = np.sum(h1)
-
-    # Calculation of penalty
-    pfun = 0.0
-    as_ = data - np.abs(data)
-    sumas = np.sum(as_)
-
-    if sumas < 0:
-        pfun = pfun + np.sum((as_/2) ** 2)
-
-    p = 1000 * pfun
-
-    return (h1s + p) / data.shape[-1] / np.max(data)
-
-
-def _ps_peak_minima_score(ph, data, peak_width):
-    """
-    Phase correction using simple minima-minimisation around highest peak
-    This is a naive approach but is quick and often achieves reasonable
-    results.  The optimisation is performed by finding the highest peak in the
-    spectra (e.g. TMSP) and then attempting to reduce minima surrounding it.
-    Parameters
-    ----------
-    ph : tuple
-        Current p0 and p1 values
-    peak_width : int
-        Lookup width
-    data : ndarray
-        Array of NMR data.
-    Returns
-    -------
-    score : float
-        Value of the objective function (phase score)
-    """
-
-    phc0, phc1 = ph
-
-    s0 = ps(data, p0=phc0, p1=phc1)
-    data = np.real(s0)
-
-    i = np.argmax(data)
-    mina = np.min(data[i-peak_width:i])
-    minb = np.min(data[i:i+peak_width])
-
-    return np.abs(mina - minb)
-
-def ps(data, p0=0.0, p1=0.0, inv=False):
-    """
-    Linear phase correction
-    Parameters
-    ----------
-    data : ndarray
-        Array of NMR data.
-    p0 : float
-        Zero order phase in degrees.
-    p1 : float
-        First order phase in degrees.
-    inv : bool, optional
-        True for inverse phase correction
-    Returnscd distr
-    -------
-    ndata : ndarray
-        Phased NMR data.
-    """
-    p0 = p0 * np.pi / 180.  # convert to radians
-    p1 = p1 * np.pi / 180.
-    size = data.shape[-1]
-    apod = np.exp(1.0j * (p0 + (p1 * np.arange(size) / size))
-                  ).astype(data.dtype)
-    if inv:
-        apod = 1 / apod
-    return apod * data
-
-
 
 # ------------------------------ License files ---------------------------------
 

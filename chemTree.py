@@ -15,7 +15,7 @@ import copy
 from operator import itemgetter
 from molparser.convertmol import parse_sdf_file
 from openpyxl import load_workbook
-import xlsxwriter
+#import xlsxwriter
 
 # Ordered set class to store children of a node
 import collections
@@ -23,8 +23,17 @@ import collections
 import warnings
 warnings.filterwarnings("ignore")
 
-# Find the main directory where the nmrQuant software is installed
-MAINDIR = os.path.dirname(os.path.abspath(__file__))
+def get_correct_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+## Find the main directory where the nmrQuant software is installed
+#MAINDIR = os.path.dirname(os.path.abspath(__file__))
+#CALLED_PATH = os.getcwd()                                          # Where it has been executed from
 
 #### Definitions of named tuples ####
 
@@ -2900,16 +2909,18 @@ def writeChemLib_XLSX(chemLib, fname='chemDB_saved.xlsx', verbose=False):
 
 def loadChemLibrary(chemLib=None, dirpath=None):
     """Loads the chemical library (a dictionary of chemDB dictionaries)."""
-    #chemdb_path = os.path.join(MAINDIR, 'chemdb')       # Path to chemdb folder
+#    chemdb_path = os.path.join(MAINDIR, 'chemdb')       # Path to chemdb folder
 #    chemdb_path = 'chemdb'       # Path to chemdb folder
-#
-#    if dirpath is None:
-#        dirpath = chemdb_path
+    
+    chemdb_path = get_correct_path('chemdb')
+    
+    if dirpath is None:
+        dirpath = chemdb_path
 
 
-    # Define a DB for common chemicals
-    # chemLib is a dictionary of dictionaries; the first level used for grouping
-    # and the second level contains chemSpec entries
+#     Define a DB for common chemicals
+#     chemLib is a dictionary of dictionaries; the first level used for grouping
+#     and the second level contains chemSpec entries
     if chemLib is None:
         chemLib = {'Built-in models' :
                     {'Water' : chemSpec(name='Water',
@@ -2929,7 +2940,7 @@ def loadChemLibrary(chemLib=None, dirpath=None):
                                        multH=[3],
                                        multC=[3]),
                     'Ethanol' : chemSpec(name='Ethanol',
-                                       chshH=[parsSpec(min=0.5, max=1.5, label='H1', dval = 1.2), parsSpec(min=3.0, max=4.0, label='H2', dval = 3.65)],
+                                       chshH=[parsSpec(min=0.5, max=1.5, label='H1'), parsSpec(min=3.0, max=4.0, label='H2')],
                                        chshC=[parsSpec(min=14.9, max=15.1, label='C1'), parsSpec(min=57.9, max=58.1, label='C2')],
                                        jcplH=[parsSpec(min=6.0, max=8.0, label='H1-H2',dval=7.0402)],
                                        meqSpins=[spinVert(0, 3), spinVert(1, 2)],
@@ -2947,47 +2958,47 @@ def loadChemLibrary(chemLib=None, dirpath=None):
                      }
                    }
 
-#        # Load the databases from XLSX file
-#        chemLibXLSX_path = os.path.join(chemdb_path, 'chemLib.xlsx')
-#        if os.path.exists(chemLibXLSX_path):
-#            wb = load_workbook(filename=chemLibXLSX_path)
-#            for ws_name in wb.sheetnames:
-#                if not ws_name.startswith('_'):
-#                    chemDB = readChemDB_XLSX(wb[ws_name])
-#                    chemLib[ws_name] = chemDB
-#
-#    # Try loading all JSON, .cdb, .mol, and .sdf files in the working directory
-#    for entry in os.listdir(dirpath):
-#        fullpath = os.path.join(dirpath, entry)
-#
-#        # Default database name used to group the items (relative path to the containing folder)
-#        db_name = os.path.relpath(os.path.dirname(fullpath), chemdb_path)
-#
-#        if os.path.isfile(fullpath):
-#            fname, ext = os.path.splitext(entry)
-#            _new_dict = {}         # Dictionary of chemSpec entries
-#            if ext == '.xlsx':
-#                # TODO: Load all excel files
-#                continue
-#            elif ext in ['.json', '.cdb']:
-#                if db_name == '.':
-#                    db_name = fname
-#                _new_dict.update(readChemDB_JSON(fullpath))
-#            elif ext in ['.mol', '.sdf']:
-#                try:
-#                    _new_dict.update(readChemDB_SDF(fullpath))
-#                except:
-#                    print('Failed to load {}.'.format(fullpath))
-#
-#            # Add to the library
-#            if db_name in chemLib.keys():
-#                chemLib[db_name].update(_new_dict)
-#            else:
-#                chemLib[db_name] = _new_dict
-#
-#        elif os.path.isdir(fullpath):
-#            # Call the function recursively
-#            chemLib = loadChemLibrary(chemLib, fullpath)
+        # Load the databases from XLSX file
+        chemLibXLSX_path = os.path.join(chemdb_path, 'chemLib.xlsx')
+        if os.path.exists(chemLibXLSX_path):
+            wb = load_workbook(filename=chemLibXLSX_path)
+            for ws_name in wb.sheetnames:
+                if not ws_name.startswith('_'):
+                    chemDB = readChemDB_XLSX(wb[ws_name])
+                    chemLib[ws_name] = chemDB
+
+    # Try loading all JSON, .cdb, .mol, and .sdf files in the working directory
+    for entry in os.listdir(dirpath):
+        fullpath = os.path.join(dirpath, entry)
+
+        # Default database name used to group the items (relative path to the containing folder)
+        db_name = os.path.relpath(os.path.dirname(fullpath), chemdb_path)
+
+        if os.path.isfile(fullpath):
+            fname, ext = os.path.splitext(entry)
+            _new_dict = {}         # Dictionary of chemSpec entries
+            if ext == '.xlsx':
+                # TODO: Load all excel files
+                continue
+            elif ext in ['.json', '.cdb']:
+                if db_name == '.':
+                    db_name = fname
+                _new_dict.update(readChemDB_JSON(fullpath))
+            elif ext in ['.mol', '.sdf']:
+                try:
+                    _new_dict.update(readChemDB_SDF(fullpath))
+                except:
+                    print('Failed to load {}.'.format(fullpath))
+
+            # Add to the library
+            if db_name in chemLib.keys():
+                chemLib[db_name].update(_new_dict)
+            else:
+                chemLib[db_name] = _new_dict
+
+        elif os.path.isdir(fullpath):
+            # Call the function recursively
+            chemLib = loadChemLibrary(chemLib, fullpath)
 
     return chemLib
 
