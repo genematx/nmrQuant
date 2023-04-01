@@ -1,6 +1,7 @@
 """
 A collection of NMR processing functions for filtering, smoothing, and
-correcting spectral baselines. Taken from nmrglue. Mostly these are from the proc_bl.py package. 
+correcting spectral baselines. Taken from nmrglue. Mostly these are from proc_bl.py  of
+the nmrglue package (https://github.com/jjhelmus/nmrglue). 
 The functions _ps_acme_score and _ps_peak_minima_score are from nmrglue.process.proc_autophase
 """
 

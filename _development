@@ -23,7 +23,7 @@ pip install jupyter_contrib_nbextensions
 
 To set up the software to be run from the code:
 
-1. Install Anaconda, https://www.anaconda.com/. It makes managing Python packages and the associate software tools so much easier.
+1. Install Anaconda, https://www.anaconda.com/. It makes managing Python packages and the associate software tools easier.
 
 2. Import the python environment from a .yml file that lists all packages on my machine. For this, in the Anaconda navigator go to Environments -> Import and select the desired file (e.g. py35.yml -- the newest version is available in the repository on GitHub. You may need to change the prefix parameter in the .yml file to reflect the path on your system, but sometimes it works even without doing that). This will download (almost) all necessary packages and install them on your system. When you will be running the code, please make sure that the correct Environment is selected on the Home page in Anaconda Navigator.
 

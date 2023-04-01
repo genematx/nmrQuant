@@ -1,25 +1,24 @@
 import sys
 import numpy as np
 import dill
-from MainLogic import *
-from MainLogic import Step, Series, Datum, Workspace
+from workspace import *
+from workspace import Step, Series, Datum, Workspace
 from chemTree import viewNode
 from dataio import *
 import config
 
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QThread, QEvent, QItemSelectionModel
-from PyQt5.QtGui import QBrush, QIcon, QPen
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QAction, QActionGroup, QApplication, QCheckBox,\
     QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,\
-    QItemDelegate, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
-    QLineEdit, QListWidget, QMenu, QMessageBox, QMainWindow, \
+    QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,\
+    QLineEdit, QMenu, QMessageBox, QMainWindow, \
     QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy, \
-    QSlider, QSpinBox, QSplitter, QStatusBar, QStyle, QTableView, QTabWidget,\
+    QSlider, QSpinBox, QSplitter, QStatusBar, QTableView, QTabWidget,\
     QToolButton, QTreeView, QToolBar, QWidget
 import pyqtgraph as pg
-import matplotlib.pyplot as plt
-from matplotlib import rc, rcParams
+from matplotlib import rcParams
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.backend_bases import cursors
@@ -61,6 +60,99 @@ cursord = {
 global settings
 settings = dict()       # A dictionary of settings for processing
 steps = []
+
+def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
+    """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
+    P = viewNode(T.name, nodeType='chemNodeDB' if type(T) in [chemNodeDB, chemNodeQM] else 'chemNode')
+    #P.addChild(viewNode(name = tuple([T.name] + ['intn'] + [None]), nodeType='intn', alias='intn' ))
+    if type(T) is chemNodeQM:
+        P.nodeType = 'chemNodeQM'
+        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+
+        if T.childCount() > 1:  # Several chemical shifts; add global parameters
+            P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+            P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+
+        # Add nodes that can become parents for parameters (combinations of spin systems if any and the QM node itself)
+        prntNodes = [None] * len(T.spsyComb) + [P]
+        parsLists = [[] for _ in range(len(T.spsyComb)+1)]
+        for i_comb, comb in enumerate(T.spsyComb):
+            prntNodes[i_comb] = viewNode(name=(T.name+'-COMB'+str(i_comb+1)), nodeType='chemNode', alias=comb.name)
+            prntNodes[i_comb].addChild(viewNode(name=(T.name+'-COMB'+str(i_comb+1), 'ampl', 0), nodeType='param', alias='intn' ))
+            P.addChild(prntNodes[i_comb])
+
+        # Loop over spin systems and collect all parameters that affect it
+        for i_spsy in range(len(T.spinTopo)):
+            i_comb = -1      # Index to which combination belongs this spin system (the first occurence). Default - the chemNodeQM itself
+            for j, comb in enumerate(T.spsyComb):
+                if i_spsy in comb.indxSpsy: i_comb = j
+
+            # Add new parameters to the list for each combination
+            parsLists[i_comb].extend( [(T.name, 'chshQD', i_parm, T.chshQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
+            parsLists[i_comb].extend( [(T.name, 'alphQD', i_parm, T.alphQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
+            parsLists[i_comb].extend( [(T.name, 'jcplQD', i_parm, T.jcplQD[i_parm].label) for i_parm in T._indxJcpl_by_spsy[i_spsy]] )
+
+        # Add intensity/amplitude parameters and add the nodes to the tree
+        for prnt, parsList_for_prnt in zip(prntNodes, parsLists):
+            parsList_for_prnt.extend( [(chld.name, 'ampl', 0, chld.alias) for chld in T[prnt.name].children() if isinstance(chld, chemNodeQT)] )
+            for pars in sorted(parsList_for_prnt, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
+                try:
+                    prnt.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))
+                except RuntimeError: pass
+
+    elif type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
+        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+
+        if T.childCount() > 1:  # Several chemical shifts; add global parameters
+            P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+            P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+
+        for par, val in T.default_pars().items():
+            for i in range(len(val)):
+                if not isinstance(getattr(T, par)[i].label, str):
+                    old = getattr(T, par)
+                    old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
+                    setattr(T, par, old)
+
+        newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in [T] for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
+        newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
+        for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
+            P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
+    elif type(T) is not chemNodeDB:
+        # General chemNode (e.g. a group of chemicals)
+        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+        P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+        P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+        for node in T.children():
+            P.addChild(getDisplayTree(node))
+    elif T.childCount() == 1 and T.child(0).childCount() == 1:
+        # A singlet (one QD node with one T node as a child)
+        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))      #
+        P.addChild(viewNode(name = tuple([T.child(0).child(0).name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))      # Intensity corresponding to the terminal node
+        P.addChild(viewNode(name = tuple([T.child(0).name] + ['chshQD'] + [0]), nodeType='param' ))
+        P.addChild(viewNode(name = tuple([T.child(0).name] + ['alphQD'] + [0]), nodeType='param' ))
+    else:         # chemNodeDB has several QD systems
+        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+        P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+        P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+
+        # Fix faulty labels of parameters and alises of the terminal nodes
+        for node in T.children():
+            for par, val in node.default_pars().items():
+                for i in range(len(val)):
+                    if not isinstance(getattr(node, par)[i].label, str):
+                        old = getattr(node, par)
+                        old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
+                        setattr(node, par, old)
+                    elif par == 'chshQD' and node.child(i).alias == '':
+                        node.child(i).alias = getattr(node, par)[i].label
+
+        newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in T.children() for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
+        newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
+        for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):     # Loop over the list of tuples
+            P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
+    return P
+
 
 class EmittingStream(QObject):
     """For printing text in a textEdit."""
@@ -1247,16 +1339,7 @@ class NavigationTreeModel(QtCore.QAbstractItemModel):
 
         elif role == Qt.DecorationRole:
             if isinstance(node, Datum):
-                displayIcon = QIcon('icons\icon_gof_none.png')
-                # gof = node.quality_of_fit()
-                # if gof is None:
-                #     displayIcon = QIcon('icons\icon_gof_none.png')
-                # elif gof > 0.9:
-                #     displayIcon = QIcon("icons\icon_gof_good.png")
-                # elif gof < 0.4:
-                #     displayIcon = QIcon('icons\icon_gof_bad.png')
-                # else:
-                #     displayIcon = QIcon('icons\icon_gof_okay.png')
+                displayIcon = QIcon('..\..\icons\icon_gof_none.png')
                 return displayIcon
 
         return None
@@ -1387,19 +1470,19 @@ class NavigationTreeView(QTreeView):
         index = self.indexAt(pos)
         selected = [selind.internalPointer() for selind in self.selectedIndexes() if selind.isValid()]     # List of selected Datums or Series
 
-        actnAddSeries = QAction(QIcon('icons\icon_newSeries.png'), 'Add new series', self)
+        actnAddSeries = QAction(QIcon('..\..\icons\icon_newSeries.png'), 'Add new series', self)
         actnAddSeries.setStatusTip('Add new series')
         actnAddSeries.triggered.connect(self.model().addSeries)
-        actnImportData = QAction(QIcon('icons\icon_addFile.png'), 'Import files', self)
+        actnImportData = QAction(QIcon('..\..\icons\icon_addFile.png'), 'Import files', self)
         actnImportData.setStatusTip('Import new data and add them to the current series')
         actnImportData.triggered.connect(lambda : self.requestImportData.emit())  # self.onImportData(crnt_series=index.internalPointer() if index.isValid() else None))
-        actnPasteCrnt = QAction(QIcon('icons\icon_pasteCrnt.png'), 'Paste as current', self)
+        actnPasteCrnt = QAction(QIcon('..\..\icons\icon_pasteCrnt.png'), 'Paste as current', self)
         actnPasteCrnt.setStatusTip('Paste as current values')
         actnPasteCrnt.triggered.connect(lambda : self.requestPasteCrnt.emit(selected))     # Emit a list of selected datums to paste the currently copied parameters to them
-        actnPasteDflt = QAction(QIcon('icons\icon_pasteDflt.png'), 'Paste as default', self)
+        actnPasteDflt = QAction(QIcon('..\..\icons\icon_pasteDflt.png'), 'Paste as default', self)
         actnPasteDflt.setStatusTip('Paste as default values')
         actnPasteDflt.triggered.connect(lambda : self.requestPasteDflt.emit(selected))     # Emit a list of selected datums to paste the currently copied parameters to them
-        actnfitSelected = QAction(QIcon('icons\icon_fitSelected.png'), 'Fit selected', self)
+        actnfitSelected = QAction(QIcon('..\..\icons\icon_fitSelected.png'), 'Fit selected', self)
         actnfitSelected.setStatusTip('Fit selected datasets')
         actnfitSelected.triggered.connect(lambda : self.requestFitSelected.emit(selected))     # Emit a list of selected datums to fit
 
@@ -1409,16 +1492,16 @@ class NavigationTreeView(QTreeView):
         popMenu.addAction(actnImportData)
 
         if index.isValid():         # If the click was on an item
-            actnRemoveData = QAction(QIcon('icons\icon_removeFile.png'), 'Remove files', self)
+            actnRemoveData = QAction(QIcon('..\..\icons\icon_removeFile.png'), 'Remove files', self)
             actnRemoveData.setStatusTip('Remove file from the workspace')
             actnRemoveData.triggered.connect(lambda : self.model().remItems(items=[selind.internalPointer() for selind in self.selectedIndexes() if selind.isValid()]))
             popMenu.addAction(actnRemoveData)
 
-            # actnCopySettings = QAction(QIcon('icons\icon_blank.png'), 'Copy settings', self)
+            # actnCopySettings = QAction(QIcon('..\..\icons\icon_blank.png'), 'Copy settings', self)
             # actnCopySettings.setStatusTip('Copies the series settings (frequency ranges, steps, and parameter priors)')
             # actnCopySettings.triggered.connect(lambda : self.model().copySettings(index.internalPointer()))
             # popMenu.addAction(actnCopySettings)
-            # actnPasteSettings = QAction(QIcon('icons\icon_blank.png'), 'Apply settings', self)
+            # actnPasteSettings = QAction(QIcon('..\..\icons\icon_blank.png'), 'Apply settings', self)
             # actnPasteSettings.setStatusTip('Applies the copied settings to the current Series')
             # actnPasteSettings.triggered.connect(lambda : self.model().pasteSettings(items=[selind.internalPointer() for selind in self.selectedIndexes() if selind.isValid()]))
             # popMenu.addAction(actnPasteSettings)
@@ -1435,98 +1518,6 @@ class NavigationTreeView(QTreeView):
         # print('Selecting ', key)
         index = self.model().indexByKey(key)
         self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectCurrent | QItemSelectionModel.Rows)
-
-def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
-    """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
-    P = viewNode(T.name, nodeType='chemNodeDB' if type(T) in [chemNodeDB, chemNodeQM] else 'chemNode')
-    #P.addChild(viewNode(name = tuple([T.name] + ['intn'] + [None]), nodeType='intn', alias='intn' ))
-    if type(T) is chemNodeQM:
-        P.nodeType = 'chemNodeQM'
-        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
-
-        if T.childCount() > 1:  # Several chemical shifts; add global parameters
-            P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
-            P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
-
-        # Add nodes that can become parents for parameters (combinations of spin systems if any and the QM node itself)
-        prntNodes = [None] * len(T.spsyComb) + [P]
-        parsLists = [[] for _ in range(len(T.spsyComb)+1)]
-        for i_comb, comb in enumerate(T.spsyComb):
-            prntNodes[i_comb] = viewNode(name=(T.name+'-COMB'+str(i_comb+1)), nodeType='chemNode', alias=comb.name)
-            prntNodes[i_comb].addChild(viewNode(name=(T.name+'-COMB'+str(i_comb+1), 'ampl', 0), nodeType='param', alias='intn' ))
-            P.addChild(prntNodes[i_comb])
-
-        # Loop over spin systems and collect all parameters that affect it
-        for i_spsy in range(len(T.spinTopo)):
-            i_comb = -1      # Index to which combination belongs this spin system (the first occurence). Default - the chemNodeQM itself
-            for j, comb in enumerate(T.spsyComb):
-                if i_spsy in comb.indxSpsy: i_comb = j
-
-            # Add new parameters to the list for each combination
-            parsLists[i_comb].extend( [(T.name, 'chshQD', i_parm, T.chshQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
-            parsLists[i_comb].extend( [(T.name, 'alphQD', i_parm, T.alphQD[i_parm].label) for i_parm in T._indxChsh_by_spsy[i_spsy]] )
-            parsLists[i_comb].extend( [(T.name, 'jcplQD', i_parm, T.jcplQD[i_parm].label) for i_parm in T._indxJcpl_by_spsy[i_spsy]] )
-
-        # Add intensity/amplitude parameters and add the nodes to the tree
-        for prnt, parsList_for_prnt in zip(prntNodes, parsLists):
-            parsList_for_prnt.extend( [(chld.name, 'ampl', 0, chld.alias) for chld in T[prnt.name].children() if isinstance(chld, chemNodeQT)] )
-            for pars in sorted(parsList_for_prnt, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
-                try:
-                    prnt.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))
-                except RuntimeError: pass
-
-    elif type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
-        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
-
-        if T.childCount() > 1:  # Several chemical shifts; add global parameters
-            P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
-            P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
-
-        for par, val in T.default_pars().items():
-            for i in range(len(val)):
-                if not isinstance(getattr(T, par)[i].label, str):
-                    old = getattr(T, par)
-                    old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
-                    setattr(T, par, old)
-
-        newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in [T] for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
-        newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
-        for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
-            P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
-    elif type(T) is not chemNodeDB:
-        # General chemNode (e.g. a group of chemicals)
-        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
-        P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
-        P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
-        for node in T.children():
-            P.addChild(getDisplayTree(node))
-    elif T.childCount() == 1 and T.child(0).childCount() == 1:
-        # A singlet (one QD node with one T node as a child)
-        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))      #
-        P.addChild(viewNode(name = tuple([T.child(0).child(0).name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))      # Intensity corresponding to the terminal node
-        P.addChild(viewNode(name = tuple([T.child(0).name] + ['chshQD'] + [0]), nodeType='param' ))
-        P.addChild(viewNode(name = tuple([T.child(0).name] + ['alphQD'] + [0]), nodeType='param' ))
-    else:         # chemNodeDB has several QD systems
-        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
-        P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
-        P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
-
-        # Fix faulty labels of parameters and alises of the terminal nodes
-        for node in T.children():
-            for par, val in node.default_pars().items():
-                for i in range(len(val)):
-                    if not isinstance(getattr(node, par)[i].label, str):
-                        old = getattr(node, par)
-                        old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
-                        setattr(node, par, old)
-                    elif par == 'chshQD' and node.child(i).alias == '':
-                        node.child(i).alias = getattr(node, par)[i].label
-
-        newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in T.children() for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
-        newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
-        for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):     # Loop over the list of tuples
-            P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
-    return P
 
 class ChemTreeModel(QtCore.QAbstractItemModel):
     """A treeView representation class"""
@@ -1803,21 +1794,21 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             if clmn == 0:
                 if node.nodeType == 'param':
                     if "chshQD" in node.name[1]:
-                        displayIcon = QIcon("icons\icon_deltaQD.png")
+                        displayIcon = QIcon("..\..\icons\icon_deltaQD.png")
                     elif node.name[1] == 'ampl':
-                        displayIcon = QIcon("icons\icon_ampl.png")
+                        displayIcon = QIcon("..\..\icons\icon_ampl.png")
                     elif node.name[1][:6] == "alphQD":
-                        displayIcon = QIcon("icons\icon_alphaQD.png")
+                        displayIcon = QIcon("..\..\icons\icon_alphaQD.png")
                     elif node.name[1][:6] == "jcplQD":
-                        displayIcon = QIcon("icons\icon_jcplQD.png")
+                        displayIcon = QIcon("..\..\icons\icon_jcplQD.png")
                     elif node.name[1][:4] == "alph":
-                        displayIcon = QIcon("icons\icon_alpha.png")
+                        displayIcon = QIcon("..\..\icons\icon_alpha.png")
                     elif node.name[1][:4] == "chsh":
-                        displayIcon = QIcon("icons\icon_delta.png")
+                        displayIcon = QIcon("..\..\icons\icon_delta.png")
                 elif node.nodeType == 'lshape':
-                    displayIcon = QIcon('icons\icon_lshape.png')
+                    displayIcon = QIcon('..\..\icons\icon_lshape.png')
                 else:
-                    displayIcon = QIcon("icons\icon_chemMixture.png")
+                    displayIcon = QIcon("..\..\icons\icon_chemMixture.png")
             return displayIcon
 
         # Display the active step in a different color
@@ -2151,7 +2142,7 @@ class ChemTreeView(QTreeView):
             self.cmboxPrior.currentIndexChanged.connect(self.setDistrForm)
             self.labelPriorP1, self.labelPriorP2 = QLabel(), QLabel()
             self.editPriorP1, self.editPriorP2 = MyDoubleEdit(param.p1), MyDoubleEdit(param.p2)
-            actnDfltFromCrnt = QAction(QIcon('icons\icon_dfltFromCrnt.png'), 'Update from current', self)
+            actnDfltFromCrnt = QAction(QIcon('..\..\icons\icon_dfltFromCrnt.png'), 'Update from current', self)
             actnDfltFromCrnt.setStatusTip('Update from current')
             self.bttnDfltFromCrnt = QToolButton()
             self.bttnDfltFromCrnt.setDefaultAction(actnDfltFromCrnt)
@@ -2266,12 +2257,12 @@ class ChemTreeView(QTreeView):
         self.setHeaderHidden(False)
 
         # Add actions and setup the context menu
-        self.toggleDfltsAction = QAction(QIcon('icons\icon_blank.png'), 'Show default values', self)
+        self.toggleDfltsAction = QAction(QIcon('..\..\icons\icon_blank.png'), 'Show default values', self)
         self.toggleDfltsAction.setStatusTip('Show default values')
         self.toggleDfltsAction.setCheckable(True)
         self.toggleDfltsAction.setChecked(False)        # By default, default values are not shown
         self.toggleDfltsAction.toggled.connect(self.toggleDflts)
-        self.toggleRangesAction = QAction(QIcon('icons\icon_blank.png'), 'Show parameter ranges', self)
+        self.toggleRangesAction = QAction(QIcon('..\..\icons\icon_blank.png'), 'Show parameter ranges', self)
         self.toggleRangesAction.setStatusTip('Show parameter ranges')
         self.toggleRangesAction.setCheckable(True)
         self.toggleRangesAction.setChecked(False)        # By default, ranges are not shown
@@ -2381,35 +2372,35 @@ class ChemTreeView(QTreeView):
                 key = node.name
 
                 # Add/remove node actions
-                actnToggleReported = QAction(QIcon('icons\icon_blank.png'), 'Reported', self)
+                actnToggleReported = QAction(QIcon('..\..\icons\icon_blank.png'), 'Reported', self)
                 actnToggleReported.setStatusTip('Change the reported state')
                 actnToggleReported.setCheckable(True)
                 actnToggleReported.setChecked( self.model().datum.T[key].isReported() )
                 actnToggleReported.toggled.connect(lambda : self.toggleReported(key) )
-                actnToggleExcluded = QAction(QIcon('icons\icon_blank.png'), 'Exclude from fit', self)
+                actnToggleExcluded = QAction(QIcon('..\..\icons\icon_blank.png'), 'Exclude from fit', self)
                 actnToggleExcluded.setStatusTip('Excludes the signature model from the the fit')
                 actnToggleExcluded.setCheckable(True)
                 actnToggleExcluded.setChecked( self.model().datum.isXclRootName(key) )
                 actnToggleExcluded.toggled.connect(lambda : self.toggleExcluded(key) )
-                actnNewGroup = QAction(QIcon('icons\icon_blank.png'), 'Add new group', self)
+                actnNewGroup = QAction(QIcon('..\..\icons\icon_blank.png'), 'Add new group', self)
                 actnNewGroup.setStatusTip('Add new group')
                 actnNewGroup.triggered.connect(lambda : self.model().addChemical(index, source='new'))
-                actnAddChemical = QAction(QIcon('icons\icon_addChemical.png'), 'Add new chemical', self)
+                actnAddChemical = QAction(QIcon('..\..\icons\icon_addChemical.png'), 'Add new chemical', self)
                 actnAddChemical.setStatusTip('Add new chemical')
                 actnAddChemical.triggered.connect(lambda : self.model().addChemical(index, source='DB'))
-                actnAddSpsy= QAction(QIcon('icons\icon_spin.png'), 'Add spin system', self)
+                actnAddSpsy= QAction(QIcon('..\..\icons\icon_spin.png'), 'Add spin system', self)
                 actnAddSpsy.setStatusTip('Add spin system')
                 actnAddSpsy.triggered.connect(lambda : self.model().addChemical(index, source='spsy'))
-                actnAddSubtree= QAction(QIcon('icons\icon_blank.png'), 'Insert subtree', self)
+                actnAddSubtree= QAction(QIcon('..\..\icons\icon_blank.png'), 'Insert subtree', self)
                 actnAddSubtree.setStatusTip('Insert subtree')
                 actnAddSubtree.triggered.connect(lambda : self.model().addChemical(index, source='file'))
-                actnRemoveChemical = QAction(QIcon('icons\icon_blank.png'), 'Remove the node', self)
+                actnRemoveChemical = QAction(QIcon('..\..\icons\icon_blank.png'), 'Remove the node', self)
                 actnRemoveChemical.setStatusTip('Remove the node')
                 actnRemoveChemical.triggered.connect(lambda : self.model().remChemical(index))
-                actnSaveSubtree = QAction(QIcon('icons\icon_saveTree.png'), 'Save subtree', self)
+                actnSaveSubtree = QAction(QIcon('..\..\icons\icon_saveTree.png'), 'Save subtree', self)
                 actnSaveSubtree.setStatusTip('Save subtree')
                 actnSaveSubtree.triggered.connect(lambda : self.saveSubtree(index))
-                actnShowRows = QAction(QIcon('icons\icon_blank.png'), 'Show hidden rows', self)
+                actnShowRows = QAction(QIcon('..\..\icons\icon_blank.png'), 'Show hidden rows', self)
                 actnShowRows.setStatusTip('Show hidden rows')
                 actnShowRows.triggered.connect(lambda : self.showRows(key))
 
@@ -2427,10 +2418,10 @@ class ChemTreeView(QTreeView):
                 popMenu.addAction(actnShowRows)
 
             elif node.nodeType == 'lshape':
-                actnIncreaseOrder = QAction(QIcon('icons\icon_increaseOrder.png'), 'Increase order', self)
+                actnIncreaseOrder = QAction(QIcon('..\..\icons\icon_increaseOrder.png'), 'Increase order', self)
                 actnIncreaseOrder.setStatusTip('Increase the order of lineshape correction polynomial.')
                 actnIncreaseOrder.triggered.connect(self.model().increaseOrder)
-                actnDecreaseOrder = QAction(QIcon('icons\icon_decreaseOrder.png'), 'Decrease order', self)
+                actnDecreaseOrder = QAction(QIcon('..\..\icons\icon_decreaseOrder.png'), 'Decrease order', self)
                 actnDecreaseOrder.setStatusTip('Decrease the order of lineshape correction polynomial.')
                 actnDecreaseOrder.triggered.connect(self.model().decreaseOrder)
 
@@ -2442,45 +2433,45 @@ class ChemTreeView(QTreeView):
                 # Single selected row
                 if len(slctdKeys) == 1:
                     key = node.name
-                    cfunAction = QAction(QIcon('icons\icon_blank.png'), 'Display cost function', self)
+                    cfunAction = QAction(QIcon('..\..\icons\icon_blank.png'), 'Display cost function', self)
                     cfunAction.setStatusTip('Display cost function')
                     cfunAction.triggered.connect(lambda : self.showCfunPopup(key))
                     popMenu.addAction(cfunAction)
 
                     if key[1] in ['chsh', 'chshQD']:
-                        actnScaleToRef = QAction(QIcon('icons\icon_none.png'), 'Set reference', self)
+                        actnScaleToRef = QAction(QIcon('..\..\icons\icon_none.png'), 'Set reference', self)
                         actnScaleToRef.setStatusTip('Reset all chemical shifts in the model to the reference')
                         actnScaleToRef.triggered.connect( lambda _ : self.model().datum.shiftToRef(refKey=key) )
                         popMenu.addAction(actnScaleToRef)
                     popMenu.addSeparator()
 
                 # Define parameter setting actions
-                actnPromotePriors = QAction(QIcon('icons\icon_globalPriors.png'), 'Set prior as global' if len(slctdKeys) == 1 else 'Set priors as global', self)
+                actnPromotePriors = QAction(QIcon('..\..\icons\icon_globalPriors.png'), 'Set prior as global' if len(slctdKeys) == 1 else 'Set priors as global', self)
                 actnPromotePriors.setStatusTip('Use this prior for all datasets in the Workspace')
                 actnPromotePriors.triggered.connect(lambda : self.promotePriors(keys=slctdKeys))
 
-                actnResetToDflt = QAction(QIcon('icons\icon_none.png'), 'Reset to default', self)
+                actnResetToDflt = QAction(QIcon('..\..\icons\icon_none.png'), 'Reset to default', self)
                 actnResetToDflt.setStatusTip('Reset current value(s) to default')
                 actnResetToDflt.triggered.connect(lambda : self.resetToDflt(keys=slctdKeys))
 
-                actnHideRows = QAction(QIcon('icons\icon_none.png'), 'Hide parameter' if len(slctdKeys) == 1 else 'Hide parameters', self)
+                actnHideRows = QAction(QIcon('..\..\icons\icon_none.png'), 'Hide parameter' if len(slctdKeys) == 1 else 'Hide parameters', self)
                 actnHideRows.setStatusTip('Hide parameters')
                 actnHideRows.triggered.connect(lambda : self.hideRows(slctdKeys) )
 
-                actnRemovePars = QAction(QIcon('icons\icon_none.png'), 'Remove parameter' if len(slctdKeys) == 1 else 'Remove parameters', self)
+                actnRemovePars = QAction(QIcon('..\..\icons\icon_none.png'), 'Remove parameter' if len(slctdKeys) == 1 else 'Remove parameters', self)
                 actnRemovePars.setStatusTip('Remove parameters')
                 actnRemovePars.triggered.connect(lambda : self.removePars(slctdKeys) )
 
-                actnCopyCrnt = QAction(QIcon('icons\icon_copy.png'), 'Copy value' if len(slctdKeys) == 1 else 'Copy values', self)
+                actnCopyCrnt = QAction(QIcon('..\..\icons\icon_copy.png'), 'Copy value' if len(slctdKeys) == 1 else 'Copy values', self)
                 actnCopyCrnt.setStatusTip('Copy current values')
                 actnCopyCrnt.triggered.connect(lambda : self.copyCrntPars(slctdKeys) )
 
-                actnPasteCrnt = QAction(QIcon('icons\icon_pasteCrnt.png'), 'Paste as current', self)
+                actnPasteCrnt = QAction(QIcon('..\..\icons\icon_pasteCrnt.png'), 'Paste as current', self)
                 actnPasteCrnt.setStatusTip('Paste copied to current values')
                 actnPasteCrnt.triggered.connect(lambda : self.pasteCrntPars() )
                 actnPasteCrnt.setEnabled(len(self._copy_buffer) > 0)
 
-                actnPasteDflt = QAction(QIcon('icons\icon_pasteDflt.png'), 'Paste as default', self)
+                actnPasteDflt = QAction(QIcon('..\..\icons\icon_pasteDflt.png'), 'Paste as default', self)
                 actnPasteDflt.setStatusTip('Paste copied to default values')
                 actnPasteDflt.triggered.connect(lambda : self.pasteDfltPars() )
                 actnPasteDflt.setEnabled(len(self._copy_buffer) > 0)
@@ -2500,7 +2491,7 @@ class ChemTreeView(QTreeView):
 
                 """elif node.nodeType == 'intn' and len(slctdKeys) == 1:              # Intensity node(s)
                 key = ('.', 'ampl', self.model().datum.repRootNames.index(node.name[0]))
-                cfunAction = QAction(QIcon('icons\icon_blank.png'), 'Display cost function', self)
+                cfunAction = QAction(QIcon('..\..\icons\icon_blank.png'), 'Display cost function', self)
                 cfunAction.setStatusTip('Display cost function')
                 cfunAction.triggered.connect(lambda : self.showCfunPopup(key))
                 popMenu.addAction(cfunAction)
@@ -3083,7 +3074,7 @@ class MainNMRWindowBase(QMainWindow):
         self.printoutEdit.ensureCursorVisible()
 
     def _icon(self, name):
-        return QIcon(path.join(SCRIPT_PATH, 'icons', name))
+        return QIcon(path.join(SCRIPT_PATH, '..\..\icons', name))
 
     def setupGUI(self):
         """Sets the layout for the main window."""
@@ -3120,17 +3111,17 @@ class MainNMRWindowBase(QMainWindow):
         self._actions.clear()
 
         # Clear workspace action
-        new = QAction(QIcon('icons\icon_new.png'), 'Clear workspace', self)
+        new = QAction(QIcon('..\..\icons\icon_new.png'), 'Clear workspace', self)
         new.setStatusTip('Clear the workspace')
         new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None, HCmode=self.wsp.HCmode))
         self._actions['Clear workspace'] = new
 
-        new = QAction(QIcon('icons\icon_new_1H.png'), 'New 1H workspace', self)
+        new = QAction(QIcon('..\..\icons\icon_new_1H.png'), 'New 1H workspace', self)
         new.setStatusTip('New 1H workspace')
         new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None, HCmode='1H'))
         self._actions['New 1H workspace'] = new
 
-        new = QAction(QIcon('icons\icon_new_13C.png'), 'New 13C workspace', self)
+        new = QAction(QIcon('..\..\icons\icon_new_13C.png'), 'New 13C workspace', self)
         new.setStatusTip('New 13C workspace')
         new.triggered.connect(lambda : self.onResetWspAction(newSettings=None, newWorkspace=None, HCmode='13C'))
         self._actions['New 13C workspace'] = new
@@ -3172,14 +3163,14 @@ class MainNMRWindowBase(QMainWindow):
         self._actions['Save workspace'] = new
 
         # Add exit action
-        new = QAction(QIcon('icons\icon_exit.png'), 'Exit', self)
+        new = QAction(QIcon('..\..\icons\icon_exit.png'), 'Exit', self)
         new.setShortcut('Ctrl+Q')
         new.setStatusTip('Exit the application')
         new.triggered.connect(self.close)
         self._actions['Exit'] = new
 
         # Show the information dialog action
-        new = QAction(QIcon('icons\icon_info.png'), 'About', self)
+        new = QAction(QIcon('..\..\icons\icon_info.png'), 'About', self)
         new.setStatusTip('Information about the program')
         new.triggered.connect(self.showAboutMessage)
         self._actions['Show about'] = new
@@ -4384,38 +4375,9 @@ if __name__ == '__main__':
     app = 0
     app = QApplication(sys.argv)
 
-    expiryTime, options = readLicenseFile(path=SCRIPT_PATH)
-
-    if expiryTime is None:
-        # No license file found
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Critical)
-
-        msg.setText("Please place a valid license *.lic file in the program directory.")
-        # msg.setInformativeText("This is additional information")
-        msg.setWindowTitle("Missing license file")
-        # msg.setDetailedText("The details are as follows:")
-        msg.setStandardButtons(QMessageBox.Close)
-
-        msg.show()            # Returns the values of pressed button
-
-    elif time.time() > expiryTime:
-        # Checks whether the current time is less than the expiry time (in sec from the beginning of the epoch).
-        # The license was found but has expired
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Critical)
-
-        msg.setText("The license has expired.")
-        msg.setInformativeText("Please place a valid license *.lic file in the program directory.")
-        msg.setWindowTitle("Expired license file")
-        # msg.setDetailedText("The details are as follows:")
-        msg.setStandardButtons(QMessageBox.Close)
-
-        msg.show()         # msg.exec_()            # Returns the values of pressed button
-    else:
-        wsp = Workspace()
-        main_view = MainView_nmrQuant(wsp, expiryTime)
-        # main_view = MainNMRWindowBase(wsp, expiryTime)
-        main_view.show()
+    wsp = Workspace()
+    main_view = MainView_nmrQuant(wsp, expiryTime)
+    # main_view = MainNMRWindowBase(wsp, expiryTime)
+    main_view.show()
 
     app.exec_()

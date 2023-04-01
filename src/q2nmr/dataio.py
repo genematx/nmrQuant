@@ -3,7 +3,7 @@ import os
 import time
 #from ssnake.specIO import loadFile, loadJEOLDelta
 
-# Functions fro reading different file formats.
+# Functions for reading different file formats.
 # Each function has standardized inputs and outputs.
 # Input: either a directory or a data file
 # Output: yT - FID array (possibly 2-dimensioanl for arrayed experiments)
@@ -71,8 +71,6 @@ def read(dir, bin_file=None, pars_files=None):
 
     return dic, data
 
-# Spinsolve binary (fid/ser) reading and writing
-
 def read_binary(filename, big=False):
     """
     Read Spinsolve binary data from file and return dic,data pair.
@@ -111,16 +109,7 @@ def read_binary(filename, big=False):
     if data.size == 3*size.prod() and size[1] == 1:
         # The dataset is saved in the format: [time points, real values, imaginary values], else [real values, imaginary values]
         data = data[size.prod():]
-    # print(size)
-    # print(data.shape, data.size)
-    # if size[1] == 1:
-    #     t = data[:size.prod()]
-    #     print(t.shape)
-    #     data = (data[size.prod()::2] - 1j*data[size.prod()+1::2])
-    #     print(data.shape)
-    #     print(size)
-    #     # .reshape(size[:2])
-    # else:
+
     data = (data[::2] - 1j*data[1::2]).reshape(size[:2], order='F')
 
     return dic, data
@@ -212,23 +201,13 @@ def read_spinsolve(path):
     swh = 1 / dt
     f0 = swh/2-fcar      # Frequency shift in Hz
 
-    # nt = dic['nrPnts']
-
-
-
-    # t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
-
-    ## Subsample if the frequency range is too large
-    #k = max(math.floor(swh/c0 / 12), 1)   # Sampling factor to make the sweep width 12 ppm
-    #t = t[::k]
-    #yT = yT[::k, :]
-
-    # name = os.path.split(os.path.dirname(path))[1]    # Only the name of the containing directory
-
     return yT, c0, f0, dt, dic
 
 def read_jeol(path):
-    """Import data in Jeol Delta format."""
+    """Import data in Jeol Delta format.
+    
+    Uses ssnake to read the data.
+    """
     spec = loadJEOLDelta(path)   # ssnake Spectrum object
 
     if spec.ndim() > 1:
@@ -350,7 +329,6 @@ def read_any_file(path):
         nt = yT.shape[0]
         t = np.linspace(start=0, stop=(nt-1)*dt, num=nt).reshape(-1,1)
         name = os.path.split(path)[1]    # File name
-        # print(path)
 
     # Read a Spinsolve data.1d file
     elif path.endswith('.1d') or path.endswith('.2d'):

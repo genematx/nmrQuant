@@ -21,9 +21,9 @@ Created on Wed Nov 24 09:43:54 2021
 import numpy as np
 #import pandas as pd
 from chemTree import *
-from MainLogic import *
-from MainLogic import Workspace#, Series, Datum
-from MainLogic import readLicenseFile
+from workspace import *
+from workspace import Workspace#, Series, Datum
+from workspace import readLicenseFile
 from dataio import read_any_file, saveFID
 
 #from pprint import pprint

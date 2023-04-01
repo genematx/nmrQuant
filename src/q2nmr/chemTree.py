@@ -14,8 +14,6 @@ import numexpr as ne
 import copy
 from operator import itemgetter
 from molparser.convertmol import parse_sdf_file
-from openpyxl import load_workbook
-#import xlsxwriter
 
 # Ordered set class to store children of a node
 import collections
@@ -53,7 +51,7 @@ spsySpec = namedtuple('spsySpec', 'chsh, jcpl, chshAsgn, jcplAsgn, mult')
 spsySpec.__new__.__defaults__ = (None, None, None, None, None, 1)
 
 # Specifications of frequency blocks used for optimization
-# NOTE: unused, left for compatibility. Use the MainLogic.freqSpec class instead
+# NOTE: unused, left for compatibility. Use the workspace.freqSpec class instead
 freqSpec = namedtuple('freqSpec', 'min, max, indxFreq, bslnOrder, bF')
 freqSpec.__new__.__defaults__ = (-float('inf'), float('inf'), np.array([]), (None, None), None)
 freqSpec.__str__ = lambda self : '{:.2f} ... {:.2f}'.format(self.min, self.max) if not (self.min == -float('inf') and self.max == float('inf')) else 'Entire range'
@@ -159,8 +157,6 @@ def smplSpec_Gaussian(mean, var):
     stdv = np.sqrt(var)
     return smplSpec(mean = mean,
                     median = mean,
-                    #q1 = q1, q3 = q3,
-                    #p5 = p5, p95 = p95,
                     hpd5 = (mean-1.959963984540*stdv, mean+1.959963984540*stdv),
                     var = var)
 
@@ -168,10 +164,6 @@ def smplSpec_invGamma(a, b):
     """Returns the statistics in the form of smplSpec derived from the parameters of the inverse-Gamma distribution."""
     return smplSpec(min = 0,
                     mean = b/(a-1) if a > 1 else None,
-                    #median = median,
-                    #q1 = q1, q3 = q3,
-                    #p5 = p5, p95 = p95,
-                    #hpd5 = hpd(data, alpha=0.05),
                     var = b**2/((a-1)**2 * (a-2))) if a > 2 else None
 
 def calc_min_interval(x, alpha):
@@ -385,7 +377,6 @@ def get_hamiltonian(chshQD, jcplQD, chshAsgn, jcplAsgn):
 
     return H, TM
 
-# QD simulations
 def transition_indices(n_spin, k=0):
     """Returns indices of singlestate transitons for the kth spin of total n_spin spins in an n_x_n matrix of intensities or frequencies."""
     k = n_spin-k-1
@@ -398,8 +389,6 @@ def splitSpSy(big, mult=None):
     if big.jcplAsgn is None or big.jcpl is []:
         # Only singlets
         spsyAll = [spsySpec([chsh], [], [1], None, mult=big.chshAsgn.count(i+1)) for i, chsh in enumerate(big.chsh)]     # All chemical shifts
-        #spsyAll = [spsySpec([i], [], [1], None) for i in big.chsh]     # All chemical shifts
-        #intnAll = [big.chshAsgn.count(i+1) for i in range(len(big.chsh))]     # Multiplicities (intensities) for each chemical shift
     else:
         # Create a pseudo-assignment matrix -- connect spins with the same chemical shifts; will be used only to assign them to spin systems
         M = np.array(big.jcplAsgn)
@@ -462,7 +451,6 @@ def tobin(x,n):
     """Converts an integer x into its binary representation in form of a list with n bits."""
     return [(x>>k)&1 for k in range(n-1,-1,-1)]     # Use range(0, n) for MSB first
 
-# @profile
 def QDsims(H, T, tol=0.0001):
     """Simulates a QD system based on the spin frequencies and j couplings in Hz. See, e.g., http://www.users.csbsju.edu/~frioux/nmr/Speclab4.htm"""
     n_spin = int(math.log2(T.shape[0]))
@@ -480,39 +468,15 @@ def QDsims(H, T, tol=0.0001):
     # Drop small transition peaks
     if tol < n_spin:
         p = np.argsort(intn)                    # Sort the peaks from highest to lowest intensity
-        # p = p[(intn[p] > 0.0000001)]                # Keep only the largest peaks
         p = p[-n_spin*(2**(n_spin-1)):]          # Keep only peaks corresponding to single transitions (assuming they are the largest)
         p = p[np.cumsum(intn[p]) > tol]
         omega, intn = omega[p], intn[p]
-        # print('Kept {:d} transitions; sum of intensities = {:.10f}'.format(len(intn), np.sum(intn)))
-
-        # # print('Originally {:d} transitions; sum of intensities = {:.10f}'.format(len(intn), np.sum(intn)))
-        # p = np.flipud(intn.argsort())        # Sort the peaks from highest to lowest intensity
-        # #intn2 = np.cumsum(intn[p]**2)        # Cumulative sum of sorted squared intensities
-        # #p = p[0:max( n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) )]      # argmax will return the index of first occurence of element that evaluates to True
-        # #p = range(max( n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) ))
-        # #p = p[range(max( 0*n_spin*(2**(n_spin-1)), np.argmax(intn2/intn2[-1] > 0.99999) ))]
-        #
-        # p = p[0:n_spin*(2**(n_spin-1))]    # Keep only peaks corresponding to single transitions (assuming they are the largest)
-        # p = p[(intn[p] > 0.00000001)]                # Keep only the largest peaks
-        # # print(n_spin, len(p))
-        #
-        # # p_max = np.argmin( np.diff(np.log(intn[p]))[:2*n_spin*(2**(n_spin-1))] ) + 1     # All coefficients before the sharpest drop in their intensity but at most 2*n_spin*(2**(n_spin-1))
-        # # #p_max=1000
-        # # p = p[:p_max]
-        # # # # print(p_max)
-        #
-        # omega, intn = omega[p], intn[p]
-        # print('Kept {:d} transitions; sum of intensities = {:.10f}'.format(len(intn), np.sum(intn)))
-        #
-        pass
 
     # Renormalize the intensities
     intn = n_spin * intn / intn.sum()
 
     return omega, intn
 
-# @profile
 def QTransFull(chshQD, jcplQD, meqSpins, meqLinks, tol=0.0001):
     """Use general QD simulations to compute the transition peak frequencies and intensities."""
 
@@ -520,7 +484,7 @@ def QTransFull(chshQD, jcplQD, meqSpins, meqLinks, tol=0.0001):
         """Splits arrays of peak frequencies and intensities according to the values of corresponding chemical shifts."""
         n_spin = len(chsh)
 
-        #  TODO! Do it better: Check if there are equal chemical shifts in the array
+        #  TODO: Check if there are equal chemical shifts in the array
         if len(chsh) != len(set(chsh)):
             chsh += np.linspace(0, 0.1, len(chsh))
 
@@ -579,16 +543,13 @@ def QTransFull(chshQD, jcplQD, meqSpins, meqLinks, tol=0.0001):
 
     # Combine the peaks into arrays corresponding to each chemical shift
     freqQPeaks, intnQPeaks = [None]*len(chshQD), [None]*len(chshQD)     # Lists to hold arrays of frequencies and intensities for each spin separately
-    # indMin = np.argmin(abs(omega[-1].reshape(-1,1) - chshQD.reshape(1,-1)), axis=1)    # Indices of the closest chem shift in freqArr for each transition
     for i in range(len(chshQD)):
-        # indx_combin = np.where(indMin == i)[0]
         indx_simple = np.where(np.array(chshAsgn)==i+1)[0]
         freqQPeaks[i] = np.concatenate( [freq[j] for j in indx_simple ] )
         intnQPeaks[i] = np.concatenate( [intn[j] for j in indx_simple ] )
 
     return freqQPeaks, intnQPeaks
 
-# @profile
 def QDsimsGrpd(H, T, states, tol=0.0001):
     """
     Simulates a QD system based on the spin frequencies and j couplings in Hz. See, e.g., http://www.users.csbsju.edu/~frioux/nmr/Speclab4.htm
@@ -672,8 +633,6 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
 
     # Compute the eigenvalues/eigenvectors of the Hamiltonian
     vH, uH = np.linalg.eigh(np.asarray(H))      # Need to make sure that the Hamiltonian is passed as an array, not a matrix
-    #     vH, uH = scipy.sparse.linalg.eigs(np.asarray(H), T.shape[0])
-    #     vH = vH.astype('float64')
 
     # Find quantum numbers (levels, M) for each eigenvector
     M = states.sum(axis=1)        # Quantum number for each state (from 0 to n_spin+1)
@@ -695,8 +654,6 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
     if n_spin > 5:
         # Compute the transitions. Consider only single-order transitions (both simple and combination)
         s1, s2 = np.where(M.reshape(-1,1) - M.reshape(1,-1) == -1)   # Indices of interacting coherences
-        # trans = states[s1, :] - states[s2, :]       # Encoded transitions
-        # flipped_indx = np.where(np.sum(np.abs(trans), axis=1) == 1, np.argmax(np.abs(trans), axis=1), n_spin)     # Indices of spins that flipped in each transition (indx = n_spin for combination transitions)
 
         # Complete arrays
         omega = vHs[s2] - vHs[s1]
@@ -706,11 +663,9 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
         # Drop small transition peaks
         if tol < n_spin:
             p = np.argsort(intn)                    # Sort the peaks from highest to lowest intensity
-            # p = p[(intn[p] > 0.0000001)]                # Keep only the largest peaks
             p = p[-n_spin*(2**(n_spin-1)):]          # Keep only peaks corresponding to single transitions (assuming they are the largest)
             p = p[np.cumsum(intn[p]) > tol]
             omega, intn = omega[p], intn[p]
-            # print('Kept {:d} transitions; sum of intensities = {:.10f}'.format(len(intn), np.sum(intn)))
 
         # Sort the transitions according to their frequencies
         indx = np.argsort(omega)
@@ -767,25 +722,13 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
 
         mat_flip = arr2mat([t[0] for t in trans_by_level], filler=-np.inf)
         mat_intn = arr2mat([t[2] for t in trans_by_level])
-    #     print(mat_flip)
-    #     print(mat_intn)
-
         c = np.where(mat_flip < n_spin, 1, -1)
-#         print(c)
-#         print(mat_intn)
         CI = c*mat_intn
-#         print(CI)
-#         print(np.sum(CI, axis=0))
-#         print(np.sum(CI, axis=1))
-
         cost_matrix = np.zeros((2,2))
         for i in range(2):
             for j in range(2):
                 cost_matrix[i, j] = sum(c[3+i, :] * mat_intn[3+j, :])
-
-#         print(cost_matrix)
         _, lbls = linear_sum_assignment(-cost_matrix)
-#         print(lbls)
 
         indx0 = (np.where(M==2)[0])[2:4]
         indx = indx0[lbls]
@@ -813,19 +756,10 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
         trans = states[s1, :] - states[s2, :]       # Encoded transitions
         flipped_indx = np.where(np.sum(np.abs(trans), axis=1) == 1, np.argmax(np.abs(trans), axis=1), n_spin)     # Indices of spins that flipped in each transition (indx = n_spin for combination transitions)
 
-    #     print(s1, s2)
-
-        # Complete arrays
-#         omega = vHs[s2] - vHs[s1]
-#         intn = np.sum(T.dot(uHs)[:, s2] * uHs[:, s1], axis=0)**2 / (2**(n_spin-1))
-#         print(vHs.sum())
-#         print(sum(intn))
-
         # Split the arrays
         omega = np.concatenate([t[1].ravel() for t in trans_by_level])
         intn = np.concatenate([t[2].ravel() for t in trans_by_level])
         flip = np.concatenate([t[0].ravel() for t in trans_by_level])
-    #     print(flip, omega, intn)
         omega = [omega[flip == i] for i in range(n_spin + 1)]
         intn = [intn[flip == i] for i in range(n_spin + 1)]
         trans = [ [''.join([{0:'o', -1:'-', 1:'+'}[t] if t != 0 else {0:'a', 1:'b'}[s] for t, s in zip(ttt, sss)])
@@ -835,7 +769,8 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
         states = [''.join([{0:'a', 1:'b'}[s] for s in sss]) for sss in states.tolist()]
 
     elif n_spin == 5:
-        # Some states may flip; need to label each allowed (-1) transistion by the number of spins that flip (use n_spin for combination transitions)
+        # Some states may flip; need to label each allowed (-1) transistion by the number
+        # of spins that flip (use n_spin for combination transitions)
 
         # Compute the transitions between each pair of consecutive quantum levels
         trans_by_level = [None]*n_spin
@@ -856,9 +791,6 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
         mat_flip = arr2mat([t[0] for t in trans_by_level], filler=-np.inf)
         mat_omega = arr2mat([t[1] for t in trans_by_level])
         mat_intn = arr2mat([t[2] for t in trans_by_level])
-#         print(mat_flip)
-#         print(mat_intn)
-
         c = np.where(mat_flip < n_spin, 1, -1)
         CI = c*mat_intn
 
@@ -959,11 +891,6 @@ def QTransAB(chshQD, jcplQD, n_spin=(1,1)):
     # Scale intensities by the number of spins
     intnQPeaks[0] *= n_spin[0]
     intnQPeaks[1] *= n_spin[1]
-
-    # # Add empty arrays to represent transition peaks (for consistency with other methods)
-    # freqQPeaks.append(np.empty(0))
-    # intnQPeaks.append(np.empty(0))
-
     return freqQPeaks, intnQPeaks
 
 def QTrans3X(chshQD, jcplQD, chshAsgn, jcplAsgn):
@@ -1033,18 +960,6 @@ def QTransClusters(chshQD, jcplQD, meqSpins, meqLinks):
     # Find lists of lists of np arrays of freq/intn for each meq spin.
     # The second level of lists corresponds to the meq spin being involved in different subgraphs within the spin system. After all subgraphs are computed, their peaks will be convolved with each other.
     freq_meq, intn_meq = [[] for _ in range(len(meqSpins))], [[] for _ in range(len(meqSpins))]
-
-    # Simulate each cluster as a separate spin system
-
-    # # Simulate each pair as an AmBn system
-    # for edge in meqLinks:
-    #     p, q = edge.indxVert           # Indices fo coupled spins
-    #     freq, intn = QTransAB( (chshQD[meqSpins[p].indxChsh], chshQD[meqSpins[q].indxChsh]),
-    #                             jcplQD[edge.indxJcpl], n_spin=(meqSpins[p].nspin, meqSpins[q].nspin) )
-    #     freq_meq[p].append(freq[0])
-    #     freq_meq[q].append(freq[1])
-    #     intn_meq[p].append(intn[0])
-    #     intn_meq[q].append(intn[1])
 
     # Convolve the multiplets for each equivalent spin and save them in the subarray corresponding to a specific chshQD
     freqQPeaks, intnQPeaks = [[] for _ in chshQD], [[] for _ in chshQD]
@@ -2103,7 +2018,6 @@ def defaultTreePars(tree, tau=0.0, theta=0.0, sigma2=0.0, gamma=0.0, startFromRo
                  "lshapeI" : [0.0]*config.MODEL_LineShapeOrder}
     return pars
 
-#@profile
 def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
     """Evaluate the entire tree of chemNodes. Returns the time-domain response
         for the specified (reported) nodes in the tree. tree is a chemNode object --
@@ -2156,7 +2070,6 @@ def evalTreeT(tree, t, c0, pars=None, xclRootNames=None):
 
     return Z, [i.name for i in repRoots]
 
-# @profile
 def evalTreeF(tree, f, dt, df, c0, f0=0, pars=None, xclRootNames=None, allowShift=False):
     """Evaluates the entire tree of chemNodes and returns a model spectrum
         directly in the frequency domain. Tree is a chemNode object -- any node
@@ -2212,7 +2125,6 @@ def collectPeaks(tree, c0, pars=None):
 
     return allPeaks
 
-#@profile
 def getFID(T, t, c0, f0=0, pars=None, tau=None, xclRootNames=None):
     """Returns modeled signals in the time domain in the form of FID."""
     if pars is None:
@@ -2894,18 +2806,10 @@ def writeChemLib_XLSX(chemLib, fname='chemDB_saved.xlsx', verbose=False):
             lastrow = write_chem(worksheet, chemToSave, firstrow)
             firstrow = lastrow+2
 
-    # worksheet = workbook.add_worksheet('chemDB')
-    # write_chem(worksheet, chemToSave)
     workbook.close()
 
 def loadChemLibrary(chemLib=None, dirpath=None):
     """Loads the chemical library (a dictionary of chemDB dictionaries)."""
-    #chemdb_path = os.path.join(MAINDIR, 'chemdb')       # Path to chemdb folder
-#    chemdb_path = 'chemdb'       # Path to chemdb folder
-#
-#    if dirpath is None:
-#        dirpath = chemdb_path
-
 
     # Define a DB for common chemicals
     # chemLib is a dictionary of dictionaries; the first level used for grouping
@@ -2947,402 +2851,6 @@ def loadChemLibrary(chemLib=None, dirpath=None):
                      }
                    }
 
-#        # Load the databases from XLSX file
-#        chemLibXLSX_path = os.path.join(chemdb_path, 'chemLib.xlsx')
-#        if os.path.exists(chemLibXLSX_path):
-#            wb = load_workbook(filename=chemLibXLSX_path)
-#            for ws_name in wb.sheetnames:
-#                if not ws_name.startswith('_'):
-#                    chemDB = readChemDB_XLSX(wb[ws_name])
-#                    chemLib[ws_name] = chemDB
-#
-#    # Try loading all JSON, .cdb, .mol, and .sdf files in the working directory
-#    for entry in os.listdir(dirpath):
-#        fullpath = os.path.join(dirpath, entry)
-#
-#        # Default database name used to group the items (relative path to the containing folder)
-#        db_name = os.path.relpath(os.path.dirname(fullpath), chemdb_path)
-#
-#        if os.path.isfile(fullpath):
-#            fname, ext = os.path.splitext(entry)
-#            _new_dict = {}         # Dictionary of chemSpec entries
-#            if ext == '.xlsx':
-#                # TODO: Load all excel files
-#                continue
-#            elif ext in ['.json', '.cdb']:
-#                if db_name == '.':
-#                    db_name = fname
-#                _new_dict.update(readChemDB_JSON(fullpath))
-#            elif ext in ['.mol', '.sdf']:
-#                try:
-#                    _new_dict.update(readChemDB_SDF(fullpath))
-#                except:
-#                    print('Failed to load {}.'.format(fullpath))
-#
-#            # Add to the library
-#            if db_name in chemLib.keys():
-#                chemLib[db_name].update(_new_dict)
-#            else:
-#                chemLib[db_name] = _new_dict
-#
-#        elif os.path.isdir(fullpath):
-#            # Call the function recursively
-#            chemLib = loadChemLibrary(chemLib, fullpath)
-
     return chemLib
 
 chemLib = loadChemLibrary()            # Load the chemical library
-
-
-
-################################################################################
-################################################################################
-# Old classes and fucntions left for compatibility with workspaces saved in
-# previous formats. Do not use in future development.
-
-class chemNodeQD(chemNode):
-
-    """
-    OLD class. Use chemNodeQM instead.
-    """
-
-    def __init__(self, name, spsy, chsh = None, alph = None, alphQD = None, ampl = None, phase = None, intn = 1., alias=''):
-        chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
-        self.chshQD = spsy.chsh
-        self.jcplQD = spsy.jcpl
-        self.intn = spsy.mult
-        self.alphQD = alphQD if alphQD is not None else [parsSpec(min=-5.0, max=25.0, label=c.label, dval=0) for c in self.chshQD]
-        self.spinTopo = spinGroup(*asgn2meqv(spsy.chshAsgn, spsy.jcplAsgn))
-        self.oldParsQD = {"chsh":None, "jcpl":None}
-        self.qPoles = [None]*len(self.chshQD)                # QD poles excluding the effects of line-broadedning although including any linebroadening due to peak aggregation
-        self.qPolesIntn = [None]*len(self.chshQD)
-
-        print('here')
-
-    def addChild(self, child, pos=-1):
-        """Add a terminal node and keep the value of its chemical shift."""
-        if type(child) is not chemNodeT:
-            raise RuntimeError("Only terminal nodes can be added to a chemQD node.")
-        else:
-            chemNode.addChild(self, child, pos)
-            child.reset()
-
-    def insertChild(self, child, pos):
-        chemNode.insertChild(self, child, pos)
-        child.reset()
-
-    def removeChild(self, child):
-        """Removes a child from position pos."""
-        pos = child.siblID()
-        self.chshUsed.pop(pos)
-        return chemNode.removeChild(self, child)
-
-    def default_pars(self):
-        """Returns a dictionary of default parameters for the node."""
-        pars = chemNode.default_pars(self)
-        pars["chshQD"] = [par.dflt() for par in self.chshQD]
-        pars["alphQD"] = [par.dflt() for par in self.alphQD]    # [0]*len(self.alphQD)
-        if len(self.jcplQD) > 0: pars["jcplQD"] = [par.dflt() for par in self.jcplQD]
-        return pars
-
-    def priors(self):
-        """Returns a dictionary of prior parameter specifications for the node."""
-        result = chemNode.priors(self)
-        result["chshQD"] = [par for par in self.chshQD]
-        result["alphQD"] = [par for par in self.alphQD]
-        if len(self.jcplQD) > 0: result["jcplQD"] = [par for par in self.jcplQD]
-        return result
-
-    def reset(self):
-        """Resets the saved old parameters in the node. Evrything will be recomputed on the next step."""
-        chemNode.reset(self)
-        self.oldParsQD["chsh"] = None
-        self.oldParsQD["jcpl"] = None
-
-    # @profile
-    def getPoles(self, c0, chsh=[], alph=[], chshQD=[], alphQD=[], jcplQD=[], **kwargs):
-        """Computes the poles for all peaks including QD simulations if needed."""
-        super().getPoles(c0, chsh, alph)     # Compute sPole
-
-        ## Values of the QD parameters
-        chshQD = c0*np.array(chshQD)          # List of absolute values of chemical shifts (in Hz)
-        alphQD = np.array(alphQD)
-        jcplQD = np.array(jcplQD)
-
-        # Run the QD simulations only if the parameters have changed (assume that chsh, alph, and t have also changed)
-        mind_chshQD = np.concatenate([[abs(cs2 - cs1) for cs2 in chshQD[i+1:]] for i, cs1 in enumerate(chshQD)] + [[np.inf]]).min()     # Minimum distance between any two chemical shifts in this spin system; inf if there is only one chemical shift
-        if self.oldParsQD["chsh"] is None or self.oldParsQD["jcpl"] is None or any(self.oldParsQD["jcpl"] != jcplQD) \
-                                          or ( max( abs(self.oldParsQD["chsh"] - chshQD)) > min(config.QD_RerunQDchshThreshold, 0.5*mind_chshQD)  \
-                                               and self.jcplQD != []):
-
-            # Back-compatibility check
-            try: self.spinTopo._oldParsQD
-            except AttributeError: self.spinTopo._oldParsQD, self.spinTopo._oldResult = {"freq":None, "jcpl":None}, {'freq':None, 'intn':None}        # Add Attributes for combatibility with the newer version
-
-            freqQPeaks, intnQPeaks, _ = self.spinTopo.get_transitions(chshQD, jcplQD)
-            freqQPeaks = [f_arr + f0 for f_arr, f0 in zip(freqQPeaks, chshQD)]
-
-            # Aggregate poles and assign them to different chemical shifts and update the corresponding child node
-            for i, chld in enumerate(self.children()):
-                qPoles, qPolesIntn = group_peaks(freqQPeaks[i], intnQPeaks[i], maxWidth = config.QD_AggregatePeaksThreshold)                    # relative values of peak positions in ppm
-
-                chld.qPoles = 1j*2*np.pi*np.array(qPoles)
-                chld.qPolesIntn = np.array(qPolesIntn) / chld.intn    # Scale all qPoles for a given T node by the number of nuclei with the same chemical shift (i.e. the intensity of the node)
-
-                # TODO: Simplify peaks / aggregate several peaks
-
-                # Include the effect of line broadening
-                chld.sT, chld.qT, chld.uT, chld.uF = [], [], [], []        # Remove previous sT
-                chld.sPole = 1j*0 - alphQD[i]
-                chld.propPoles(self.uPoles)      # Propagate the poles
-
-            # store the parameters
-            self.oldParsQD.update({"chsh":chshQD, "jcpl":jcplQD})
-        else:
-            # Check maybe only some alphas and/or chem shifts have changed
-            diffPoles = 1j*2*np.pi*(chshQD - self.oldParsQD["chsh"]) - alphQD
-            for i, chld in enumerate(self.children()):
-                if chld.sPole != diffPoles[i]:
-                    chld.sT, chld.uT, chld.uF = [], [], []
-                    chld.sPole = diffPoles[i]
-                    chld.uPoles = chld.qPoles + chld.sPole
-
-    #@profile
-    def evalTime(self, t, **kwargs):
-        "Computes the node's response sT and also updates the children if any QD parameters have changed."
-        newHash = arrhash(t)
-        if self.sT == [] or self._oldHash != newHash:
-            self.sT = self.intn if self.sPole == 0 else self.intn * np.exp(np.outer(t, self.sPole)).ravel()
-
-        # Evaluate children as well
-        for i, chld in enumerate(self.children()):
-            if chld.qT == [] or self._oldHash != newHash:
-                chld.qT = np.inner( np.exp(np.outer(t, chld.qPoles)), chld.qPolesIntn ).ravel()
-            if chld.sT == [] or self._oldHash != newHash:
-                chld.sT = chld.intn * chld.qT * np.exp(np.outer(t, chld.sPole)).ravel()
-
-        self._oldHash = newHash
-
-    def getChshTree(self, sfx='', indx=0):
-        """Creates a parameters tree. Takes into account the parsKind parameter of itself and also all QD parameters, but omits any attached chemNodeT children. sfx = '' or 'QD'. """
-        P = parsNode( name = (self.name, 'chsh'+sfx, indx) )       # Works for QD parameters as well
-
-        if not sfx:
-            for i in range( len( self.chshQD ) ):
-                P.addChild( parsNode( name = (self.name, 'chshQD', i) ) )
-
-        return P
-
-class chemNodeT(chemNode):
-    """
-    OLD class. Use chemNodeQT instead.
-    Terminal nodes that emit signals. Can only be used as leaves."""
-    def __init__(self, name, chsh = None, alph = None, ampl = None, phase = None, intn = 1., alias=''):
-        chemNode.__init__(self, name, chsh, alph, ampl, phase, intn, alias)
-        self.qPoles = np.array([0.])                # QD poles from the parent node that determine peak splitting
-        self.qPolesIntn = 1.
-        self.uPoles = 0.                # Poles computed including the effects of all ancestors
-        self.uF = []
-        self.qT = []
-
-    def default_pars(self):
-        """Returns a dictionary of default parameters for the node."""
-        return {'ampl':[self.ampl[0].dflt()], 'phase':[self.phase[0].dflt()]}
-
-    #@profile
-    def evalTime(self, t, **kwargs):
-        "Computes the node's response sT"
-        pass
-
-    def getPoles(self, c0, chsh=[], alph=[], **kwargs):
-        "The poles would be computed by the parent node, chemNodeQM"
-        pass
-
-    def addChild(self, child, pos=-1):
-        """Terminal nodes can not have children."""
-        raise RuntimeError("Children can not be added to terminal nodes.")
-
-    def insertChild(self, child, pos):
-        """Terminal nodes can not have children."""
-        raise RuntimeError("Children can not be added to terminal nodes.")
-
-    def propPoles(self, uPolePrnt = None):
-        """Propagates offset poles to all children."""
-        if uPolePrnt is None:
-            uPolePrnt = 0. if self.isRoot() else self._parent.uPoles     # Set the offset pole to the uPole of the parent
-        newPoles = self.sPole + uPolePrnt + self.qPoles
-        if not np.array_equal(self.uPoles, newPoles):
-            self.uPoles = 1j*newPoles.imag + np.minimum(newPoles.real, 0.0)
-            self.uF = []    # Reset the output in the frequency domain
-
-    def reset(self):
-        super().reset()
-        self.qT = []
-
-    # @njit
-    # @profile
-    def evalFreq(self, f, dt, df, c0, f0=0, tau=0, allowShift=True):
-        "Computes the node's response in the frequency domain assuming that all ancestors have updated uPoles."
-        # Check if the signal needs to be reevaluated
-        newHash = arrhash(f)
-
-        if self.uF == [] or self._oldHash != newHash:
-            self.uF = np.exp(1j*tau*(self.uPoles.imag - 2*np.pi*f0)).reshape((1,-1))
-            x1 = 1j*2*np.pi*(c0*f-f0).reshape((-1,1))
-            x2 = np.conj(self.uPoles - 1j*2*np.pi*f0).reshape((1,-1))
-            # self.uF = self.uF / -np.expm1((x1+x2)*dt)
-            self.uF = ne.evaluate( 'x / -expm1( (x1 + x2)*dt )', local_dict={'x':self.uF, 'x1':x1, 'x2':x2, 'dt':dt})       # Compute exp(x)-1 in one go
-            self.uF = ne.evaluate('sum(conj( x ) * y, axis=1)', local_dict={'x':self.uF, 'y':self.qPolesIntn}).ravel()
-            # self.uF = np.inner(np.conj(self.uF), self.qPolesIntn).ravel()
-            self.uF *= self.intn * np.sqrt(df*c0*dt)
-
-            self._oldHash = newHash
-
-    def get_parKey(self, pars='chshQD'):
-        """Returns the key of the parameter associated with the current terminal node."""
-        name = self.name.rsplit('-', 1)
-        indx = name[1].split('.')
-        return (name[0]+'-SPSY'+indx[0] if int(indx[0])>0 else name[0], pars, int(indx[1])-1)
-
-class chemNodeDB(chemNode):
-    """OLD Class for a node describing a chemical from the database, inherited from
-       chemNode. The node can be specified either by passing a name of a species
-       in the database or the QDpars structure (an instance of chemSpec class.)
-
-       NOTE: chemNodeQM to be used instead.
-    """
-    def __init__(self, name, chsh = None, alph = None, alphQD = None, ampl = None, phase = None, intn = 1., alias='', nameDB=None, QDpars=None):
-        super().__init__(name, chsh, alph, ampl, phase, intn, alias)
-        chemDB = {key:val for _, db in chemLib.items() for key, val in db.items()}
-
-        # Assign a ChemSpec record QDpars
-        if QDpars is not None:
-            self.QDpars = QDpars
-        elif name in chemDB or nameDB in chemDB:
-            self.QDpars = copy.deepcopy(chemDB[self.name if nameDB is None else nameDB])    # Parameters from the database
-        else:
-            raise RuntimeError("The chemical \'" + self.name + '\' is not in the database and no QD parameters are supplied.')
-        self.HCmode = None            # Mode of experiment if the node is dendrolized
-
-    def rename(self, newName):
-        for chld in self.descendants():
-            chld.rename(newName=chld.name.replace(self.name, newName))
-        super().rename(newName)
-
-    def setReported(self, flag=True):
-        """Self the _reported flag of the node. If the DB node itself is not reported, its terminal leaves, not spin systems become reported."""
-        if not self.isLeaf():     # Leafs can only have _reported set to True
-            if flag:
-                for chld in self._children:
-                    chld.setReported(flag)
-            elif not self.isRoot() and self._parent.isReported() != flag:
-                self._parent.setReported(flag)
-            self._reported = flag
-            for chld in self._children:
-                chld.setReported(flag)
-
-    def setDefaultQD(self, key, dval, min=None, max=None):
-        """Sets (updates) the default distributions of QD parameters. key is a 2-tuple of the form ('chshH', i), ('jcplH', i), or ('chshC', i), where i is the number of the parameter in the zero-order, e.g. ('chshH', 2) for the third chemical shift."""
-
-        # Check if the entire list of parameters need to be updated (e.g. all chshH or all jcplH, etc.)
-        if not isinstance(key, tuple):
-            if len(getattr(self.QDpars, key)) == len(dval):
-                for i, val in enumerate(dval):
-                    # Call the function recursively
-                    self.setDefaultQD((key, i), val)
-            else:
-                raise RuntimeError("The number of supplied values does not match the size of the parameter array.")
-
-        else:
-            # Set up the range for the parameter
-            if min is None or max is None:
-                if 'chsh' in key[0]:
-                    min, max = np.round(dval, decimals=1) + np.array([-0.05, 0.05])
-                elif 'jcpl' in key[0]:
-                    min, max = np.round(dval) + np.array([-1, 1])
-
-            # Update the specification
-            parsArray = getattr(self.QDpars, key[0])          # An entire array of the parameters, one of which needs to be updated
-            parsArray[key[1]] = parsArray[key[1]]._replace(dval=dval, min=min, max=max)
-
-    def dendrolize(self, experiment="1H"):
-        "Creates chemTrees based on the QD parameters of the node"
-        # self.QDpars = chemDB[self.nameDB]    # Update the parameters from the database
-        self.HCmode = experiment
-        # 1. Define big spin systems based on the type of experiment
-        #if experiment == "1H":
-        #    spsyBig = spsySpec(self.QDpars.chshH, self.QDpars.jcplH, self.QDpars.chshAsgnH, self.QDpars.jcplAsgnHH)
-        #elif experiment == "13C":
-        #    spsyBig = spsySpec(self.QDpars.chshC, None, self.QDpars.chshAsgnC, None)
-
-        # 2. Separate spin systems
-        spsySmall = self.QDpars.getSpSy(mode=experiment)
-
-        # 3. Add nodes to the tree. Each new node is a QD node for a particular spin system.
-        for chld in self.children():             # Loop backwards to avoid missing children when the index increases but the number of children decreases
-            self.removeChild(chld)
-        for i, spsy in enumerate(spsySmall):
-            # Add a QD node with their own terminal nodes
-            SPSY = chemNodeQD(self.name + '-SPSY' + str(i+1), spsy)  # New spin system node (QD)
-            for j in range(len(spsy.chsh)):
-                SPSY.addChild(chemNodeT(self.name + '-' + str(i+1) + '.' + str(j+1), intn=spsy.chshAsgn.count(j+1),
-                                        alias=self.name + ' ' + spsy.chsh[j].label if spsy.chsh[j].label!='' else ''))      # , intn=spsy.mult
-            self.addChild(SPSY)
-
-class OrderedSet(collections.MutableSet):
-
-    def __init__(self, iterable=None):
-        self.end = end = []
-        end += [None, end, end]         # sentinel node for doubly linked list
-        self.map = {}                   # key --> [key, prev, next]
-        if iterable is not None:
-            self |= iterable
-
-    def __len__(self):
-        return len(self.map)
-
-    def __contains__(self, key):
-        return key in self.map
-
-    def add(self, key):
-        if key not in self.map:
-            end = self.end
-            curr = end[1]
-            curr[2] = end[1] = self.map[key] = [key, curr, end]
-
-    def discard(self, key):
-        if key in self.map:
-            key, prev, next = self.map.pop(key)
-            prev[2] = next
-            next[1] = prev
-
-    def __iter__(self):
-        end = self.end
-        curr = end[2]
-        while curr is not end:
-            yield curr[0]
-            curr = curr[2]
-
-    def __reversed__(self):
-        end = self.end
-        curr = end[1]
-        while curr is not end:
-            yield curr[0]
-            curr = curr[1]
-
-    def pop(self, last=True):
-        if not self:
-            raise KeyError('set is empty')
-        key = self.end[1][0] if last else self.end[2][0]
-        self.discard(key)
-        return key
-
-    def __repr__(self):
-        if not self:
-            return '%s()' % (self.__class__.__name__,)
-        return '%s(%r)' % (self.__class__.__name__, list(self))
-
-    def __eq__(self, other):
-        if isinstance(other, OrderedSet):
-            return len(self) == len(other) and list(self) == list(other)
-        return set(self) == set(other)

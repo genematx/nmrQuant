@@ -126,4 +126,4 @@ test_pyqtgraph.py
 image.*
 fid/
 release.zip
-BASF_VitA.json
+.DS_Store
