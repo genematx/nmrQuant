@@ -379,7 +379,7 @@ class Workspace():
 
         # add QD nodes to the tree based on the mode of the current workspace
         for node in T.items():
-            if type(node) in [chemNodeDB, chemNodeQM] and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
+            if type(node) in [chemNodeQM] and node.HCmode != self.HCmode: node.dendrolize(self.HCmode)
 
         self._updateParameters()
 
@@ -475,7 +475,7 @@ class Workspace():
 
         # Dendrolize nodes if necessary
         for node in X.items():
-            if type(node) in [chemNodeDB, chemNodeQM] and node.HCmode != self.HCmode:
+            if type(node) in [chemNodeQM] and node.HCmode != self.HCmode:
                 node.dendrolize(self.HCmode)
 
         # Insert the node
@@ -908,7 +908,7 @@ class Workspace():
             if not hasattr(node, '_oldHash'): node._oldHash = None
             if not hasattr(node, '_oldLeafPoles'): node._oldLeafPoles = None
             if not hasattr(node, '_t_shift'): node._t_shift = None
-            if isinstance(node, chemNodeQD) and not hasattr(node, 'spinTopo'): node.spinTopo = spinGroup(*asgn2meqv(node.chshAsgn, node.jcplAsgn))
+            # if isinstance(node, chemNodeQD) and not hasattr(node, 'spinTopo'): node.spinTopo = spinGroup(*asgn2meqv(node.chshAsgn, node.jcplAsgn))
             node._children = list(node._children)
         #self.repRootNames = [node.name for node in self.T.repRoots()]    # Need to set the repRootNames before to refer to them later in the _updateParameters function
         self.setTree(T, packed['parsSpecDict'])
@@ -2005,7 +2005,8 @@ class Datum():
 
         def equiv_chshKey(key):
             # Define a key that corresponds to a chemical shift (or chshQD) instead of alph or ampl
-            if key[1] == 'ampl' and isinstance(self.T[key[0]], chemNodeT):
+            # NOTE: chemNodeT changed to checmNodeQT
+            if key[1] == 'ampl' and isinstance(self.T[key[0]], chemNodeQT):
                 rootName = self.T[key[0]].parent().name
                 sfx = 'QD'
                 indx = int(key[0].split('.')[-1])-1
@@ -2021,7 +2022,7 @@ class Datum():
             inRange, _ = splitFreq([ minmaxTuple(self.freqBlocks[blk].min, self.freqBlocks[blk].max) for blk in frqBlkIds ])
 
         # Sort the nodes of the tree in the depth-first order
-        nodes_in_tree = [node.name for node in self.T.iterDepth(method='in-order') if not isinstance(node, chemNodeT)]                           # Tree nodes' names sorted depth first
+        nodes_in_tree = [node.name for node in self.T.iterDepth(method='in-order') if not isinstance(node, chemNodeQT)]                           # Tree nodes' names sorted depth first   # NOTE: chemNodeT changed to checmNodeQT
         keys = sorted(keys, key = lambda x : (nodes_in_tree.index(equiv_chshKey(x)[0]), equiv_chshKey(x)[1] ) )                              # Sort the keys such that all 'chsh' parameters come before 'chshQD'
 
         for key in keys:

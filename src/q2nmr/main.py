@@ -63,7 +63,7 @@ steps = []
 
 def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
     """Returns the tree of parameters P for a chemNode tree T. The variable myOrder defines the order in which the parameters will be sorted. Each node in the parameter tree corresponds to a chemical/group of chemicals or its parameters."""
-    P = viewNode(T.name, nodeType='chemNodeDB' if type(T) in [chemNodeDB, chemNodeQM] else 'chemNode')
+    P = viewNode(T.name, nodeType='chemNodeDB' if type(T) in [chemNodeQM] else 'chemNode')
     #P.addChild(viewNode(name = tuple([T.name] + ['intn'] + [None]), nodeType='intn', alias='intn' ))
     if type(T) is chemNodeQM:
         P.nodeType = 'chemNodeQM'
@@ -100,31 +100,31 @@ def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
                     prnt.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))
                 except RuntimeError: pass
 
-    elif type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
-        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+    # elif type(T) is chemNodeQD:    # Spin system defined by itself without a parent chemDB node
+    #     P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
 
-        if T.childCount() > 1:  # Several chemical shifts; add global parameters
-            P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
-            P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+    #     if T.childCount() > 1:  # Several chemical shifts; add global parameters
+    #         P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+    #         P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
 
-        for par, val in T.default_pars().items():
-            for i in range(len(val)):
-                if not isinstance(getattr(T, par)[i].label, str):
-                    old = getattr(T, par)
-                    old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
-                    setattr(T, par, old)
+    #     for par, val in T.default_pars().items():
+    #         for i in range(len(val)):
+    #             if not isinstance(getattr(T, par)[i].label, str):
+    #                 old = getattr(T, par)
+    #                 old[i] = parsSpec(old[i].min, old[i].max, label='', distr=old[i].distr, p1=old[i].p1, p2=old[i].p2)
+    #                 setattr(T, par, old)
 
-        newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in [T] for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
-        newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
-        for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
-            P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
-    elif type(T) is not chemNodeDB:
-        # General chemNode (e.g. a group of chemicals)
-        P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
-        P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
-        P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
-        for node in T.children():
-            P.addChild(getDisplayTree(node))
+    #     newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in [T] for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
+    #     # newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
+    #     for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):
+    #         P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
+    # elif type(T) is not chemNodeDB:
+    #     # General chemNode (e.g. a group of chemicals)
+    #     P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))
+    #     P.addChild(viewNode(name = tuple([T.name] + ['chsh'] + [0]), nodeType='param' ))
+    #     P.addChild(viewNode(name = tuple([T.name] + ['alph'] + [0]), nodeType='param' ))
+    #     for node in T.children():
+    #         P.addChild(getDisplayTree(node))
     elif T.childCount() == 1 and T.child(0).childCount() == 1:
         # A singlet (one QD node with one T node as a child)
         P.addChild(viewNode(name = tuple([T.name] + ['ampl'] + [0]), nodeType='param', alias='intn' ))      #
@@ -148,7 +148,7 @@ def getDisplayTree(T, myOrder = ['ampl', 'chsh', 'alph', 'jcpl']):
                         node.child(i).alias = getattr(node, par)[i].label
 
         newParsNodes = [tuple([node.name] + [par] + [i] + [getattr(node, par)[i].label]) for node in T.children() for par, val in node.default_pars().items() for i in range(len(val)) if "QD" in par]      # All new parameter tuples that will be added as children here; keep the label in the fourth element of the tuple
-        newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
+        # newParsNodes += [tuple([node.name] + ['ampl'] + [0] + [node.alias]) for node in T.descendants() if type(node) is chemNodeT]
         for pars in sorted(newParsNodes, key = lambda par : [i for i, x in enumerate(myOrder) if x in par[1]][-1] ):     # Loop over the list of tuples
             P.addChild(viewNode(name = pars[0:3], alias = pars[3], nodeType='param'))    #         + [node.aliasQD[i]]
     return P
@@ -1732,7 +1732,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         if clmn == 0 and role == Qt.FontRole:
             font = QtGui.QFont()    # Default font
 
-            if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:     # Chemical node
+            if node.nodeType in ['chemNode', 'chemNodeQM']:     # Chemical node
                 if not self.datum.T[node.name].isReported():
                     font.setStyle(QtGui.QFont.StyleItalic)
                 elif node.name in self.datum.repRootNames:
@@ -1775,7 +1775,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 else:
                     pass
 
-            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
+            elif node.nodeType in ['chemNode', 'chemNodeQM'] and clmn == 4:
                 if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                     crntVal = self.datum.T[node.name].intn
 
@@ -1836,7 +1836,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                 return result | Qt.ItemIsSelectable
             elif node.nodeType == 'chemNode':
                 return result | Qt.ItemIsEditable # | Qt.ItemIsUserCheckable
-            elif node.nodeType in ['chemNodeDB', 'chemNodeQM']:
+            elif node.nodeType in ['chemNodeQM']:
                 return result # | Qt.ItemIsUserCheckable
             else:
                 return result
@@ -1845,11 +1845,11 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
         elif clmn == 4:
             if node.nodeType == 'lshape':
                 return result
-            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:
+            elif node.nodeType in ['chemNode', 'chemNodeQM']:
                 return result | Qt.ItemIsEditable
             else:
                 return result | Qt.ItemIsEditable | Qt.ItemIsSelectable
-            """elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4:
+            """elif node.nodeType in ['chemNode', 'chemNodeQM'] and clmn == 4:
             if self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                 return Qt.ItemIsEditable | result"""
 
@@ -1897,7 +1897,7 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
                     # self.dataChanged.emit(index, index)
                     # except: return False
 
-            elif node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
+            elif node.nodeType in ['chemNode', 'chemNodeQM'] and clmn == 4 and self.datum.T[node.name].isReported() and node.name not in self.datum.repRootNames:
                 # self.datum.T[node.name].set_intn(float(value))
                 self.requestParameterChange.emit((node.name, 'intn', 0), float(value))
                 # self.dataChanged.emit(index, index)
@@ -2054,9 +2054,10 @@ class ChemTreeModel(QtCore.QAbstractItemModel):
             chshAsgn = [1]
             jcplAsgn = None
             spsy = spsySpec(chsh, jcpl, chshAsgn, jcplAsgn, mult=1)
-            X = chemNodeQD(name, spsy)  # New spin system node (QD)
+            # NOTE: node type changed from chemNodeQD to chemNodeQM. Likely to break!
+            X = chemNodeQM(name, spsy)  # New spin system node (QD)
             for j in range(len(chsh)):
-                X.addChild(chemNodeT(name + '-0.' + str(j+1), intn=chshAsgn.count(j+1),
+                X.addChild(chemNodeQT(name + '-0.' + str(j+1), intn=chshAsgn.count(j+1),
                                         alias = name+'-'+chsh[j].label if chsh[j].label!='' else ''))      # , intn=spsy.mult
 
         # Get the node in the parameter tree to which new chemical will be attached
@@ -2368,7 +2369,7 @@ class ChemTreeView(QTreeView):
             clmn = index.column()
             row = index.row()
 
-            if node.nodeType in ['chemNode', 'chemNodeDB', 'chemNodeQM']:       # Chemical node
+            if node.nodeType in ['chemNode', 'chemNodeQM']:       # Chemical node
                 key = node.name
 
                 # Add/remove node actions

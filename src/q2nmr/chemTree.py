@@ -1204,7 +1204,7 @@ class chemSpec:
 
     def getSpSy(self, mode='1H'):
         """Returns a list of spin systems."""
-        # !!! Left for compatibility with old chemNodeDB.
+        # NOTE: Left for compatibility with old chemNodeDB.
         if mode == '13C':
             spsyBig = spsySpec(chsh=self.chshC, jcpl=[], chshAsgn=list(range(1,len(self.chshC)+1)), jcplAsgn = None)
             mult = self.multC
@@ -2174,7 +2174,7 @@ def loadTree(fname):
             if not hasattr(node, '_oldLeafPoles'): node._oldLeafPoles = None
             if not hasattr(node, '_t_shift'): node._t_shift = None
             if not hasattr(node, 'phase'): node.phase = [parsSpec(distr='Uniform', min=-np.pi, max=np.pi, dval=0.0)]
-            if isinstance(node, chemNodeQD) and not hasattr(node, 'spinTopo'): node.spinTopo = spinGroup(*asgn2meqv(node.chshAsgn, node.jcplAsgn))
+            # if isinstance(node, chemNodeQD) and not hasattr(node, 'spinTopo'): node.spinTopo = spinGroup(*asgn2meqv(node.chshAsgn, node.jcplAsgn))
             # if isinstance(node, chemNodeQM): node._setSpinTopo()
             node._children = list(node._children)
 
