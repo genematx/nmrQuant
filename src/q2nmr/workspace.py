@@ -2,14 +2,14 @@ import numpy as np
 from scipy.linalg import block_diag
 import copy
 import emcee
-import config
-from chemTree import chemNodeQM, minmaxTuple, evalTreeF, parsSpec, getFID, defaultTreePars
-from chemTree import *
-from leastsquares import *
+import q2nmr.config as config
+from .chemTree import chemNodeQM, minmaxTuple, evalTreeF, parsSpec, getFID, defaultTreePars
+from .leastsquares import *
 import sys
 import tabulate
 from math import ceil
-from utils import *
+from .utils.utils import *
+from .utils.dataio import read_any_file
 
 
 # Functions for generating FIDs and optimization
@@ -2525,7 +2525,7 @@ class Datum():
             if ZZ.size > 0 and np.linalg.matrix_rank(ZZ.real) < ZZ.shape[0]:
                 ZZ += (1e-09)*np.identity(ZZ.shape[0])          # Make sure ZZ is invertible if it is low rank
             Sc = np.linalg.inv(ZZ.real)
-            theta = np.asscalar( 0.5*np.angle(Zy.T.dot(np.dot(Sc, Zy))) )
+            theta = 0.5*np.angle(Zy.T.dot(np.dot(Sc, Zy))).item()
         else: theta = evalParsH['.']['theta'][0]
         if numberField == 'Re':
             # Use only the real part
@@ -2565,7 +2565,7 @@ class Datum():
         result, ampl, sigma2, meta = log_likelihood(Z, y, ampl0=ampl, sigma2_0=sigma2, \
             Gz=Gz, Gy=None, gamma0=gamma, m0=m0, iS0=iS0, a_sigma2_0=a_sigma2, b_sigma2_0=b_sigma2, \
             funcType=funcType, robust=robust, nonnegative=True, na=na)
-        theta_0 = np.asscalar( 1/2*np.angle(ampl[:na].T.dot(ampl[:na])) )   # Global phase estimated from the complex valued amplitudes
+        theta_0 = 1/2*np.angle(ampl[:na].T.dot(ampl[:na])).item()   # Global phase estimated from the complex valued amplitudes
         theta = (theta + theta_0)   # + np.pi) % (2 * np.pi) - np.pi             # Updated value of theta
         m_ampl = ampl*np.exp(-1j*theta_0)
         #m_ampl[:na] = m_ampl[:na].real
@@ -2584,8 +2584,8 @@ class Datum():
 
         mult = 1   # sum(m_ampl)     # Multiplier (can be used to output normalized amplitudes)
         for lbl, val in zip(reportedNames, m_ampl[:na]):
-            evalParsH[lbl]['ampl'][0] = np.asscalar(np.abs(val)) / mult
-            evalParsH[lbl]['phase'][0] = np.asscalar(np.angle(val)) if numberField == 'Cx' else 0.0
+            evalParsH[lbl]['ampl'][0] = np.abs(val).item() / mult
+            evalParsH[lbl]['phase'][0] = np.angle(val).item() if numberField == 'Cx' else 0.0
         evalParsH['.']['mult'][0] = mult
         evalParsH['.']['theta'][0] = theta            # Update the phase
         evalParsH['.']['sigma2'][0] = sigma2
@@ -2608,8 +2608,7 @@ class Datum():
             for i in range(na):
                 key=(reportedNames[i], 'ampl', 0)
                 if key in autoKeys:
-                    # print(key, (np.asscalar(np.abs(m_ampl[i])), np.asscalar(np.abs(S_ampl[i,i]))))
-                    self.smplDistF[key] = smplSpec_Gaussian(np.asscalar(np.abs(m_ampl[i])), np.asscalar(np.abs(S_ampl[i,i])))
+                    self.smplDistF[key] = smplSpec_Gaussian(np.abs(m_ampl[i]).item(), np.abs(S_ampl[i,i]).item() )
 
             key=('.', 'sigma2', 0)
             if key in autoKeys:
@@ -2665,7 +2664,7 @@ class Datum():
         yFnoise = yF - yFbsln
         #yFbsln[indxFreq] = self.yF[indxFreq] - whitsm(self.yF[indxFreq], 7.0)
         sigma2_est = np.sum(np.abs(yFnoise)**2) * (self.f.size/indxFreq.size) / self.t.size
-        print("sigma2_est = {:.6f}".format(np.asscalar(sigma2_est)))
+        print("sigma2_est = {:.6f}".format(sigma2_est.item()))
         return sigma2_est # yF, yFbsln
 
     def estimate_snr(self, lims_noise, lims_signal=None, lmda=6.0):
@@ -3086,7 +3085,7 @@ class Datum():
         indxFreqByBlock = [ self.freqBlocks[i].indxFreq(self._f_shifted()) for i in frqBlkIds ]
         indxInRangeStacked = np.concatenate(indxFreqByBlock)
         # indxInRangeStacked = np.concatenate(tuple(self.freqBlocks[i].indxFreq(self.f) for i in frqBlkIds))
-        dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
+        dt = (self.t[1]-self.t[0]).item()             # Dwell time
 
         # 2. Compute the model spectrum if necessary
         if self.zF is None:
@@ -3173,7 +3172,7 @@ class Datum():
         indxFreqByBlock = [ self.freqBlocks[i].indxFreq(self._f_shifted()) for i in frqBlkIds ]
         indxInRangeStacked = np.concatenate(indxFreqByBlock)
         # indxInRangeStacked = np.concatenate(tuple(self.freqBlocks[i].indxFreq(self.f) for i in frqBlkIds))
-        dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
+        dt = (self.t[1]-self.t[0]).item()             # Dwell time
 
         # 2. Compute the model spectrum if necessary
         if self.zF is None or self.bF is None or force_eval:
@@ -3255,7 +3254,7 @@ class Datum():
         indxFreqByBlock = [ self.freqBlocks[i].indxFreq(self._f_shifted()) for i in frqBlkIds ]
         indxInRangeStacked = np.concatenate(indxFreqByBlock)
         indxIntegration = freqSpec(*lims).indxFreq(self._f_shifted())
-        dt = np.asscalar(self.t[1]-self.t[0])             # Dwell time
+        dt = (self.t[1]-self.t[0]).item()             # Dwell time
 
         if source == 'measured':
             # Phase the measured data according to the values in the parameters
@@ -3802,3 +3801,95 @@ class Datum():
                 'nF' : len(self.parent.f),
                 'nF_adap' : len(self.f),
                 'nF_opti' : sum( [len( self.freqBlocks[i].indxFreq(self._f_shifted()) ) for i in self.steps[-1].frqBlkIds] )}   # Find the number of points in the active optimization ranges
+
+
+# Loading and saving
+
+def load_workspace(filename):
+    """Loads a Worksapce saved in file fname."""
+    with open(filename, 'rb') as fp:
+        dataPack, GUIsettings = dill.load(fp)
+    wsp = Workspace()       # Define a new Workspace object
+    wsp.unpack(dataPack)    # Unpack the loaded data into it
+
+    # set the global config settings
+    if GUIsettings is not None:
+        try:
+            stngConfig = GUIsettings.pop('_config')
+            config.from_dict(config, stngConfig)
+        except KeyError:
+            print('Using default global settings.')
+
+    return wsp, GUIsettings
+
+def save_workspace(filename, wsp, GUIsettings=None):
+    """Saves the workspace wsp into file filename."""
+    if GUIsettings is None:
+        GUIsettings = {'ax0Limits': {'ylim': (0.0, 1000.0),
+                                     'xlim': (10.0, 0.0)},
+                       'autoPhase': False, 'startFromPars': 'current',
+                       '_view': {'hiddenTreeViewNodes': [], 'stepsEditText': 'AAAAAA'},
+                       'autoPick': False, 'ax1Limits': None, 'ax2Limits': None}
+    GUIsettings.update( {'_config': config.as_dict()} )
+    dataPack = wsp.pack()
+    with open(filename, 'wb') as fp:
+        dill.dump([dataPack, GUIsettings], fp)
+
+def addDatumFromFile(path, dest):
+    """Add new Datum entries specified by the path to the series object.
+
+    Args:
+        path: str
+            Location of the spectrum file.
+        dest: Series, Datum, or Workspace
+            A series to which the new spectra should be added. If a Datum is
+            passed, the spectrum will be added to its parent Series. If a Workspace
+            is passed, its first Series will be used. If the parameters of the
+            Series are not consistent with the imported spectrum (e.g. field
+            strength c0), will try to find first suitable Series in the Workspace,
+            or create a new one.
+
+    Returns:
+        dat: Datum
+            The newly added Datum. If several spectra were added (e.g. if the
+            file contained a series of spectra, all of them will be added but
+            only the last one will be returned)
+
+    """
+
+    # Read the data
+    t, yT, dic = read_any_file(path)
+    c0, f0, dt, name = dic['c0'], dic['f0'], dic['dt'], dic['name']
+
+    # Determine to which Series it should be added
+    wsp = dest.wsp      # The Workspace
+    ser_ID, _ = dest.selfID()
+
+    if len(wsp.series) == 0:
+        wsp.addSeries()
+
+    if ser_ID is None: ser_ID = -1
+    ser = wsp.series[ser_ID]
+
+    # TODO: Check if new c0/f0 are the same as the old ones when loading the rest of the data
+    # Save the acquisition parameters; these should be the same for all spectra in the series (by convention)
+    if ser.c0 is None:
+        ser.c0 = c0
+        ser.f0 = f0
+        ser.t = t
+        ser.fullReset()
+    elif np.abs(ser.c0 - c0) > 1e-3:
+        # Create a new series and put the data into it
+        print('The aquisition parameters do not match the current values. Creating a new Series...')
+        ser = wsp.addSeries()
+        ser.c0 = c0
+        ser.f0 = f0
+        ser.t = t
+        ser.fullReset()
+
+    # Add the data to the current series
+    for i in range(yT.shape[1]):
+        dat = ser.addDatum(yT[:,i].reshape(-1,1),
+                    name = name+str(i+1) if yT.shape[1] > 1 else name, extra=dic)
+
+    return dat

@@ -2790,7 +2790,7 @@ class PhasingWidget(QWidget):
 
     def setPivot(self, val):
         """Sets a pivoting point for phase correction."""
-        self.pivot = np.asscalar( (val - self._frange[0]) / (self._frange[1] - self._frange[0]) )
+        self.pivot = ( (val - self._frange[0]) / (self._frange[1] - self._frange[0]) ).item()
 
     def onPh0SliderChanged(self, val):
         """Reads new values from the sliders ph0 and ph1 and updates the plot"""
@@ -2826,7 +2826,7 @@ class PhasingWidget(QWidget):
     #     self.pivot = 0.0
     #     self.p0deg = 180 * theta / np.pi
     #     try:
-    #         self.p1deg = np.asscalar( tau*(self.datum.f[-1]*self.datum.c0-self.datum.f0)*360. )
+    #         self.p1deg = ( tau*(self.datum.f[-1]*self.datum.c0-self.datum.f0)*360. ).item()
     #     except (IndexError, AttributeError) as e:      # If self.datum.f == []
     #         self.p1deg = 0.
     #

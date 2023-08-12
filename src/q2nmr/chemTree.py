@@ -4,27 +4,21 @@ import scipy.sparse as sps
 import json
 import os
 import dill
-from linear_sum_assignment import linear_sum_assignment
 import weakref
 import scipy
-import config
 import math
 import itertools
 import numexpr as ne
 import copy
 from operator import itemgetter
 from molparser.convertmol import parse_sdf_file
+import xlsxwriter
 
-# Ordered set class to store children of a node
-import collections
+import q2nmr.config as config
+from .utils.linear_sum_assignment import linear_sum_assignment
 
 import warnings
 warnings.filterwarnings("ignore")
-
-# Find the main directory where the nmrQuant software is installed
-MAINDIR = os.path.dirname(os.path.abspath(__file__))
-
-#### Definitions of named tuples ####
 
 # Named tuple to store pairs of min and max values
 minmaxTuple = namedtuple('minmaxTuple', 'min, max')
@@ -850,7 +844,7 @@ def QDsimsGrpd(H, T, states, tol=0.0001):
     return omega, intn, trans, uHs, vHs
 
 def QTransAB(chshQD, jcplQD, n_spin=(1,1)):
-    """Simulates an approximate response for an AmBn system."""
+    """Simulate an approximate response for an AmBn system."""
 
     def expand_multiplet(freq, intn, order=2):
         """Expands doublet of peaks into multiplets while preserving the intensities ratio. order is the number of coupled spins, e.g. 2 to get a triplet."""
@@ -871,9 +865,9 @@ def QTransAB(chshQD, jcplQD, n_spin=(1,1)):
         raise RuntimeError('Only two-spin systems are supported.')
 
     # Find the transitions for an AB system first. See Keeler, page 2-15
-    J = np.asscalar(np.abs(jcplQD))          # Works only with abs(J)
-    D = np.asscalar(np.sqrt( (chshQD[1]-chshQD[0])**2 + J**2 ))
-    S = -np.asscalar(np.array(chshQD[0] + chshQD[1]))      # Positive in the original source
+    J = np.abs(jcplQD).item()          # Works only with abs(J)
+    D = np.sqrt( (chshQD[1]-chshQD[0])**2 + J**2 ).item()
+    S = -np.array(chshQD[0] + chshQD[1]).item()      # Positive in the original source
     sin2t = J/D
 
     freqQPeaks = [np.array([-D-S-J, -D-S+J])/2, np.array([D-S-J, D-S+J])/2]

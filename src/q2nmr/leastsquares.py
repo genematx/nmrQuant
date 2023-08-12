@@ -46,7 +46,7 @@ def ls(Z, y, m0=None, S0=None, Gy=None, lockedPhase=False, indxPositive=None, ro
             iSc = (iS0 + ZZ).real
             Sc = np.linalg.inv(iSc)
             # Estimate theta to maximize the posterior
-            theta = np.asscalar( 0.5*np.angle(np.dot(Zy.T, np.dot(Sc, Zy))) )
+            theta = 0.5*np.angle(np.dot(Zy.T, np.dot(Sc, Zy))).item()
             # TODO!!! This should also depend on priors over amplitudes (i.e. S0 and m0)
             mc = Sc.dot( (Zy*np.exp(-1j*theta) + np.dot(iS0,m0)).real )
 
@@ -81,7 +81,7 @@ def ls(Z, y, m0=None, S0=None, Gy=None, lockedPhase=False, indxPositive=None, ro
     if robust:
         r = y - Z.dot(mc)    # the residual
         r2 = np.abs(r.reshape(1,-1))**2
-        #print( "sum r2 = {}".format(np.asscalar(r2.sum(axis=1))/r2.size) )
+        #print( "sum r2 = {}".format((r2.sum(axis=1))/r2.size).item() )
         ZrZ = (ZG * r2).dot(ZG.conj().T)
         if np.linalg.matrix_rank(ZrZ) < k:
             ZrZ = ZrZ + 0.000001*np.identity(k)
@@ -89,7 +89,7 @@ def ls(Z, y, m0=None, S0=None, Gy=None, lockedPhase=False, indxPositive=None, ro
     else: Sr = None
 
     Q = yG.dot(y) + np.dot(np.dot(m0[indx_variable].conj().T, iS0[indx_variable[:,None], indx_variable]), m0[indx_variable]) - np.dot(np.dot(mc[indx_variable].conj().T, iSc[indx_variable[:,None], indx_variable]), mc[indx_variable])
-    Q = max(np.asscalar(Q.real), 0.0)
+    Q = max(Q.real.item(), 0.0)
     return mc, Sc, Sr, Q
 
 def tls0(Z, y):
@@ -165,7 +165,7 @@ def ktls(Z, y, Q0=None, Qx=None, Qy=None, lamb=0.5, niter=15):
 
     ZZ = Z.conj().T.dot(Z)
     Zy = Z.conj().T.dot(y.reshape(-1,1))
-    #theta = np.asscalar( 0.5*np.angle(np.dot(Zy.T, np.dot(np.linalg.inv(ZZ.real), Zy))) )
+    #theta = 0.5*np.angle(np.dot(Zy.T, np.dot(np.linalg.inv(ZZ.real), Zy))).item()
     b = np.linalg.inv(ZZ).dot(Zy)
 
     M = np.linalg.inv(Qy)
@@ -333,7 +333,7 @@ def ll_ls(Z, y, ampl, m0=None, iS0=None, Gy=None, robust=False):
     # Include the priors
     Q += (mc-m0).T.dot(iS0.dot(mc-m0))
 
-    Q = max(np.asscalar(Q).real, 0.0)
+    Q = max(Q.item().real, 0.0)
 
     # Define a function that computes the covariance matrix
     if robust:
@@ -424,7 +424,7 @@ def ll_ls_withIntegrationOut(Z, y, ampl=None, m0=None, S0=None, Gy=None, lockedP
     mc[ifxd] = ampl[ifxd]     # Replace values if neecessary (where variance is 0)
 
     Q += yG.dot(y) + m0.conj().T.dot(iS0.dot(m0))
-    Q = max(np.asscalar(Q).real, 0.0)
+    Q = max(Q.item().real, 0.0)
 
     return mc, Sc, Q, logdetS
 
@@ -460,7 +460,7 @@ def ll_tls(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=None, maxiter=
             # Compute the value of the entire likelihood function assuming inverse gamma prior for sigma2
             fun = logdetGc/2 + (n/2+a_sigma2)*np.log(Q+b_sigma2)
             jac = grad.dlda/2 + (n/2+a_sigma2)/(Q+b_sigma2)*grad.dQda
-            return np.asscalar(fun), jac[ivar].ravel()
+            return fun.item(), jac[ivar].ravel()
 
         def func_opti_gamma(x):
             """Function that takes a vector of parameters and returns its value, gradient, and Hessian.
@@ -470,12 +470,12 @@ def ll_tls(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=None, maxiter=
             # Compute the value of the entire likelihood function assuming inverse gamma prior for sigma2
             fun = logdetGc/2 + (n/2+a_sigma2)*np.log(Q+b_sigma2)
             jac = grad.dldg/2 + (n/2+a_sigma2)/(Q+b_sigma2)*grad.dQdg
-            return np.asscalar(fun), jac.ravel()
+            return fun.item(), jac.ravel()
 
         # Start by optimizing over gamma first
         flag = False
         if gamma is None:
-            gamma = np.asscalar( optimize.minimize(func_opti_gamma, jac=True, x0=0.5, bounds=((1e-12, 1-1e-12), ), method='L-BFGS-B').x )
+            gamma = optimize.minimize(func_opti_gamma, jac=True, x0=0.5, bounds=((1e-12, 1-1e-12), ), method='L-BFGS-B').x.item()
             flag = True
 
         # Optimize over amplitudes
@@ -484,7 +484,7 @@ def ll_tls(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=None, maxiter=
             # If needed, optimize over gamma again and find new amplitudes
             if flag:
                 for _ in range(maxiter):
-                    gamma = np.asscalar( optimize.minimize(func_opti_gamma, jac=True, x0=0.5, bounds=((1e-12, 1-1e-12), ), method='L-BFGS-B').x )   # Update gamma
+                    gamma = optimize.minimize(func_opti_gamma, jac=True, x0=0.5, bounds=((1e-12, 1-1e-12), ), method='L-BFGS-B').x.item()   # Update gamma
                     mc[ivar] = optimize.minimize(func_opti_ampl, jac=True, x0=mc[ivar], bounds=bounds, method='L-BFGS-B').x.reshape(-1, 1)       # UPdate the amplitudes
     else:
         mc = np.copy(ampl)
@@ -541,7 +541,7 @@ def ll_tls_eval(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=
 
         Gc = Gy + b2Gz
         iGc = np.linalg.inv( Gc )
-        logdetGc, Q = np.linalg.slogdet(Gc)[1], np.asscalar(ey.conj().T.dot(iGc).dot(ey))
+        logdetGc, Q = np.linalg.slogdet(Gc)[1], ey.conj().T.dot(iGc).dot(ey).item()
 
         if constr:
             raise NotImplementedError
@@ -577,33 +577,33 @@ def ll_tls_eval(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=
         Gc = Gy + b2Gz             # Covariance matrix of the distribution of the measurement vector
         iGc = 1 / Gc
         logdetGc, Q = np.sum(np.log(Gc)), np.sum(iGc*(np.abs(ey)**2))
-        """if constr:
-            # Compute the correction matrices for Gc and iGc
-            print('Constrained')
+        # """if constr:
+        #     # Compute the correction matrices for Gc and iGc
+        #     print('Constrained')
 
-            g = (1/(2*n)*np.sum(b2Gz) - b2Gz)/n
-            C = g + g.T
-            luv = np.asscalar(g.T.dot(iGc)) + 1
-            luu, lvv = np.asscalar((g**2).T.dot(iGc)) / luv, np.asscalar(iGc.sum()) / luv
-            den = luv*(1-luu*lvv)      # Denominator expression
-            iC = 1/den * iGc.T*(luu + lvv*g*(g.T) - C)*iGc
-            print(den, iC.shape)
-            Gc = np.diag(Gc.ravel()) + C
-            iGc1 = np.linalg.inv(Gc)
-            iGc = np.diag(iGc.ravel()) + iC
-            logdetGc, Q = np.linalg.slogdet(Gc)[1], np.asscalar(ey.conj().T.dot(iGc).dot(ey))
-            logdetGc, Q = np.log(luv**2*(1 - luu*lvv))+np.sum(np.log(Gy + b2Gz)), np.asscalar(ey.conj().T.dot(iGc).dot(ey))
-            """
+        #     g = (1/(2*n)*np.sum(b2Gz) - b2Gz)/n
+        #     C = g + g.T
+        #     luv = np.asscalar(g.T.dot(iGc)) + 1
+        #     luu, lvv = np.asscalar((g**2).T.dot(iGc)) / luv, np.asscalar(iGc.sum()) / luv
+        #     den = luv*(1-luu*lvv)      # Denominator expression
+        #     iC = 1/den * iGc.T*(luu + lvv*g*(g.T) - C)*iGc
+        #     print(den, iC.shape)
+        #     Gc = np.diag(Gc.ravel()) + C
+        #     iGc1 = np.linalg.inv(Gc)
+        #     iGc = np.diag(iGc.ravel()) + iC
+        #     logdetGc, Q = np.linalg.slogdet(Gc)[1], np.asscalar(ey.conj().T.dot(iGc).dot(ey))
+        #     logdetGc, Q = np.log(luv**2*(1 - luu*lvv))+np.sum(np.log(Gy + b2Gz)), np.asscalar(ey.conj().T.dot(iGc).dot(ey))
+        #     """
         if constr:
             # Compute the correction matrices for Gc and iGc
             g = (1/(2*n)*np.sum(b2Gz) - b2Gz)/n   # New matrix Gc can be computed as Gy+b2Gz+ g.dot(np.ones((1,n)))+np.ones((n,1)).dot(g.T)
-            luv = np.asscalar(g.T.dot(iGc)) + 1
-            luu, lvv = np.asscalar((g**2).T.dot(iGc)) / luv, np.asscalar(iGc.sum()) / luv
+            luv = g.T.dot(iGc).item() + 1
+            luu, lvv = (g**2).T.dot(iGc).item() / luv, iGc.sum().item() / luv
             #iC = 1/(luv*(1-luu*lvv)) * iGc.T*( luu + lvv*g*(g.T) - (g+g.T) )*iGc
-            #dQ = np.asscalar(ey.conj().T.dot(iC).dot(ey))
+            #dQ = ey.conj().T.dot(iC).dot(ey).item()
 
             iGc_ey = iGc*ey
-            dQ = np.asscalar( lvv*(g.T.dot(iGc_ey))**2 - 2*iGc_ey.sum()*g.T.dot(iGc_ey) + luu*(iGc_ey.sum())**2 )
+            dQ = ( lvv*(g.T.dot(iGc_ey))**2 - 2*iGc_ey.sum()*g.T.dot(iGc_ey) + luu*(iGc_ey.sum())**2 ).item()
             dQ *= 1/(luv*(1-luu*lvv))
 
             logdetGc += np.log(luv**2*(1 - luu*lvv))
@@ -639,9 +639,7 @@ def ll_tls_eval(Z, y, ampl, m0=None, iS0=None, Gz=None, Gy=None, gamma=0.5, jac=
         Q += (ampl-m0).T.dot(iS0.dot(ampl-m0))
         dQda += iS0.dot(ampl-m0)
 
-    Q = np.asscalar(Q)
-    logdetGc = np.asscalar(logdetGc)
-    return Q, logdetGc, grad(dQda, dQdg, dlda, dldg, d2lda2, d2Qda2)
+    return Q.item(), logdetGc.item(), grad(dQda, dQdg, dlda, dldg, d2lda2, d2Qda2)
 
 def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=None, m0=None, iS0=None, a_sigma2_0=2.0, b_sigma2_0=10.0, funcType='LS', constr=False, robust=False, nonnegative=True, na=None):
     """
@@ -684,14 +682,14 @@ def log_likelihood(Z, y, ampl0=None, sigma2_0=None, Gz=None, Gy=None, gamma0=Non
         result += - a_sigma2*np.log(b_sigma2)
 
     result = result - n/2*np.log(np.pi) if isReal else result - n*np.log(np.pi)
-    result = np.asscalar(result.real)
+    result = result.real.item()
 
     # Report posterior distributions for amplitudes
     m_ampl = mc.copy()
     S_ampl = fun_Sc(sigma2)
 
     # # Constrain amplitudes to non-negative values and re-estimate them using fewer components
-    theta_0 = np.asscalar( 1/2*np.angle(mc[:na].T.dot(mc[:na])) )   # Global phase estimated from the complex valued amplitudes
+    theta_0 = 1/2*np.angle(mc[:na].T.dot(mc[:na])).item()   # Global phase estimated from the complex valued amplitudes
     m_ampl[:na] = (mc[:na]*np.exp(-1j*theta_0)).real                                   # #m_ampl[:na] = m_ampl[:na].real
     if m_ampl[:na].sum() < 0:      # Make sure that all amplitudes are positive
         m_ampl *= -1
