@@ -107,7 +107,7 @@ venv.bak/
 _results.txt
 _development
 .vs/
-data/
+data/*
 build/
 dist/
 docs/_figures/
