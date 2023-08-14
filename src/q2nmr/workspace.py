@@ -3,11 +3,13 @@ from scipy.linalg import block_diag
 import copy
 import emcee
 import q2nmr.config as config
-from .chemTree import chemNodeQM, minmaxTuple, evalTreeF, parsSpec, getFID, defaultTreePars
-from .leastsquares import *
 import sys
+import pathlib
 import tabulate
 from math import ceil
+
+from .chemTree import chemNodeQM, minmaxTuple, evalTreeF, parsSpec, getFID, defaultTreePars
+from .leastsquares import *
 from .utils.utils import *
 from .utils.dataio import read_any_file
 
@@ -3832,6 +3834,9 @@ def save_workspace(filename, wsp, GUIsettings=None):
                        'autoPick': False, 'ax1Limits': None, 'ax2Limits': None}
     GUIsettings.update( {'_config': config.as_dict()} )
     dataPack = wsp.pack()
+    filename = filename if filename.endswith('.wsp') else filename + '.wsp'
+    dirpath = pathlib.Path(filename).parent
+    dirpath.mkdir(parents=True, exist_ok=True)
     with open(filename, 'wb') as fp:
         dill.dump([dataPack, GUIsettings], fp)
 
