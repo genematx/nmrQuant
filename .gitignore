@@ -113,7 +113,7 @@ dist/
 docs/_figures/
 icons/_dev/
 workspaces/
-notebooks/
+notebooks/.ipynb_checkpoints/
 *.lic
 *.wsp
 *.spec       # Files created by pyinstaller
@@ -127,3 +127,4 @@ image.*
 fid/
 release.zip
 .DS_Store
+*/.ipynb_checkpoints/
