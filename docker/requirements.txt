@@ -1,3 +1,11 @@
+dill
+emcee
 matplotlib
+numexpr
 numpy
+openpyxl
 pandas
+pywavelets
+scipy
+tabulate
+xlsxwriter
